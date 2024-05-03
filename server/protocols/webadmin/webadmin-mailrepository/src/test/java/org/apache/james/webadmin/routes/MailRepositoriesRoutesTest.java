@@ -54,7 +54,6 @@ import org.apache.james.json.DTOConverter;
 import org.apache.james.mailrepository.api.MailKey;
 import org.apache.james.mailrepository.api.MailRepository;
 import org.apache.james.mailrepository.api.MailRepositoryPath;
-import org.apache.james.mailrepository.api.MailRepositoryStore;
 import org.apache.james.mailrepository.api.MailRepositoryUrl;
 import org.apache.james.mailrepository.api.Protocol;
 import org.apache.james.mailrepository.memory.MailRepositoryStoreConfiguration;
@@ -1139,6 +1138,39 @@ class MailRepositoriesRoutesTest {
             .body("startedDate", is(notNullValue()))
             .body("submitDate", is(notNullValue()))
             .body("completedDate", is(notNullValue()));
+    }
+
+    @Test
+    void reprocessingAllTaskShouldAllowFilteringByRecipient() throws Exception {
+        MailRepository mailRepository = mailRepositoryStore.create(URL_MY_REPO);
+        String recipient1 = "recipient1@domain";
+        String recipient2 = "recipient2@domain";
+        mailRepository.store(FakeMail.builder()
+            .name(NAME_1)
+            .recipient(recipient1)
+            .mimeMessage(MimeMessageUtil.mimeMessageFromBytes(MESSAGE_BYTES))
+            .build());
+        mailRepository.store(FakeMail.builder()
+            .name(NAME_2)
+            .recipient(recipient2)
+            .mimeMessage(MimeMessageUtil.mimeMessageFromBytes(MESSAGE_BYTES))
+            .build());
+
+        String taskId = with()
+            .param("action", "reprocess")
+            .param("forRecipient", recipient1)
+            .patch(PATH_ESCAPED_MY_REPO + "/mails")
+            .jsonPath()
+            .get("taskId");
+
+        given()
+            .basePath(TasksRoutes.BASE)
+        .when()
+            .get(taskId + "/await");
+
+        assertThat(mailRepository.list())
+            .toIterable()
+            .containsOnly(new MailKey(NAME_2));
     }
 
     @Test
