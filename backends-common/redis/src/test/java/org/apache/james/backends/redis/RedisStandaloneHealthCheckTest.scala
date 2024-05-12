@@ -27,13 +27,13 @@ import org.junit.jupiter.api.{AfterEach, BeforeEach, Test}
 import reactor.core.scala.publisher.SMono
 
 @ExtendWith(Array(classOf[RedisExtension]))
-class RedisHealthCheckTest {
+class RedisStandaloneHealthCheckTest {
 
   var redisHealthCheck: RedisHealthCheck = _
 
   @BeforeEach
   def setup(redis: DockerRedis): Unit = {
-    val redisConfiguration: RedisConfiguration = RedisConfiguration.from(redis.redisURI().toString, isCluster = false)
+    val redisConfiguration: RedisConfiguration = RedisConfiguration.from(redis.redisURI().toString, Standalone)
 
     redisHealthCheck = new RedisHealthCheck(redisConfiguration)
   }
