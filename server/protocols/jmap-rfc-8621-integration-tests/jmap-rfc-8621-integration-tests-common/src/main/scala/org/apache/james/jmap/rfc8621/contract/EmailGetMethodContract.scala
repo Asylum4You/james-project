@@ -32,7 +32,6 @@ import jakarta.mail.Flags
 import net.javacrumbs.jsonunit.assertj.JsonAssertions.assertThatJson
 import net.javacrumbs.jsonunit.core.Option
 import net.javacrumbs.jsonunit.core.Option.IGNORING_ARRAY_ORDER
-import net.javacrumbs.jsonunit.core.internal.Options
 import org.apache.http.HttpStatus.SC_OK
 import org.apache.james.GuiceJamesServer
 import org.apache.james.jmap.JmapGuiceProbe
@@ -2304,7 +2303,7 @@ trait EmailGetMethodContract {
       .asString
 
     assertThatJson(response)
-      .withOptions(new Options(IGNORING_ARRAY_ORDER))
+      .withOptions(IGNORING_ARRAY_ORDER)
       .whenIgnoringPaths("methodResponses[0][1].state")
       .isEqualTo(
       s"""{
@@ -3303,7 +3302,7 @@ trait EmailGetMethodContract {
          |        "type": "text/plain"
          |      },
          |      {
-         |        "size": 2093,
+         |        "size": 2094,
          |        "partId": "3",
          |        "blobId": "${messageId.serialize()}_3",
          |        "type": "message/rfc822"
@@ -4699,7 +4698,7 @@ trait EmailGetMethodContract {
          |                        ],
          |                        "bodyValues": {
          |                            "2": {
-         |                                "value": "Main test message...\\n",
+         |                                "value": "Main test message...\\r\\n",
          |                                "isEncodingProblem": false,
          |                                "isTruncated": false
          |                            }
@@ -4820,7 +4819,7 @@ trait EmailGetMethodContract {
          |						}
          |					],
          |					"subject": "My subject",
-         |					"size": 970
+         |					"size": 1011
          |				}]
          |			},
          |			"c1"
@@ -4963,7 +4962,7 @@ trait EmailGetMethodContract {
          |						}
          |					],
          |					"subject": "My subject",
-         |					"size": 970
+         |					"size": 1011
          |				}]
          |			},
          |			"c1"
@@ -8004,7 +8003,7 @@ trait EmailGetMethodContract {
       .asString()
 
     assertThatJson(response)
-      .withOptions(new Options(Option.IGNORING_ARRAY_ORDER))
+      .withOptions(Option.IGNORING_ARRAY_ORDER)
       .inPath("methodResponses[0][1]")
       .isEqualTo(
         s"""{

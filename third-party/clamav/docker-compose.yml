@@ -37,7 +37,7 @@ services:
       - james
 
   opensearch:
-    image: opensearchproject/opensearch:2.1.0
+    image: opensearchproject/opensearch:2.14.0
     environment:
       - discovery.type=single-node
       - DISABLE_INSTALL_DEMO_CONFIG=true
@@ -48,7 +48,7 @@ services:
           - elasticsearch
 
   cassandra:
-    image: cassandra:4.1.3
+    image: cassandra:4.1.5
     ports:
       - "9042:9042"
     healthcheck:
@@ -62,12 +62,12 @@ services:
       - james
 
   tika:
-    image: apache/tika:2.8.0.0
+    image: apache/tika:2.9.2.1
     networks:
       - james
 
   rabbitmq:
-    image: rabbitmq:3.12.1-management
+    image: rabbitmq:3.13.3-management
     ports:
       - "5672:5672"
       - "15672:15672"
@@ -87,7 +87,7 @@ services:
       - james
 
   clamav:
-    image: clamav/clamav:1.1
+    image: clamav/clamav:1.3
     networks:
       - james
 

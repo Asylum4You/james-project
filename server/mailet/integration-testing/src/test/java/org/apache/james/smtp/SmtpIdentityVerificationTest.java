@@ -40,6 +40,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.api.io.TempDir;
 
+import com.google.common.collect.ImmutableList;
+
 class SmtpIdentityVerificationTest {
     private static final String ATTACKER_PASSWORD = "secret";
 
@@ -81,6 +83,56 @@ class SmtpIdentityVerificationTest {
     }
 
     @Test
+    void relaxedShouldAcceptEmailsFromMXWhenLocalUsers(@TempDir File temporaryFolder) throws Exception {
+        createJamesServer(temporaryFolder, SmtpConfiguration.builder()
+            .relaxedIdentityVerification());
+
+        messageSender.connect(LOCALHOST_IP, jamesServer.getProbe(SmtpGuiceProbe.class).getSmtpPort())
+            .sendMessage(USER, USER);
+    }
+
+    @Test
+    void relaxedShouldRejectEmailsFromMUAWhenLocalUsers(@TempDir File temporaryFolder) throws Exception {
+        createJamesServer(temporaryFolder, SmtpConfiguration.builder()
+            .relaxedIdentityVerification());
+
+        assertThatThrownBy(() -> new SMTPMessageSender("appleclient").connect(LOCALHOST_IP, jamesServer.getProbe(SmtpGuiceProbe.class).getSmtpPort())
+            .sendMessage(USER, USER)).isInstanceOf(SMTPSendingException.class)
+            .hasMessageContaining("Error upon step Sender: 530 5.7.1 Authentication Required");
+    }
+
+    @Test
+    void relaxedShouldRejectEmailsFromMUAIPWhenLocalUsers(@TempDir File temporaryFolder) throws Exception {
+        createJamesServer(temporaryFolder, SmtpConfiguration.builder()
+            .relaxedIdentityVerification());
+
+        assertThatThrownBy(() -> new SMTPMessageSender("127.0.0.1").connect(LOCALHOST_IP, jamesServer.getProbe(SmtpGuiceProbe.class).getSmtpPort())
+            .sendMessage(USER, USER)).isInstanceOf(SMTPSendingException.class)
+            .hasMessageContaining("Error upon step Sender: 530 5.7.1 Authentication Required");
+    }
+
+    @Test
+    void relaxedShouldRejectLocalUsersSpoofingAttempts(@TempDir File temporaryFolder) throws Exception {
+        createJamesServer(temporaryFolder, SmtpConfiguration.builder()
+            .relaxedIdentityVerification());
+
+        assertThatThrownBy(() -> new SMTPMessageSender("127.0.0.1").connect(LOCALHOST_IP, jamesServer.getProbe(SmtpGuiceProbe.class).getSmtpPort())
+            .authenticate(USER, PASSWORD)
+            .sendMessage("other@james.org", USER)).isInstanceOf(SMTPSendingException.class)
+            .hasMessageContaining("Error upon step Sender: 503 5.7.1 Incorrect Authentication for Specified Email Address");
+    }
+
+    @Test
+    void relaxedShouldAcceptEmailsOfAuthenticatedUsers(@TempDir File temporaryFolder) throws Exception {
+        createJamesServer(temporaryFolder, SmtpConfiguration.builder()
+            .relaxedIdentityVerification());
+
+        new SMTPMessageSender("127.0.0.1").connect(LOCALHOST_IP, jamesServer.getProbe(SmtpGuiceProbe.class).getSmtpPort())
+            .authenticate(USER, PASSWORD)
+            .sendMessage(USER, USER);
+    }
+
+    @Test
     void remoteUserCanSendEmailsToLocalUsersWhenAuthNotRequired(@TempDir File temporaryFolder) throws Exception {
         createJamesServer(temporaryFolder, SmtpConfiguration.builder()
             .verifyIdentity());
@@ -108,6 +160,72 @@ class SmtpIdentityVerificationTest {
 
         messageSender.connect(LOCALHOST_IP, jamesServer.getProbe(SmtpGuiceProbe.class).getSmtpPort())
             .authenticate(USER, PASSWORD).sendMessage(USER, USER);
+    }
+
+    @Test
+    void spoofingAttemptsShouldBeRejectedInFromField(@TempDir File temporaryFolder) throws Exception {
+        createJamesServer(temporaryFolder, SmtpConfiguration.builder()
+            .requireAuthentication()
+            .verifyIdentity());
+
+        String message = """
+            FROM: victim@spoofed.info\r
+            subject: test\r
+            \r
+            content\r
+            .\r
+            """;
+
+        assertThatThrownBy(() ->
+            messageSender.connect(LOCALHOST_IP, jamesServer.getProbe(SmtpGuiceProbe.class).getSmtpPort())
+                .authenticate(USER, PASSWORD)
+                .sendMessageWithHeaders(USER, ImmutableList.of(USER), message))
+            .isInstanceOf(SMTPSendingException.class)
+            .hasMessageContaining("503 5.7.1 Incorrect Authentication for Specified Email Address");
+    }
+
+    @Test
+    void spoofingInternalAddressAttemptsShouldBeRejectedInFromField(@TempDir File temporaryFolder) throws Exception {
+        createJamesServer(temporaryFolder, SmtpConfiguration.builder()
+            .requireAuthentication()
+            .verifyIdentity());
+
+        String message = """
+            FROM: victim@james.org\r
+            subject: test\r
+            \r
+            content\r
+            .\r
+            """;
+
+        assertThatThrownBy(() ->
+            messageSender.connect(LOCALHOST_IP, jamesServer.getProbe(SmtpGuiceProbe.class).getSmtpPort())
+                .authenticate(USER, PASSWORD)
+                .sendMessageWithHeaders(USER, ImmutableList.of(USER), message))
+            .isInstanceOf(SMTPSendingException.class)
+            .hasMessageContaining("503 5.7.1 Incorrect Authentication for Specified Email Address");
+    }
+
+    @Test
+    void aliasShouldBeSupportedInFromField(@TempDir File temporaryFolder) throws Exception {
+        createJamesServer(temporaryFolder, SmtpConfiguration.builder()
+            .requireAuthentication()
+            .verifyIdentity());
+
+        jamesServer.getProbe(DataProbeImpl.class)
+            .addUserAliasMapping("alias", DEFAULT_DOMAIN, USER);
+
+        String message = """
+            FROM: alias@james.org\r
+            subject: test\r
+            \r
+            content\r
+            .\r
+            """;
+
+        messageSender.connect(LOCALHOST_IP, jamesServer.getProbe(SmtpGuiceProbe.class).getSmtpPort())
+            .authenticate(USER, PASSWORD)
+            .sendMessageWithHeaders(USER, ImmutableList.of(USER), message);
     }
 
     @Test

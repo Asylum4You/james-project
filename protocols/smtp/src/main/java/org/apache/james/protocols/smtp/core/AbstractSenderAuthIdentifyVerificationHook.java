@@ -36,13 +36,13 @@ import com.google.common.base.Preconditions;
  * Handler which check if the authenticated user is the same as the one used as MAIL FROM
  */
 public abstract class AbstractSenderAuthIdentifyVerificationHook implements MailHook, RcptHook {
-    private static final HookResult INVALID_AUTH = HookResult.builder()
+    protected static final HookResult INVALID_AUTH = HookResult.builder()
         .hookReturnCode(HookReturnCode.deny())
         .smtpReturnCode(SMTPRetCode.BAD_SEQUENCE)
         .smtpDescription(DSNStatus.getStatus(DSNStatus.PERMANENT, DSNStatus.SECURITY_AUTH)
             + " Incorrect Authentication for Specified Email Address")
         .build();
-    private static final HookResult AUTH_REQUIRED = HookResult.builder()
+    protected static final HookResult AUTH_REQUIRED = HookResult.builder()
         .hookReturnCode(HookReturnCode.deny())
         .smtpReturnCode(SMTPRetCode.AUTH_REQUIRED)
         .smtpDescription(DSNStatus.getStatus(DSNStatus.PERMANENT, DSNStatus.SECURITY_AUTH)
@@ -54,7 +54,7 @@ public abstract class AbstractSenderAuthIdentifyVerificationHook implements Mail
      * Its important to ignore case here to fix JAMES-837. This is save to do because if the handler is called
      * the user was already authenticated
      */
-    private boolean senderDoesNotMatchAuthUser(SMTPSession session, MaybeSender sender) {
+    protected boolean senderDoesNotMatchAuthUser(SMTPSession session, MaybeSender sender) {
         return session.getUsername() != null &&
             (isAnonymous(sender) || !senderMatchSessionUser(sender, session) || !belongsToLocalDomain(sender));
     }
@@ -62,7 +62,7 @@ public abstract class AbstractSenderAuthIdentifyVerificationHook implements Mail
     /*
      * Validate that unauthenticated users do not use local addresses in MAIL FROM
      */
-    private boolean unauthenticatedSenderIsLocalUser(SMTPSession session, MaybeSender sender) {
+    protected boolean unauthenticatedSenderIsLocalUser(SMTPSession session, MaybeSender sender) {
         return session.getUsername() == null && !session.isRelayingAllowed() && belongsToLocalDomain(sender);
     }
 

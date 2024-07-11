@@ -3,7 +3,7 @@ version: '3'
 services:
 
   redis:
-    image: redis:7.0.12
+    image: redis:7.2.5
     command:
       - "--loglevel"
       - "debug"
@@ -20,3 +20,4 @@ services:
       - $PWD/extensions.properties:/root/conf/extensions.properties
       - $PWD/redis.properties:/root/conf/redis.properties
       - $PWD/mailetcontainer.xml:/root/conf/mailetcontainer.xml
+      - $PWD/healthcheck.properties:/root/conf/healthcheck.properties

@@ -19,6 +19,8 @@
 
 package org.apache.james.backends.opensearch;
 
+import java.util.concurrent.TimeUnit;
+
 import org.awaitility.Awaitility;
 import org.junit.jupiter.api.extension.AfterEachCallback;
 import org.junit.jupiter.api.extension.BeforeEachCallback;
@@ -56,21 +58,28 @@ public class DockerOpenSearchExtension implements AfterEachCallback, BeforeEachC
 
         @Override
         public void clean(DockerOpenSearch openSearch) {
-            Awaitility.await()
+            Awaitility.await().atMost(30, TimeUnit.SECONDS)
+                .pollInterval(2, TimeUnit.SECONDS)
                 .ignoreExceptions()
                 .until(() -> {
                     openSearch.flushIndices();
                     ReactorOpenSearchClient client = client(openSearch);
                     new DeleteByQueryPerformer(client, aliasName)
-                        .perform(new MatchAllQuery.Builder().build()._toQuery())
+                        .perform(new MatchAllQuery.Builder().build().toQuery())
                         .block();
                     SearchRequest searchRequest = new SearchRequest.Builder()
-                        .query(new MatchAllQuery.Builder().build()._toQuery())
+                        .query(new MatchAllQuery.Builder().build().toQuery())
                         .build();
                     openSearch.flushIndices();
-                    return client.search(searchRequest)
-                        .map(searchResponse -> searchResponse.hits().hits().size())
-                        .block() == 0;
+
+                    int currentHits = client.search(searchRequest)
+                        .map(response -> response.hits().hits())
+                        .flatMapIterable(e -> e)
+                        .filter(hits -> !hits.index().equalsIgnoreCase(".plugins-ml-config")) // it was added by default from opensearch 2.9.0
+                        .collectList()
+                        .block().size();
+
+                    return currentHits == 0;
                 });
         }
 

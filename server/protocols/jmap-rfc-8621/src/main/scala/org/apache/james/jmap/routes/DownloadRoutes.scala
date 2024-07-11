@@ -20,6 +20,8 @@ package org.apache.james.jmap.routes
 
 import java.io.InputStream
 import java.nio.charset.StandardCharsets
+import java.util.concurrent.Callable
+import java.util.function.Consumer
 import java.util.stream
 import java.util.stream.Stream
 
@@ -29,7 +31,7 @@ import eu.timepit.refined.refineV
 import io.netty.buffer.Unpooled
 import io.netty.handler.codec.http.HttpHeaderNames.{CONTENT_LENGTH, CONTENT_TYPE}
 import io.netty.handler.codec.http.HttpResponseStatus._
-import io.netty.handler.codec.http.{HttpHeaderValidationUtil, HttpMethod, HttpResponseStatus, QueryStringDecoder}
+import io.netty.handler.codec.http.{HttpHeaderValidationUtil, HttpMethod, QueryStringDecoder}
 import jakarta.inject.{Inject, Named}
 import org.apache.commons.io.output.UnsynchronizedByteArrayOutputStream
 import org.apache.james.jmap.HttpConstants.JSON_CONTENT_TYPE
@@ -42,13 +44,14 @@ import org.apache.james.jmap.exceptions.UnauthorizedException
 import org.apache.james.jmap.http.Authenticator
 import org.apache.james.jmap.http.rfc8621.InjectionKeys
 import org.apache.james.jmap.json.ResponseSerializer
-import org.apache.james.jmap.mail.{BlobId, EmailBodyPart, MinimalEmailBodyPart}
+import org.apache.james.jmap.mail.{BlobId, MinimalEmailBodyPart}
 import org.apache.james.jmap.method.{AccountNotFoundException, ZoneIdProvider}
 import org.apache.james.jmap.routes.DownloadRoutes.{BUFFER_SIZE, LOGGER}
 import org.apache.james.jmap.{Endpoint, JMAPRoute, JMAPRoutes}
 import org.apache.james.mailbox.model.ContentType.{MediaType, MimeType, SubType}
 import org.apache.james.mailbox.model._
 import org.apache.james.mailbox.{AttachmentIdFactory, AttachmentManager, MailboxSession, MessageIdManager}
+import org.apache.james.metrics.api.{Metric, MetricFactory}
 import org.apache.james.mime4j.codec.EncoderUtil
 import org.apache.james.mime4j.codec.EncoderUtil.Usage
 import org.apache.james.mime4j.dom.SingleBody
@@ -61,7 +64,6 @@ import reactor.core.scala.publisher.SMono
 import reactor.core.scheduler.Schedulers
 import reactor.netty.http.server.{HttpServerRequest, HttpServerResponse}
 
-import scala.compat.java8.FunctionConverters._
 import scala.jdk.CollectionConverters._
 import scala.util.{Failure, Success, Try}
 
@@ -245,13 +247,15 @@ class BlobResolvers(blobResolvers: Set[BlobResolver]) {
 
 class DownloadRoutes @Inject()(@Named(InjectionKeys.RFC_8621) val authenticator: Authenticator,
                                val blobResolvers: BlobResolvers,
-                               val sessionTranslator: SessionTranslator) extends JMAPRoutes {
+                               val sessionTranslator: SessionTranslator,
+                               val metricFactory: MetricFactory) extends JMAPRoutes {
 
   private val accountIdParam: String = "accountId"
   private val blobIdParam: String = "blobId"
   private val nameParam: String = "name"
   private val contentTypeParam: String = "type"
   private val downloadUri = s"/download/{$accountIdParam}/{$blobIdParam}"
+  private val pendingDownloadMetric: Metric = metricFactory.generate("jmap_pending_downloads")
 
   override def routes(): stream.Stream[JMAPRoute] = Stream.of(
     JMAPRoute.builder
@@ -268,23 +272,15 @@ class DownloadRoutes @Inject()(@Named(InjectionKeys.RFC_8621) val authenticator:
       .flatMap(mailboxSession => getIfOwner(request, response, mailboxSession))
       .onErrorResume {
         case _: ForbiddenException | _: AccountNotFoundException =>
-          respondDetails(response,
-            ProblemDetails(status = FORBIDDEN, detail = "You cannot download in others accounts"),
-            FORBIDDEN)
+          respondDetails(response, ProblemDetails(status = FORBIDDEN, detail = "You cannot download in others accounts"))
         case e: UnauthorizedException =>
           LOGGER.warn("Unauthorized", e)
-          respondDetails(e.addHeaders(response),
-            ProblemDetails(status = UNAUTHORIZED, detail = e.getMessage),
-            UNAUTHORIZED)
+          respondDetails(e.addHeaders(response), ProblemDetails(status = UNAUTHORIZED, detail = e.getMessage))
         case _: BlobNotFoundException =>
-          respondDetails(response,
-            ProblemDetails(status = NOT_FOUND, detail = "The resource could not be found"),
-            NOT_FOUND)
+          respondDetails(response, ProblemDetails(status = NOT_FOUND, detail = "The resource could not be found"))
         case e =>
-          LOGGER.error("Unexpected error upon downloads", e)
-          respondDetails(response,
-            ProblemDetails(status = INTERNAL_SERVER_ERROR, detail = e.getMessage),
-            INTERNAL_SERVER_ERROR)
+          LOGGER.error("Unexpected error upon download {}", request.uri(), e)
+          respondDetails(response, ProblemDetails(status = INTERNAL_SERVER_ERROR, detail = e.getMessage))
       }
       .subscribeOn(ReactorUtils.BLOCKING_CALL_WRAPPER)
       .asJava()
@@ -293,7 +289,8 @@ class DownloadRoutes @Inject()(@Named(InjectionKeys.RFC_8621) val authenticator:
   private def get(request: HttpServerRequest, response: HttpServerResponse, mailboxSession: MailboxSession): SMono[Unit] =
     BlobId.of(request.param(blobIdParam))
       .fold(e => SMono.error(e),
-        blobResolvers.resolve(_, mailboxSession))
+        blobResolvers.resolve(_, mailboxSession)
+          .doOnSubscribe(_ => pendingDownloadMetric.increment()))
       .flatMap(blob => downloadBlob(
         optionalName = queryParam(request, nameParam),
         response = response,
@@ -302,6 +299,7 @@ class DownloadRoutes @Inject()(@Named(InjectionKeys.RFC_8621) val authenticator:
           .getOrElse(blob.contentType),
         blob = blob)
         .`then`())
+      .doOnSuccess(_ => pendingDownloadMetric.decrement())
 
   private def getIfOwner(request: HttpServerRequest, response: HttpServerResponse, mailboxSession: MailboxSession): SMono[Unit] =
     Id.validate(request.param(accountIdParam)) match {
@@ -313,20 +311,24 @@ class DownloadRoutes @Inject()(@Named(InjectionKeys.RFC_8621) val authenticator:
   private def downloadBlob(optionalName: Option[String],
                            response: HttpServerResponse,
                            blobContentType: ContentType,
-                           blob: Blob): SMono[Unit] =
+                           blob: Blob): SMono[Unit] = {
+    val resourceSupplier: Callable[InputStream] = () => blob.content
+    val sourceSupplier: java.util.function.Function[InputStream, Mono[Void]] = stream => SMono(addContentDispositionHeader(optionalName)
+      .compose(addContentLengthHeader(blob.size))
+      .apply(response)
+      .header(CONTENT_TYPE, sanitizeHeaderValue(blobContentType.asString))
+      .status(OK)
+      .send(ReactorUtils.toChunks(stream, BUFFER_SIZE)
+        .map(Unpooled.wrappedBuffer(_))
+        .subscribeOn(Schedulers.boundedElastic()))).asJava()
+    val resourceRelease: Consumer[InputStream] = (stream: InputStream) => stream.close()
+
     SMono.fromPublisher(Mono.using(
-      () => blob.content,
-      (stream: InputStream) => addContentDispositionHeader(optionalName)
-        .compose(addContentLengthHeader(blob.size))
-        .apply(response)
-        .header(CONTENT_TYPE, sanitizeHeaderValue(blobContentType.asString))
-        .status(OK)
-        .send(ReactorUtils.toChunks(stream, BUFFER_SIZE)
-          .map(Unpooled.wrappedBuffer(_))
-          .subscribeOn(Schedulers.boundedElastic()))
-        .`then`,
-      asJavaConsumer[InputStream]((stream: InputStream) => stream.close())))
+        resourceSupplier,
+        sourceSupplier,
+        resourceRelease))
       .`then`
+  }
 
   private def addContentDispositionHeader(optionalName: Option[String]): HttpServerResponse => HttpServerResponse =
     resp => optionalName.map(addContentDispositionHeaderRegardingEncoding(_, resp))
@@ -364,12 +366,12 @@ class DownloadRoutes @Inject()(@Named(InjectionKeys.RFC_8621) val authenticator:
       .flatMap(_.asScala)
       .headOption
 
-  private def respondDetails(httpServerResponse: HttpServerResponse, details: ProblemDetails, statusCode: HttpResponseStatus = BAD_REQUEST): SMono[Unit] =
+  private def respondDetails(httpServerResponse: HttpServerResponse, details: ProblemDetails): SMono[Unit] =
     SMono.fromCallable(() => ResponseSerializer.serialize(details))
       .map(Json.stringify)
       .map(_.getBytes(StandardCharsets.UTF_8))
       .flatMap(bytes =>
-        SMono.fromPublisher(httpServerResponse.status(statusCode)
+        SMono.fromPublisher(httpServerResponse.status(details.status)
           .header(CONTENT_TYPE, JSON_CONTENT_TYPE)
           .header(CONTENT_LENGTH, Integer.toString(bytes.length))
           .sendByteArray(SMono.just(bytes))

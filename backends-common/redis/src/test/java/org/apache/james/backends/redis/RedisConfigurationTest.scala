@@ -19,7 +19,7 @@
 
 package org.apache.james.backends.redis
 
-import io.lettuce.core.RedisURI
+import io.lettuce.core.{ReadFrom, RedisURI}
 import org.apache.commons.configuration2.PropertiesConfiguration
 import org.apache.commons.configuration2.convert.DefaultListDelimiterHandler
 import org.scalatest.flatspec.AnyFlatSpec
@@ -31,16 +31,12 @@ class RedisConfigurationTest extends AnyFlatSpec with Matchers {
     val config = new PropertiesConfiguration()
     config.addProperty("redisURL", "redis://localhost:6379")
     config.addProperty("redis.topology", "master-replica")
+    config.addProperty("redis.readFrom", "any")
     config.addProperty("redis.ioThreads", 16)
     config.addProperty("redis.workerThreads", 32)
 
     val redisConfig = RedisConfiguration.from(config)
-
-    redisConfig.redisURI.value should have length 1
-    redisConfig.redisURI.value should contain theSameElementsAs List(RedisURI.create("redis://localhost:6379"))
-    redisConfig.redisTopology shouldEqual MasterReplica
-    redisConfig.ioThreads shouldEqual Some(16)
-    redisConfig.workerThreads shouldEqual Some(32)
+    redisConfig shouldEqual MasterReplicaRedisConfiguration.from(Array("redis://localhost:6379"), ReadFrom.ANY, Some(16), Some(32))
   }
 
   it should "parse multiple Redis URIs from config" in {
@@ -52,12 +48,7 @@ class RedisConfigurationTest extends AnyFlatSpec with Matchers {
     config.addProperty("redis.workerThreads", 32)
 
     val redisConfig = RedisConfiguration.from(config)
-
-    redisConfig.redisURI.value should have length 2
-    redisConfig.redisURI.value should contain theSameElementsAs List(RedisURI.create("redis://localhost:6379"), RedisURI.create("redis://localhost:6380"))
-    redisConfig.redisTopology shouldEqual Cluster
-    redisConfig.ioThreads shouldEqual Some(16)
-    redisConfig.workerThreads shouldEqual Some(32)
+    redisConfig shouldEqual ClusterRedisConfiguration(RedisUris.liftOrThrow(List(RedisURI.create("redis://localhost:6379"), RedisURI.create("redis://localhost:6380"))), Some(16), Some(32))
   }
 
   it should "use default values for missing config values" in {
@@ -65,17 +56,33 @@ class RedisConfigurationTest extends AnyFlatSpec with Matchers {
     config.addProperty("redisURL", "redis://localhost:6379")
 
     val redisConfig = RedisConfiguration.from(config)
-
-    redisConfig.redisURI.value should have length 1
-    redisConfig.redisURI.value should contain theSameElementsAs List(RedisURI.create("redis://localhost:6379"))
-    redisConfig.redisTopology shouldEqual Standalone
-    redisConfig.ioThreads shouldEqual None
-    redisConfig.workerThreads shouldEqual None
+    redisConfig shouldEqual StandaloneRedisConfiguration(RedisURI.create("redis://localhost:6379"), None, None)
   }
 
   it should "throw exception for invalid Redis URI" in {
     val config = new PropertiesConfiguration()
     config.addProperty("redisURL", "invalid://localhost:6379")
+
+    intercept[IllegalArgumentException] {
+      RedisConfiguration.from(config)
+    }
+  }
+
+  it should "throw exception for invalid Redis topology" in {
+    val config = new PropertiesConfiguration()
+    config.addProperty("redisURL", "redis://localhost:6379")
+    config.addProperty("redis.topology", "invalid")
+
+    intercept[IllegalArgumentException] {
+      RedisConfiguration.from(config)
+    }
+  }
+
+  it should "throw exception for invalid Redis readFrom" in {
+    val config = new PropertiesConfiguration()
+    config.addProperty("redisURL", "redis://localhost:6379")
+    config.addProperty("redis.topology", "master-replica")
+    config.addProperty("redis.readFrom", "invalid")
 
     intercept[IllegalArgumentException] {
       RedisConfiguration.from(config)
