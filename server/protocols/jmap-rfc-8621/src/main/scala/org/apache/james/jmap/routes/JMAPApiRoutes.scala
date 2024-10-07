@@ -18,11 +18,11 @@
  ****************************************************************/
 package org.apache.james.jmap.routes
 
-import java.io.InputStream
 import java.nio.charset.StandardCharsets
 import java.util.stream
 import java.util.stream.Stream
 
+import com.fasterxml.jackson.core.exc.StreamConstraintsException
 import io.netty.handler.codec.http.HttpHeaderNames.{CONTENT_LENGTH, CONTENT_TYPE}
 import io.netty.handler.codec.http.HttpMethod
 import io.netty.handler.codec.http.HttpResponseStatus.OK
@@ -30,7 +30,7 @@ import jakarta.inject.{Inject, Named}
 import org.apache.james.jmap.HttpConstants.JSON_CONTENT_TYPE
 import org.apache.james.jmap.JMAPUrls.JMAP
 import org.apache.james.jmap.core.CapabilityIdentifier.CapabilityIdentifier
-import org.apache.james.jmap.core.{ProblemDetails, RequestObject}
+import org.apache.james.jmap.core.{MaxSizeRequest, ProblemDetails, RequestObject}
 import org.apache.james.jmap.exceptions.UnauthorizedException
 import org.apache.james.jmap.http.rfc8621.InjectionKeys
 import org.apache.james.jmap.http.{Authenticator, UserProvisioning}
@@ -39,13 +39,18 @@ import org.apache.james.jmap.{Endpoint, JMAPRoute, JMAPRoutes}
 import org.apache.james.mailbox.MailboxSession
 import org.slf4j.{Logger, LoggerFactory}
 import play.api.libs.json.{JsError, JsSuccess, Json}
-import reactor.core.publisher.Mono
+import reactor.core.publisher.{Mono, SynchronousSink}
 import reactor.core.scala.publisher.SMono
 import reactor.netty.http.server.{HttpServerRequest, HttpServerResponse}
+
+import scala.util.Try
 
 object JMAPApiRoutes {
   val LOGGER: Logger = LoggerFactory.getLogger(classOf[JMAPApiRoutes])
 }
+
+case class StreamConstraintsExceptionWithInput(cause: StreamConstraintsException, input: Array[Byte]) extends RuntimeException(cause)
+case class RequestSizeExceeded(input: Array[Byte]) extends RuntimeException
 
 class JMAPApiRoutes @Inject() (@Named(InjectionKeys.RFC_8621) val authenticator: Authenticator,
                      userProvisioner: UserProvisioning,
@@ -75,14 +80,29 @@ class JMAPApiRoutes @Inject() (@Named(InjectionKeys.RFC_8621) val authenticator:
     SMono.fromPublisher(httpServerRequest
       .receive()
       .aggregate()
-      .asInputStream())
-      .handle[RequestObject] {
-        case (input, sink) => parseRequestObject(input)
-          .fold(sink.error, sink.next)
-      }
+      .asByteArray())
+      .handle[Array[Byte]](validateRequestSize)
+      .handle[RequestObject](parseRequestObject)
 
-  private def parseRequestObject(inputStream: InputStream): Either[IllegalArgumentException, RequestObject] =
-    ResponseSerializer.deserializeRequestObject(inputStream) match {
+  private def validateRequestSize: (Array[Byte], SynchronousSink[Array[Byte]]) => Unit = {
+    case (input, sink) => if (input.length > MaxSizeRequest.DEFAULT) {
+      sink.error(RequestSizeExceeded(input))
+    } else {
+      sink.next(input)
+    }
+  }
+
+  private def parseRequestObject: (Array[Byte], SynchronousSink[RequestObject]) => Unit = {
+    case (input, sink) => Try(parseRequestObject(input)
+      .fold(sink.error, sink.next))
+      .fold({
+        case ex: StreamConstraintsException => sink.error(StreamConstraintsExceptionWithInput(ex, input))
+        case e => sink.error(e)
+      }, nothing => nothing)
+  }
+
+  private def parseRequestObject(input: Array[Byte]): Either[IllegalArgumentException, RequestObject] =
+    ResponseSerializer.deserializeRequestObject(input) match {
       case JsSuccess(requestObject, _) => Right(requestObject)
       case errors: JsError => Left(new IllegalArgumentException(ResponseSerializer.serialize(errors).toString()))
     }
@@ -118,3 +138,4 @@ class JMAPApiRoutes @Inject() (@Named(InjectionKeys.RFC_8621) val authenticator:
 }
 
 case class UnsupportedCapabilitiesException(capabilities: Set[CapabilityIdentifier]) extends RuntimeException
+case class TooManyCallsInRequest(requestObject: RequestObject) extends RuntimeException

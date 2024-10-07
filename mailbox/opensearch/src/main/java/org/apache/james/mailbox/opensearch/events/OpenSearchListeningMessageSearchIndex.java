@@ -274,6 +274,11 @@ public class OpenSearchListeningMessageSearchIndex extends ListeningMessageSearc
     }
 
     @Override
+    public void postReindexing() {
+        // no need to explicitly commit after reindexing
+    }
+
+    @Override
     public Mono<Void> reactiveEvent(Event event) {
         MailboxSession systemSession = sessionProvider.createSystemSession(event.getUsername());
         return handleMailboxEvent(event, systemSession, (MailboxEvents.MailboxEvent) event)
@@ -357,7 +362,7 @@ public class OpenSearchListeningMessageSearchIndex extends ListeningMessageSearc
     }
 
     private Mono<String> generateIndexedJson(Mailbox mailbox, MailboxMessage message, MailboxSession session) {
-        return messageToOpenSearchJson.convertToJson(message)
+        return messageToOpenSearchJson.convertToJson(message, session)
             .onErrorResume(e -> {
                 LOGGER.warn("Indexing mailbox {}-{} of user {} on message {} without attachments ",
                     mailbox.getName(),
@@ -365,7 +370,7 @@ public class OpenSearchListeningMessageSearchIndex extends ListeningMessageSearc
                     session.getUser().asString(),
                     message.getUid(),
                     e);
-                return messageToOpenSearchJson.convertToJsonWithoutAttachment(message);
+                return messageToOpenSearchJson.convertToJsonWithoutAttachment(message, session);
             });
     }
 

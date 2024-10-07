@@ -19,8 +19,12 @@
 
 package org.apache.james.transport.matchers;
 
+import static org.apache.james.transport.matchers.AttributeUtils.extractLdapAttributeValue;
+
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Optional;
+import java.util.stream.Stream;
 
 import jakarta.inject.Inject;
 import jakarta.mail.MessagingException;
@@ -33,9 +37,9 @@ import org.apache.mailet.Mail;
 import org.apache.mailet.base.GenericMatcher;
 
 import com.github.fge.lambdas.Throwing;
+import com.google.common.cache.Cache;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
-import com.unboundid.ldap.sdk.Attribute;
 import com.unboundid.ldap.sdk.Filter;
 import com.unboundid.ldap.sdk.LDAPConnectionPool;
 import com.unboundid.ldap.sdk.LDAPException;
@@ -67,8 +71,22 @@ import com.unboundid.ldap.sdk.SearchScope;
  *
  * &lt;/mailet&gt;
  * </code></pre>
+ *
+ * A cache can optionally be turned on in order to reduce LDAP calls:
+ *
+ *
+ * <pre><code>
+ * &lt;!-- Matches recipients that have the following attribute with the specified value--&gt;
+ * &lt;mailet matcher=&quot;HasLDAPAttribute=description:blocked?cacheEnabled=true&cacheSize=1000&cacheDuration=1hour&quot; class=&quot;Null&quot;&gt;
+ *
+ * &lt;/mailet&gt;
+ * </code></pre>
+ *
+ * The defaults are cache up to 10_000 entries for 1 day.
  */
 public class HasLDAPAttribute extends GenericMatcher {
+
+
     private final LDAPConnectionPool ldapConnectionPool;
     private final LdapRepositoryConfiguration configuration;
     private final Filter objectClassFilter;
@@ -76,6 +94,7 @@ public class HasLDAPAttribute extends GenericMatcher {
     private String attributeName;
     private Optional<String> attributeValue;
     private String[] attributes;
+    private Optional<Cache<String, Boolean>> cache;
 
     @Inject
     public HasLDAPAttribute(LdapRepositoryConfiguration configuration) throws LDAPException {
@@ -89,7 +108,7 @@ public class HasLDAPAttribute extends GenericMatcher {
 
     @Override
     public void init() throws MessagingException {
-        String condition = getCondition().trim();
+        String condition = removeCacheSettings();
         int commaPosition = condition.indexOf(':');
 
         if (commaPosition == -1) {
@@ -107,6 +126,17 @@ public class HasLDAPAttribute extends GenericMatcher {
             .add(configuration.getReturnedAttributes())
             .add(attributeName)
             .build().toArray(String[]::new);
+
+        cache = CacheSettings.parse(getCondition()).map(CacheSettings::createAssociatedCache);
+    }
+
+    private String removeCacheSettings() {
+        int conditionEnd = getCondition().indexOf('?');
+        if (conditionEnd == -1) {
+            return getCondition().trim();
+        } else {
+            return getCondition().substring(0, conditionEnd).trim();
+        }
     }
 
     @Override
@@ -118,15 +148,23 @@ public class HasLDAPAttribute extends GenericMatcher {
     }
 
     private boolean hasAttribute(MailAddress rcpt) {
+        Optional<Boolean> cacheAnswer = cache.flatMap(c -> Optional.ofNullable(c.getIfPresent(rcpt.asString())));
+        if (cacheAnswer.isPresent()) {
+            return cacheAnswer.get();
+        }
         try {
             SearchResult searchResult = ldapConnectionPool.search(userBase(rcpt),
                 SearchScope.SUB,
                 createFilter(rcpt.asString(), configuration.getUserIdAttribute()),
                 attributes);
 
-            return searchResult.getSearchEntries()
+            boolean answer = searchResult.getSearchEntries()
                 .stream()
                 .anyMatch(this::hasAttribute);
+
+            cache.ifPresent(c -> c.put(rcpt.asString(), answer));
+
+            return answer;
         } catch (LDAPSearchException e) {
             throw new RuntimeException("Failed searching LDAP", e);
         }
@@ -134,9 +172,10 @@ public class HasLDAPAttribute extends GenericMatcher {
 
     private boolean hasAttribute(SearchResultEntry entry) {
         return attributeValue.map(value -> Optional.ofNullable(entry.getAttribute(attributeName))
-            .map(Attribute::getValue)
-            .map(value::equals)
-            .orElse(false))
+                .map(attribute -> Arrays.stream(attribute.getValues()))
+                .orElse(Stream.empty())
+                .map(ldapValue -> extractLdapAttributeValue(attributeName, ldapValue))
+                .anyMatch(value::equals))
             .orElseGet(() -> entry.hasAttribute(attributeName));
     }
 

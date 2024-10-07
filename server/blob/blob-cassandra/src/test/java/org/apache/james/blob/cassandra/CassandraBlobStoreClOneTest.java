@@ -39,9 +39,10 @@ import org.apache.james.backends.cassandra.init.configuration.CassandraConfigura
 import org.apache.james.blob.api.BlobId;
 import org.apache.james.blob.api.BlobStore;
 import org.apache.james.blob.api.BucketName;
-import org.apache.james.blob.api.HashBlobId;
+import org.apache.james.blob.api.DeduplicationBlobStoreContract;
 import org.apache.james.blob.api.MetricableBlobStore;
 import org.apache.james.blob.api.ObjectStoreException;
+import org.apache.james.blob.api.PlainBlobId;
 import org.apache.james.metrics.api.MetricFactory;
 import org.apache.james.server.blob.deduplication.BlobStoreFactory;
 import org.junit.jupiter.api.BeforeEach;
@@ -52,30 +53,37 @@ import com.google.common.base.Strings;
 
 import reactor.core.publisher.Mono;
 
-class CassandraBlobStoreClOneTest implements CassandraBlobStoreContract {
+class CassandraBlobStoreClOneTest implements CassandraBlobStoreContract, DeduplicationBlobStoreContract {
     @RegisterExtension
     static CassandraClusterExtension cassandraCluster = new CassandraClusterExtension(CassandraBlobModule.MODULE);
 
     private BlobStore testee;
     private CassandraDefaultBucketDAO defaultBucketDAO;
+    private CassandraCluster cassandra;
 
     @BeforeEach
     void setUp(CassandraCluster cassandra) {
-        HashBlobId.Factory blobIdFactory = new HashBlobId.Factory();
-        CassandraBucketDAO bucketDAO = new CassandraBucketDAO(blobIdFactory, cassandra.getConf());
-        defaultBucketDAO = spy(new CassandraDefaultBucketDAO(cassandra.getConf(), blobIdFactory));
+        this.cassandra = cassandra;
+        this.testee = createBlobStore();
+    }
+
+    @Override
+    public MetricableBlobStore createBlobStore() {
+        PlainBlobId.Factory blobIdFactory = new PlainBlobId.Factory();
+        CassandraBucketDAO bucketDAO = new CassandraBucketDAO(blobIdFactory, this.cassandra.getConf());
+        defaultBucketDAO = spy(new CassandraDefaultBucketDAO(this.cassandra.getConf(), blobIdFactory));
         CassandraConfiguration cassandraConfiguration = CassandraConfiguration.builder()
-            .blobPartSize(CHUNK_SIZE)
-            .optimisticConsistencyLevel(true)
-            .build();
+                .blobPartSize(CHUNK_SIZE)
+                .optimisticConsistencyLevel(true)
+                .build();
         MetricFactory metricFactory = metricsTestExtension.getMetricFactory();
-        testee = new MetricableBlobStore(
-            metricFactory,
-            BlobStoreFactory.builder()
-                .blobStoreDAO(new CassandraBlobStoreDAO(defaultBucketDAO, bucketDAO, cassandraConfiguration, BucketName.DEFAULT, metricFactory))
-                .blobIdFactory(blobIdFactory)
-                .defaultBucketName()
-                .deduplication());
+        return new MetricableBlobStore(
+                metricFactory,
+                BlobStoreFactory.builder()
+                        .blobStoreDAO(new CassandraBlobStoreDAO(defaultBucketDAO, bucketDAO, cassandraConfiguration, BucketName.DEFAULT, metricFactory))
+                        .blobIdFactory(blobIdFactory)
+                        .defaultBucketName()
+                        .deduplication());
     }
 
     @Override
@@ -85,7 +93,7 @@ class CassandraBlobStoreClOneTest implements CassandraBlobStoreContract {
 
     @Override
     public BlobId.Factory blobIdFactory() {
-        return new HashBlobId.Factory();
+        return new PlainBlobId.Factory();
     }
 
     @Override

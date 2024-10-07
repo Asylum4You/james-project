@@ -26,6 +26,7 @@ import org.apache.commons.configuration2.Configuration;
 import org.apache.james.backends.opensearch.IndexName;
 import org.apache.james.backends.opensearch.ReadAliasName;
 import org.apache.james.backends.opensearch.WriteAliasName;
+import org.apache.james.mailbox.opensearch.json.MessageToOpenSearchJson.IndexUser;
 
 public class OpenSearchMailboxConfiguration {
 
@@ -36,7 +37,9 @@ public class OpenSearchMailboxConfiguration {
         private Optional<IndexAttachments> indexAttachment;
         private Optional<IndexHeaders> indexHeaders;
         private Optional<Boolean> optimiseMoves;
+        private Optional<Boolean> textFuzzinessSearch;
         private Optional<IndexBody> indexBody;
+        private Optional<IndexUser> indexUser;
 
         Builder() {
             indexMailboxName = Optional.empty();
@@ -45,7 +48,9 @@ public class OpenSearchMailboxConfiguration {
             indexAttachment = Optional.empty();
             indexHeaders = Optional.empty();
             optimiseMoves = Optional.empty();
+            textFuzzinessSearch = Optional.empty();
             indexBody = Optional.empty();
+            indexUser = Optional.empty();
         }
 
         public Builder indexMailboxName(Optional<IndexName> indexMailboxName) {
@@ -78,8 +83,18 @@ public class OpenSearchMailboxConfiguration {
             return this;
         }
 
+        public Builder textFuzzinessSearch(Boolean textFuzzinessSearch) {
+            this.textFuzzinessSearch = Optional.ofNullable(textFuzzinessSearch);
+            return this;
+        }
+
         public Builder indexBody(IndexBody indexBody) {
             this.indexBody = Optional.ofNullable(indexBody);
+            return this;
+        }
+
+        public Builder indexUser(IndexUser indexUser) {
+            this.indexUser = Optional.ofNullable(indexUser);
             return this;
         }
 
@@ -91,7 +106,9 @@ public class OpenSearchMailboxConfiguration {
                 indexAttachment.orElse(IndexAttachments.YES),
                 indexHeaders.orElse(IndexHeaders.YES),
                 optimiseMoves.orElse(DEFAULT_OPTIMIZE_MOVES),
-                indexBody.orElse(IndexBody.YES));
+                textFuzzinessSearch.orElse(DEFAULT_TEXT_FUZZINESS_SEARCH),
+                indexBody.orElse(IndexBody.YES),
+                indexUser.orElse(IndexUser.NO));
         }
     }
 
@@ -108,11 +125,15 @@ public class OpenSearchMailboxConfiguration {
     private static final String OPENSEARCH_INDEX_ATTACHMENTS = "opensearch.indexAttachments";
     private static final String OPENSEARCH_INDEX_HEADERS = "opensearch.indexHeaders";
     private static final String OPENSEARCH_MESSAGE_INDEX_OPTIMIZE_MOVE = "opensearch.message.index.optimize.move";
+    private static final String OPENSEARCH_TEXT_FUZZINESS_SEARCH = "opensearch.text.fuzziness.search";
     private static final String OPENSEARCH_INDEX_BODY = "opensearch.indexBody";
+    private static final String OPENSEARCH_INDEX_USER = "opensearch.indexUser";
     private static final boolean DEFAULT_INDEX_ATTACHMENTS = true;
     private static final boolean DEFAULT_INDEX_HEADERS = true;
     public static final boolean DEFAULT_OPTIMIZE_MOVES = false;
+    public static final boolean DEFAULT_TEXT_FUZZINESS_SEARCH = false;
     public static final boolean DEFAULT_INDEX_BODY = true;
+    public static final boolean DEFAULT_INDEX_USER = false;
     public static final OpenSearchMailboxConfiguration DEFAULT_CONFIGURATION = builder().build();
 
     public static OpenSearchMailboxConfiguration fromProperties(Configuration configuration) {
@@ -123,7 +144,9 @@ public class OpenSearchMailboxConfiguration {
             .indexAttachment(provideIndexAttachments(configuration))
             .indexHeaders(provideIndexHeaders(configuration))
             .optimiseMoves(configuration.getBoolean(OPENSEARCH_MESSAGE_INDEX_OPTIMIZE_MOVE, null))
+            .textFuzzinessSearch(configuration.getBoolean(OPENSEARCH_TEXT_FUZZINESS_SEARCH, null))
             .indexBody(provideIndexBody(configuration))
+            .indexUser(provideIndexUser(configuration))
             .build();
     }
 
@@ -169,24 +192,36 @@ public class OpenSearchMailboxConfiguration {
         return IndexBody.NO;
     }
 
+    private static IndexUser provideIndexUser(Configuration configuration) {
+        if (configuration.getBoolean(OPENSEARCH_INDEX_USER, DEFAULT_INDEX_USER)) {
+            return IndexUser.YES;
+        }
+        return IndexUser.NO;
+    }
+
     private final IndexName indexMailboxName;
     private final ReadAliasName readAliasMailboxName;
     private final WriteAliasName writeAliasMailboxName;
     private final IndexAttachments indexAttachment;
     private final IndexHeaders indexHeaders;
     private final boolean optimiseMoves;
+    private final boolean textFuzzinessSearch;
     private final IndexBody indexBody;
+    private final IndexUser indexUser;
 
     private OpenSearchMailboxConfiguration(IndexName indexMailboxName, ReadAliasName readAliasMailboxName,
                                            WriteAliasName writeAliasMailboxName, IndexAttachments indexAttachment,
-                                           IndexHeaders indexHeaders, boolean optimiseMoves, IndexBody indexBody) {
+                                           IndexHeaders indexHeaders, boolean optimiseMoves, boolean textFuzzinessSearch,
+                                           IndexBody indexBody, IndexUser indexUser) {
         this.indexMailboxName = indexMailboxName;
         this.readAliasMailboxName = readAliasMailboxName;
         this.writeAliasMailboxName = writeAliasMailboxName;
         this.indexAttachment = indexAttachment;
         this.indexHeaders = indexHeaders;
         this.optimiseMoves = optimiseMoves;
+        this.textFuzzinessSearch = textFuzzinessSearch;
         this.indexBody = indexBody;
+        this.indexUser = indexUser;
     }
 
     public IndexName getIndexMailboxName() {
@@ -213,8 +248,16 @@ public class OpenSearchMailboxConfiguration {
         return optimiseMoves;
     }
 
+    public boolean textFuzzinessSearchEnable() {
+        return textFuzzinessSearch;
+    }
+
     public IndexBody getIndexBody() {
         return indexBody;
+    }
+
+    public IndexUser getIndexUser() {
+        return indexUser;
     }
 
     @Override
@@ -227,8 +270,10 @@ public class OpenSearchMailboxConfiguration {
                 && Objects.equals(this.indexMailboxName, that.indexMailboxName)
                 && Objects.equals(this.readAliasMailboxName, that.readAliasMailboxName)
                 && Objects.equals(this.optimiseMoves, that.optimiseMoves)
+                && Objects.equals(this.textFuzzinessSearch, that.textFuzzinessSearch)
                 && Objects.equals(this.writeAliasMailboxName, that.writeAliasMailboxName)
-                && Objects.equals(this.indexBody, that.indexBody);
+                && Objects.equals(this.indexBody, that.indexBody)
+                && Objects.equals(this.indexUser, that.indexUser);
         }
         return false;
     }
@@ -236,6 +281,6 @@ public class OpenSearchMailboxConfiguration {
     @Override
     public final int hashCode() {
         return Objects.hash(indexMailboxName, readAliasMailboxName, writeAliasMailboxName, indexAttachment, indexHeaders,
-            writeAliasMailboxName, optimiseMoves, indexBody);
+            writeAliasMailboxName, optimiseMoves, textFuzzinessSearch, indexBody, indexUser);
     }
 }

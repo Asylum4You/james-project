@@ -28,6 +28,7 @@ import org.apache.commons.configuration2.tree.ImmutableNode;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.james.ProtocolConfigurationSanitizer;
 import org.apache.james.RunArguments;
+import org.apache.james.core.healthcheck.HealthCheck;
 import org.apache.james.filesystem.api.FileSystem;
 import org.apache.james.imap.ImapSuite;
 import org.apache.james.imap.api.ConnectionCheckFactory;
@@ -48,6 +49,7 @@ import org.apache.james.imap.encode.ImapResponseEncoder;
 import org.apache.james.imap.encode.base.EndImapEncoder;
 import org.apache.james.imap.encode.main.DefaultImapEncoderFactory;
 import org.apache.james.imap.encode.main.DefaultLocalizer;
+import org.apache.james.imap.main.DefaultImapDecoderFactory;
 import org.apache.james.imap.message.response.UnpooledStatusResponseFactory;
 import org.apache.james.imap.processor.AuthenticateProcessor;
 import org.apache.james.imap.processor.CapabilityImplementingProcessor;
@@ -59,6 +61,7 @@ import org.apache.james.imap.processor.SelectProcessor;
 import org.apache.james.imap.processor.StatusProcessor;
 import org.apache.james.imap.processor.base.AbstractProcessor;
 import org.apache.james.imap.processor.base.UnknownRequestProcessor;
+import org.apache.james.imapserver.netty.IMAPHealthCheck;
 import org.apache.james.imapserver.netty.IMAPServerFactory;
 import org.apache.james.lifecycle.api.ConfigurationSanitizer;
 import org.apache.james.metrics.api.GaugeRegistry;
@@ -107,6 +110,8 @@ public class IMAPServerModule extends AbstractModule {
 
         Multibinder.newSetBinder(binder(), CertificateReloadable.Factory.class).addBinding().to(IMAPServerFactory.class);
         bind(ConnectionCheckFactory.class).to(ConnectionCheckFactoryImpl.class);
+
+        Multibinder.newSetBinder(binder(), HealthCheck.class).addBinding().to(IMAPHealthCheck.class);
     }
 
     @Provides
@@ -183,7 +188,7 @@ public class IMAPServerModule extends AbstractModule {
     }
 
     ImapDecoder provideImapDecoder(ImapCommandParserFactory imapCommandParserFactory, StatusResponseFactory statusResponseFactory) {
-        return new DefaultImapDecoder(statusResponseFactory, imapCommandParserFactory);
+        return new DefaultImapDecoderFactory(imapCommandParserFactory, statusResponseFactory).buildImapDecoder();
     }
 
     ImapEncoder provideImapEncoder(ImapPackage imapPackage, GuiceGenericLoader loader) {

@@ -25,10 +25,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.UUID;
 
 import org.apache.commons.configuration2.PropertiesConfiguration;
 import org.apache.james.blob.api.BlobId;
-import org.apache.james.blob.api.HashBlobId;
+import org.apache.james.blob.api.PlainBlobId;
 import org.apache.james.utils.UpdatableTickingClock;
 import org.assertj.core.api.SoftAssertions;
 import org.junit.jupiter.api.BeforeEach;
@@ -36,8 +37,6 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-
-import com.google.common.io.ByteSource;
 
 import nl.jqno.equalsverifier.EqualsVerifier;
 
@@ -50,7 +49,7 @@ class GenerationAwareBlobIdTest {
 
     @BeforeEach
     void setUp() {
-        delegate = new HashBlobId.Factory();
+        delegate = new PlainBlobId.Factory();
         clock = new UpdatableTickingClock(NOW);
         testee = new GenerationAwareBlobId.Factory(clock, delegate, GenerationAwareBlobId.Configuration.DEFAULT);
     }
@@ -58,46 +57,14 @@ class GenerationAwareBlobIdTest {
     @Nested
     class BlobIdGeneration {
         @Test
-        void randomIdShouldGenerateABlobIdOfTheRightGeneration() {
-            GenerationAwareBlobId actual = testee.randomId();
+        void ofShouldGenerateABlobIdOfTheRightGeneration() {
+            String key = UUID.randomUUID().toString();
+            GenerationAwareBlobId actual = testee.of(key);
 
             SoftAssertions.assertSoftly(soft -> {
                 soft.assertThat(actual.getFamily()).isEqualTo(GenerationAwareBlobId.Configuration.DEFAULT.getFamily());
                 soft.assertThat(actual.getGeneration()).isEqualTo(628L);
-            });
-        }
-
-        @Test
-        void randomIdShouldGenerateABlobIdOfTheRightFutureGeneration() {
-            clock.setInstant(NOW.plus(30, ChronoUnit.DAYS));
-
-            GenerationAwareBlobId actual = testee.randomId();
-
-            SoftAssertions.assertSoftly(soft -> {
-                soft.assertThat(actual.getFamily()).isEqualTo(GenerationAwareBlobId.Configuration.DEFAULT.getFamily());
-                soft.assertThat(actual.getGeneration()).isEqualTo(629L);
-            });
-        }
-
-        @Test
-        void forPayloadShouldGenerateABlobIdOfTheRightGeneration() {
-            GenerationAwareBlobId actual = testee.forPayload("abc".getBytes());
-
-            SoftAssertions.assertSoftly(soft -> {
-                soft.assertThat(actual.getFamily()).isEqualTo(GenerationAwareBlobId.Configuration.DEFAULT.getFamily());
-                soft.assertThat(actual.getGeneration()).isEqualTo(628L);
-                soft.assertThat(actual.getDelegate()).isEqualTo(delegate.forPayload("abc".getBytes()));
-            });
-        }
-
-        @Test
-        void forPayloadByteSourceShouldGenerateABlobIdOfTheRightGeneration() {
-            GenerationAwareBlobId actual = testee.forPayload(ByteSource.wrap("abc".getBytes()));
-
-            SoftAssertions.assertSoftly(soft -> {
-                soft.assertThat(actual.getFamily()).isEqualTo(GenerationAwareBlobId.Configuration.DEFAULT.getFamily());
-                soft.assertThat(actual.getGeneration()).isEqualTo(628L);
-                soft.assertThat(actual.getDelegate()).isEqualTo(delegate.forPayload("abc".getBytes()));
+                soft.assertThat(actual.getDelegate()).isEqualTo(delegate.of(key));
             });
         }
     }
@@ -106,9 +73,9 @@ class GenerationAwareBlobIdTest {
     class BlobIdParsing {
         @Test
         void previousBlobIdsShouldBeParsable() {
-            String blobIdString = delegate.forPayload("abc".getBytes()).asString();
+            String blobIdString = delegate.of("abc").asString();
 
-            GenerationAwareBlobId actual = testee.from(blobIdString);
+            GenerationAwareBlobId actual = testee.parse(blobIdString);
 
             SoftAssertions.assertSoftly(soft -> {
                 soft.assertThat(actual.getFamily()).isEqualTo(0);
@@ -119,27 +86,27 @@ class GenerationAwareBlobIdTest {
 
         @Test
         void noFamilyShouldBeParsable() {
-            String blobIdString = "0_0_" + delegate.forPayload("abc".getBytes()).asString();
+            String blobIdString = "0_0_" + delegate.of("abc").asString();
 
-            GenerationAwareBlobId actual = testee.from(blobIdString);
+            GenerationAwareBlobId actual = testee.parse(blobIdString);
 
             SoftAssertions.assertSoftly(soft -> {
                 soft.assertThat(actual.getFamily()).isEqualTo(0);
                 soft.assertThat(actual.getGeneration()).isEqualTo(0L);
-                soft.assertThat(actual.getDelegate()).isEqualTo(delegate.forPayload("abc".getBytes()));
+                soft.assertThat(actual.getDelegate()).isEqualTo(delegate.of("abc"));
             });
         }
 
         @Test
         void generationBlobIdShouldBeParsable() {
-            String blobIdString = "12_126_" + delegate.forPayload("abc".getBytes()).asString();
+            String blobIdString = "12_126_" + delegate.of("abc").asString();
 
-            GenerationAwareBlobId actual = testee.from(blobIdString);
+            GenerationAwareBlobId actual = testee.parse(blobIdString);
 
             SoftAssertions.assertSoftly(soft -> {
                 soft.assertThat(actual.getFamily()).isEqualTo(12);
                 soft.assertThat(actual.getGeneration()).isEqualTo(126L);
-                soft.assertThat(actual.getDelegate()).isEqualTo(delegate.forPayload("abc".getBytes()));
+                soft.assertThat(actual.getDelegate()).isEqualTo(delegate.of("abc"));
             });
         }
 
@@ -147,12 +114,12 @@ class GenerationAwareBlobIdTest {
         void wrappedBlobIdCanContainSeparator() {
             String blobIdString = "12_126_ab_c";
 
-            GenerationAwareBlobId actual = testee.from(blobIdString);
+            GenerationAwareBlobId actual = testee.parse(blobIdString);
 
             SoftAssertions.assertSoftly(soft -> {
                 soft.assertThat(actual.getFamily()).isEqualTo(12);
                 soft.assertThat(actual.getGeneration()).isEqualTo(126L);
-                soft.assertThat(actual.getDelegate()).isEqualTo(delegate.from("ab_c"));
+                soft.assertThat(actual.getDelegate()).isEqualTo(delegate.parse("ab_c"));
             });
         }
 
@@ -166,12 +133,12 @@ class GenerationAwareBlobIdTest {
             "_abc"
         })
         void fromShouldFallbackWhenNotApplicable(String blobIdString) {
-            GenerationAwareBlobId actual = testee.from(blobIdString);
+            GenerationAwareBlobId actual = testee.parse(blobIdString);
 
             SoftAssertions.assertSoftly(soft -> {
                 soft.assertThat(actual.getFamily()).isEqualTo(0);
                 soft.assertThat(actual.getGeneration()).isEqualTo(0L);
-                soft.assertThat(actual.getDelegate()).isEqualTo(delegate.from(blobIdString));
+                soft.assertThat(actual.getDelegate()).isEqualTo(delegate.parse(blobIdString));
             });
         }
 
@@ -179,13 +146,13 @@ class GenerationAwareBlobIdTest {
         class Failures {
             @Test
             void emptyShouldFail() {
-                assertThatThrownBy(() -> testee.from(""))
+                assertThatThrownBy(() -> testee.parse(""))
                     .isInstanceOf(IllegalArgumentException.class);
             }
 
             @Test
             void nullShouldFailShouldFail() {
-                assertThatThrownBy(() -> testee.from(null))
+                assertThatThrownBy(() -> testee.parse(null))
                     .isInstanceOf(NullPointerException.class);
             }
 
@@ -200,7 +167,7 @@ class GenerationAwareBlobIdTest {
                 "1_-1_abc",
             })
             void fromShouldFallbackWhenNotApplicable(String blobIdString) {
-                assertThatThrownBy(() -> testee.from(blobIdString))
+                assertThatThrownBy(() -> testee.parse(blobIdString))
                     .isInstanceOf(IllegalArgumentException.class);
             }
         }
@@ -216,14 +183,14 @@ class GenerationAwareBlobIdTest {
 
         @Test
         void asStringShouldIntegrateFamilyAndGeneration() {
-            BlobId blobId = new GenerationAwareBlobId(23, 456, delegate.from("abc"));
+            BlobId blobId = new GenerationAwareBlobId(23, 456, delegate.parse("abc"));
 
             assertThat(blobId.asString()).isEqualTo("456_23_abc");
         }
 
         @Test
         void asStringShouldReturnDelegateForZeroFamily() {
-            BlobId blobId = new GenerationAwareBlobId(0, 0, delegate.from("abc"));
+            BlobId blobId = new GenerationAwareBlobId(0, 0, delegate.parse("abc"));
 
             assertThat(blobId.asString()).isEqualTo("abc");
         }
@@ -234,28 +201,28 @@ class GenerationAwareBlobIdTest {
             "abc"
         })
         void asStringShouldRevertFromString(String blobIdString) {
-            GenerationAwareBlobId blobId = testee.from(blobIdString);
+            GenerationAwareBlobId blobId = testee.parse(blobIdString);
 
             assertThat(blobId.asString()).isEqualTo(blobIdString);
         }
 
         @Test
         void noGenerationShouldNeverBeInActiveGeneration() {
-            GenerationAwareBlobId blobId = new GenerationAwareBlobId(0, 0, delegate.from("abc"));
+            GenerationAwareBlobId blobId = new GenerationAwareBlobId(0, 0, delegate.parse("abc"));
 
             assertThat(blobId.inActiveGeneration(GenerationAwareBlobId.Configuration.DEFAULT, NOW)).isFalse();
         }
 
         @Test
         void inActiveGenerationShouldReturnTrueWhenSameDate() {
-            GenerationAwareBlobId blobId = testee.forPayload("abc".getBytes());
+            GenerationAwareBlobId blobId = testee.of("abc");
 
             assertThat(blobId.inActiveGeneration(GenerationAwareBlobId.Configuration.DEFAULT, NOW)).isTrue();
         }
 
         @Test
         void inActiveGenerationShouldReturnTrueWhenInTheFuture() {
-            GenerationAwareBlobId blobId = testee.forPayload("abc".getBytes());
+            GenerationAwareBlobId blobId = testee.of("abc");
 
             assertThat(blobId.inActiveGeneration(GenerationAwareBlobId.Configuration.DEFAULT, NOW.minus(60, ChronoUnit.DAYS)))
                 .isTrue();
@@ -263,7 +230,7 @@ class GenerationAwareBlobIdTest {
 
         @Test
         void inActiveGenerationShouldReturnTrueForAtLeastOneMoreMonth() {
-            GenerationAwareBlobId blobId = testee.forPayload("abc".getBytes());
+            GenerationAwareBlobId blobId = testee.of("abc");
 
             assertThat(blobId.inActiveGeneration(GenerationAwareBlobId.Configuration.DEFAULT, NOW.plus(30, ChronoUnit.DAYS)))
                 .isTrue();
@@ -271,7 +238,7 @@ class GenerationAwareBlobIdTest {
 
         @Test
         void inActiveGenerationShouldReturnFalseAfterTwoMonth() {
-            GenerationAwareBlobId blobId = testee.forPayload("abc".getBytes());
+            GenerationAwareBlobId blobId = testee.of("abc");
 
             assertThat(blobId.inActiveGeneration(GenerationAwareBlobId.Configuration.DEFAULT, NOW.plus(60, ChronoUnit.DAYS)))
                 .isFalse();
@@ -280,7 +247,7 @@ class GenerationAwareBlobIdTest {
 
         @Test
         void inActiveGenerationShouldReturnFalseWhenDistinctFamily() {
-            GenerationAwareBlobId blobId = new GenerationAwareBlobId(628L, 2, delegate.forPayload("abcd".getBytes()));
+            GenerationAwareBlobId blobId = new GenerationAwareBlobId(628L, 2, delegate.of("abcd"));
 
             assertThat(blobId.inActiveGeneration(GenerationAwareBlobId.Configuration.DEFAULT, NOW.plus(60, ChronoUnit.DAYS)))
                 .isFalse();

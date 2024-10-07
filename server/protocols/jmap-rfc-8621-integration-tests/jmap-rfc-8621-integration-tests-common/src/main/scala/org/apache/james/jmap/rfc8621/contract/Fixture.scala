@@ -117,6 +117,48 @@ object Fixture {
       |    ]
       |  ]
       |}""".stripMargin
+  val BIG_ECHO_REQUEST_OBJECT: String =
+    s"""{
+      |  "using": [
+      |    "urn:ietf:params:jmap:core"
+      |  ],
+      |  "methodCalls": [
+      |    [
+      |      "Core/echo",
+      |      {
+      |        "arg1": "${"0123456789".repeat(1_000_001)}",
+      |        "arg2": "arg2data"
+      |      },
+      |      "c1"
+      |    ]
+      |  ]
+      |}""".stripMargin
+
+  val TOO_MANY_CALLS_ECHO_REQUEST_OBJECT: String =
+    s"""{
+      |  "using": [
+      |    "urn:ietf:params:jmap:core"
+      |  ],
+      |  "methodCalls": [
+      |    ["Core/echo",{"arg1": "abx"}, "c1"],
+      |    ["Core/echo",{"arg1": "abx"}, "c2"],
+      |    ["Core/echo",{"arg1": "abx"}, "c3"],
+      |    ["Core/echo",{"arg1": "abx"}, "c4"],
+      |    ["Core/echo",{"arg1": "abx"}, "c5"],
+      |    ["Core/echo",{"arg1": "abx"}, "c6"],
+      |    ["Core/echo",{"arg1": "abx"}, "c7"],
+      |    ["Core/echo",{"arg1": "abx"}, "c8"],
+      |    ["Core/echo",{"arg1": "abx"}, "c9"],
+      |    ["Core/echo",{"arg1": "abx"}, "c10"],
+      |    ["Core/echo",{"arg1": "abx"}, "c11"],
+      |    ["Core/echo",{"arg1": "abx"}, "c12"],
+      |    ["Core/echo",{"arg1": "abx"}, "c13"],
+      |    ["Core/echo",{"arg1": "abx"}, "c14"],
+      |    ["Core/echo",{"arg1": "abx"}, "c15"],
+      |    ["Core/echo",{"arg1": "abx"}, "c16"],
+      |    ["Core/echo",{"arg1": "abx"}, "c17"]
+      |  ]
+      |}""".stripMargin
 
   val ECHO_REQUEST_OBJECT_WITHOUT_CORE_CAPABILITY: String =
     """{

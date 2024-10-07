@@ -32,7 +32,6 @@ import org.apache.james.util.DurationParser;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.MoreObjects;
 import com.google.common.base.Preconditions;
-import com.google.common.io.ByteSource;
 
 public class GenerationAwareBlobId implements BlobId {
 
@@ -123,17 +122,12 @@ public class GenerationAwareBlobId implements BlobId {
         }
 
         @Override
-        public GenerationAwareBlobId forPayload(byte[] payload) {
-            return decorate(delegate.forPayload(payload));
+        public GenerationAwareBlobId of(String id) {
+            return decorate(delegate.of(id));
         }
 
         @Override
-        public GenerationAwareBlobId forPayload(ByteSource payload) {
-            return decorate(delegate.forPayload(payload));
-        }
-
-        @Override
-        public GenerationAwareBlobId from(String id) {
+        public GenerationAwareBlobId parse(String id) {
             int separatorIndex1 = id.indexOf('_');
             if (separatorIndex1 == -1 || separatorIndex1 == id.length() - 1) {
                 return decorateWithoutGeneration(id);
@@ -144,18 +138,13 @@ public class GenerationAwareBlobId implements BlobId {
             }
             int family = Integer.parseInt(id.substring(0, separatorIndex1));
             int generation = Integer.parseInt(id.substring(separatorIndex1 + 1, separatorIndex2));
-            BlobId wrapped = delegate.from(id.substring(separatorIndex2 + 1));
+            BlobId wrapped = delegate.parse(id.substring(separatorIndex2 + 1));
 
             return new GenerationAwareBlobId(generation, family, wrapped);
         }
 
-        @Override
-        public GenerationAwareBlobId randomId() {
-            return decorate(delegate.randomId());
-        }
-
         private GenerationAwareBlobId decorateWithoutGeneration(String id) {
-            return new GenerationAwareBlobId(NO_GENERATION, NO_FAMILY, delegate.from(id));
+            return new GenerationAwareBlobId(NO_GENERATION, NO_FAMILY, delegate.parse(id));
         }
 
         private GenerationAwareBlobId decorate(BlobId blobId) {

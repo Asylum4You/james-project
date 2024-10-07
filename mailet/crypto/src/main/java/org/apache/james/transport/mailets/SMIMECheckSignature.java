@@ -26,13 +26,17 @@ import java.security.cert.CertificateEncodingException;
 import java.util.ArrayList;
 import java.util.List;
 
+import jakarta.inject.Inject;
 import jakarta.mail.MessagingException;
 import jakarta.mail.Multipart;
 import jakarta.mail.internet.MimeBodyPart;
 import jakarta.mail.internet.MimeMessage;
 import jakarta.mail.internet.MimeMultipart;
 
+import org.apache.james.filesystem.api.FileSystem;
 import org.apache.james.transport.KeyStoreHolder;
+import org.apache.james.transport.KeyStoreHolderConfiguration;
+import org.apache.james.transport.KeyStoreHolderFactory;
 import org.apache.james.transport.SMIMESignerInfo;
 import org.apache.mailet.Attribute;
 import org.apache.mailet.AttributeName;
@@ -43,6 +47,7 @@ import org.apache.mailet.base.GenericMailet;
 import org.bouncycastle.cms.CMSException;
 import org.bouncycastle.mail.smime.SMIMEException;
 import org.bouncycastle.mail.smime.SMIMESigned;
+import org.eclipse.angus.mail.util.BASE64DecoderStream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -107,10 +112,18 @@ import org.slf4j.LoggerFactory;
 public class SMIMECheckSignature extends GenericMailet {
     private static final Logger LOGGER = LoggerFactory.getLogger(SMIMECheckSignature.class);
 
+    private static final String SMIME_STATUS_HEADER = "X-SMIME-Status";
+
+    private final FileSystem fileSystem;
     private KeyStoreHolder trustedCertificateStore;
     private boolean stripSignature = false;
     private boolean onlyTrusted = true;
     private AttributeName mailAttribute = AttributeName.of("org.apache.james.SMIMECheckSignature");
+
+    @Inject
+    public SMIMECheckSignature(FileSystem fileSystem) {
+        this.fileSystem = fileSystem;
+    }
 
     @Override
     public void init() throws MessagingException {
@@ -130,23 +143,8 @@ public class SMIMECheckSignature extends GenericMailet {
         if (mailAttributeConf != null) {
             mailAttribute = AttributeName.of(mailAttributeConf);
         }
-        
-        
-        String type = config.getInitParameter("keyStoreType");
-        String file = config.getInitParameter("keyStoreFileName");
-        String password = config.getInitParameter("keyStorePassword");
-        
-        try {
-            if (file != null) {
-                trustedCertificateStore = new KeyStoreHolder(file, password, type);
-            } else {
-                LOGGER.info("No trusted store path specified, using default store.");
-                trustedCertificateStore = new KeyStoreHolder(password);
-            }
-        } catch (Exception e) {
-            throw new MessagingException("Error loading the trusted certificate store", e);
-        }
 
+        trustedCertificateStore = KeyStoreHolderFactory.from(fileSystem).createKeyStoreHolder(KeyStoreHolderConfiguration.from(config));
     }
 
     @Override
@@ -160,6 +158,9 @@ public class SMIMECheckSignature extends GenericMailet {
         MimeBodyPart strippedMessage = null;
         
         List<SMIMESignerInfo> signers = null;
+
+        boolean isMessageSigned = false;
+        boolean isSignatureGood = false;
         
         try {
             SMIMESigned signed = asSMIMESigned(message);
@@ -167,6 +168,7 @@ public class SMIMECheckSignature extends GenericMailet {
             if (signed != null) {
                 signers = trustedCertificateStore.verifySignatures(signed);
                 strippedMessage = signed.getContent();
+                isMessageSigned = true;
             } else {
                 LOGGER.info("Content not identified as signed");
             }
@@ -191,14 +193,27 @@ public class SMIMECheckSignature extends GenericMailet {
 
             if (!signerinfolist.isEmpty()) {
                 mail.setAttribute(new Attribute(mailAttribute, AttributeValue.of(signerinfolist)));
+                isSignatureGood = true;
             } else {
                 // if no valid signers are found the message is not modified.
                 strippedMessage = null;
             }
         }
 
+        setSMIMEStatus(mail, isMessageSigned, isSignatureGood);
+
         if (stripSignature && strippedMessage != null) {
             stripSignature(mail, message, strippedMessage);
+        }
+    }
+
+    private void setSMIMEStatus(Mail mail, boolean isMessageSigned, boolean isSignatureGood) throws MessagingException {
+        if (!isMessageSigned) {
+            mail.getMessage().setHeader(SMIME_STATUS_HEADER, "Not signed");
+        } else if (isSignatureGood) {
+            mail.getMessage().setHeader(SMIME_STATUS_HEADER, "Good signature");
+        } else {
+            mail.getMessage().setHeader(SMIME_STATUS_HEADER, "Bad signature");
         }
     }
 
@@ -240,7 +255,7 @@ public class SMIMECheckSignature extends GenericMailet {
             signed = new SMIMESigned((MimeMultipart) message.getContent());
         } else if (obj instanceof SMIMESigned) {
             signed = (SMIMESigned) obj;
-        } else if (obj instanceof byte[]) {
+        } else if (obj instanceof byte[] || obj instanceof BASE64DecoderStream) {
             signed = new SMIMESigned(message);
         } else {
             signed = null;

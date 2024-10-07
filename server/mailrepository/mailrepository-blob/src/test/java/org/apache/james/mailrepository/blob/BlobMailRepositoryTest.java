@@ -19,7 +19,7 @@
 
 package org.apache.james.mailrepository.blob;
 
-import org.apache.james.blob.api.HashBlobId;
+import org.apache.james.blob.api.PlainBlobId;
 import org.apache.james.blob.mail.MimeMessageStore;
 import org.apache.james.blob.memory.MemoryBlobStoreDAO;
 import org.apache.james.blob.memory.MemoryBlobStoreFactory;
@@ -34,22 +34,22 @@ import org.junit.jupiter.api.BeforeEach;
 class BlobMailRepositoryTest implements MailRepositoryContract {
 
     private MailRepository blobMailRepository;
-    private HashBlobId.Factory blobIdFactory;
+    private PlainBlobId.Factory blobIdFactory;
     private MemoryBlobStoreDAO blobStore;
     private MimeMessageStore.Factory mimeMessageStoreFactory;
     private BlobMailRepositoryFactory blobMailRepositoryFactory;
 
     @BeforeEach
     void setup() {
-        blobIdFactory = new HashBlobId.Factory();
+        blobIdFactory = new PlainBlobId.Factory();
         blobStore = new MemoryBlobStoreDAO();
-        var mimeMessageBlobStore  = MemoryBlobStoreFactory.builder()
+        var mimeMessageBlobStore = MemoryBlobStoreFactory.builder()
                 .blobIdFactory(blobIdFactory)
                 .defaultBucketName()
                 .passthrough();
         mimeMessageStoreFactory = new MimeMessageStore.Factory(mimeMessageBlobStore);
-        MailRepositoryPath path = MailRepositoryPath.from("/foo");
-        blobMailRepositoryFactory = new BlobMailRepositoryFactory(blobStore, blobIdFactory, mimeMessageStoreFactory);
+        MailRepositoryPath path = MailRepositoryPath.from("var/mail/error");
+        blobMailRepositoryFactory = new BlobMailRepositoryFactory(blobStore, blobIdFactory, mimeMessageBlobStore.getDefaultBucketName());
         blobMailRepository = buildBlobMailRepository(path);
     }
 

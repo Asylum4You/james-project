@@ -22,7 +22,7 @@ package org.apache.james.blob.objectstorage.aws;
 import org.apache.james.blob.api.BlobId;
 import org.apache.james.blob.api.BlobStore;
 import org.apache.james.blob.api.BlobStoreContract;
-import org.apache.james.blob.api.HashBlobId;
+import org.apache.james.blob.api.PlainBlobId;
 import org.apache.james.metrics.api.NoopGaugeRegistry;
 import org.apache.james.metrics.tests.RecordingMetricFactory;
 import org.apache.james.server.blob.deduplication.BlobStoreFactory;
@@ -37,6 +37,8 @@ class S3PassThroughBlobStoreTest implements BlobStoreContract {
     private static BlobStore testee;
     private static S3BlobStoreDAO s3BlobStoreDAO;
 
+    private static S3ClientFactory s3ClientFactory;
+
     @BeforeAll
     static void setUpClass(DockerAwsS3Container dockerAwsS3) {
         AwsS3AuthConfiguration authConfiguration = AwsS3AuthConfiguration.builder()
@@ -50,8 +52,9 @@ class S3PassThroughBlobStoreTest implements BlobStoreContract {
             .region(dockerAwsS3.dockerAwsS3().region())
             .build();
 
-        HashBlobId.Factory blobIdFactory = new HashBlobId.Factory();
-        s3BlobStoreDAO = new S3BlobStoreDAO(s3Configuration, blobIdFactory, new RecordingMetricFactory(), new NoopGaugeRegistry());
+        PlainBlobId.Factory blobIdFactory = new PlainBlobId.Factory();
+        s3ClientFactory = new S3ClientFactory(s3Configuration, new RecordingMetricFactory(), new NoopGaugeRegistry());
+        s3BlobStoreDAO = new S3BlobStoreDAO(s3ClientFactory, s3Configuration, blobIdFactory);
 
         testee = BlobStoreFactory.builder()
             .blobStoreDAO(s3BlobStoreDAO)
@@ -67,7 +70,7 @@ class S3PassThroughBlobStoreTest implements BlobStoreContract {
 
     @AfterAll
     static void tearDownClass() {
-        s3BlobStoreDAO.close();
+        s3ClientFactory.close();
     }
 
     @Override
@@ -77,7 +80,7 @@ class S3PassThroughBlobStoreTest implements BlobStoreContract {
 
     @Override
     public BlobId.Factory blobIdFactory() {
-        return new HashBlobId.Factory();
+        return new PlainBlobId.Factory();
     }
 
 }

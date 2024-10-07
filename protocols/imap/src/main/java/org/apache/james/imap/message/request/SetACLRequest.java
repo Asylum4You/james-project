@@ -21,6 +21,8 @@ package org.apache.james.imap.message.request;
 
 import org.apache.james.imap.api.ImapConstants;
 import org.apache.james.imap.api.Tag;
+import org.apache.james.imap.message.MailboxName;
+import org.apache.james.mailbox.model.MailboxACL;
 
 import com.google.common.base.MoreObjects;
 
@@ -28,35 +30,29 @@ import com.google.common.base.MoreObjects;
  * SETACL Request.
  */
 public class SetACLRequest extends AbstractImapRequest {
-    private final String identifier;
-    private final String mailboxName;
-    private final String rights;
 
-    public SetACLRequest(Tag tag, String mailboxName, String identifier, String rights) {
+    private final MailboxName mailboxName;
+    private final MailboxACL.ACLCommand aclCommand;
+
+    public SetACLRequest(Tag tag, MailboxName mailboxName, MailboxACL.ACLCommand aclCommand) {
         super(tag, ImapConstants.SETACL_COMMAND);
         this.mailboxName = mailboxName;
-        this.identifier = identifier;
-        this.rights = rights;
+        this.aclCommand = aclCommand;
     }
 
-    public String getIdentifier() {
-        return identifier;
-    }
-
-    public String getMailboxName() {
+    public MailboxName getMailboxName() {
         return mailboxName;
     }
 
-    public String getRights() {
-        return rights;
+    public MailboxACL.ACLCommand getAclCommand() {
+        return aclCommand;
     }
 
     @Override
     public String toString() {
         return MoreObjects.toStringHelper(this)
-            .add("identifier", identifier)
             .add("mailboxName", mailboxName)
-            .add("rights", rights)
+            .add("ACL command", aclCommand)
             .toString();
     }
 }

@@ -17,6 +17,7 @@ Changes to apply between 3.8.x and 3.9.0 will be reported here.
 
 Change list:
 
+ - [JAMES-4046 Refactor and update apache-james-mailbox-lucene](#james-4046-refactor-and-update-apache-james-mailbox-lucene)
  - [Imap Packages](#imap-packages)
  - [Jmap uploads](#jmap-uploads)
  - [Mutualize quota table](#mutualize-quota-table)
@@ -32,6 +33,87 @@ Change list:
  - [Make all queues on RabbitMQ quorum queue when `quorum.queues.enable=true`](#make-all-queues-on-rabbitmq-quorum-queue-when-quorumqueuesenabletrue)
  - [Migrate RabbitMQ classic queues to version 2](#migrate-rabbitmq-classic-queues-to-version-2)
  - [JAMES-3946 White list removals](#james-3946-white-list-removals)
+ - [JAMES-4052 Details in quota index](#james-4052-details-in-quota-index)
+
+### JAMES-4052 Details in quota index and mailbox user
+
+Date: 23/07/2024
+
+JIRA: https://issues.apache.org/jira/browse/JAMES-4052
+
+In order to build a comprehensive view for quotas using OpenSearch dashboard, the quota document indexed was enriched 
+to include quota details.
+
+As the OpenSearch mapping was changed, one can either:
+
+ - Add the missing fields:
+
+```
+curl -X PUT \
+  http://ip:port/quota_ratio_v1/_mapping \
+  -H 'Content-Type: application/json' \
+  -d "{
+	\"properties\": {
+		\"sizeUsed\": {
+			\"type\": \"long\",
+		},
+		\"countUsed\": {
+			\"type\": \"long\",
+		},
+		\"sizeLimit\": {
+			\"type\": \"long\",
+		},
+		\"countLimit\": {
+			\"type\": \"long\",
+		},
+		\"date\": {
+			\"type\": \"date\",
+			\"format\": \"uuuu-MM-dd'T'HH:mm:ssX||uuuu-MM-dd'T'HH:mm:ssXXX||uuuu-MM-dd'T'HH:mm:ssXXXXX\"
+		}
+	}
+}"
+```
+
+ - Or consider this non-critical data and just start with a fresh index, which could be achieved with the following configuration:
+
+```
+opensearch.index.quota.ratio.name=james-quota-ratio-v2
+opensearch.alias.read.quota.ratio.name=james-quota-ratio-read-v2
+opensearch.alias.write.quota.ratio.name=james-quota-ratio-write-v2
+```
+
+We also added an optional field to the mailbox mapping for `user`. It allows doing per user analysis in OpenSearch dashboards.
+
+In order to activate that field, include in `opensearch.properties`: 
+
+```
+opensearch.indexUser=true
+```
+
+And create the field:
+
+```
+curl -X PUT \
+  http://ip:port/mailbox_v2/_mapping \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "properties": {
+        "user": {
+            "type": "keyword"
+        }
+    }
+}'
+```
+
+### JAMES-4046 Refactor and update apache-james-mailbox-lucene
+
+Date: 16/08/2024
+
+JIRA: https://issues.apache.org/jira/browse/JAMES-4046
+
+Lucene was upgraded from version 3 to version 9. Automatic upgrade is not supported with such a big upgrade thus it's required to delete/drop Lucene (file) index altogether and recreate it. 
+
+Index recreation can be done with [ReIndexing all mails REST API](https://james.apache.org/server/manage-webadmin.html#ReIndexing_all_mails)
 
 ### JAMES-3946 White list removals
 

@@ -29,8 +29,8 @@ import jakarta.mail.internet.MimeMessage;
 
 import org.apache.james.blob.api.BlobId;
 import org.apache.james.blob.api.BlobStore;
-import org.apache.james.blob.api.HashBlobId;
 import org.apache.james.blob.api.ObjectNotFoundException;
+import org.apache.james.blob.api.PlainBlobId;
 import org.apache.james.blob.api.Store;
 import org.apache.james.blob.memory.MemoryBlobStoreFactory;
 import org.apache.james.core.builder.MimeMessageBuilder;
@@ -42,7 +42,7 @@ import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Mono;
 
 class MimeMessageStoreTest {
-    private static final HashBlobId.Factory BLOB_ID_FACTORY = new HashBlobId.Factory();
+    private static final PlainBlobId.Factory BLOB_ID_FACTORY = new PlainBlobId.Factory();
 
     private Store<MimeMessage, MimeMessagePartsId> testee;
     private BlobStore blobStore;
@@ -105,8 +105,8 @@ class MimeMessageStoreTest {
     @Test
     void deleteShouldNotThrowWhenCalledOnNonExistingData() throws Exception {
         MimeMessagePartsId parts = MimeMessagePartsId.builder()
-            .headerBlobId(BLOB_ID_FACTORY.randomId())
-            .bodyBlobId(BLOB_ID_FACTORY.randomId())
+            .headerBlobId(BLOB_ID_FACTORY.of("NON_EXISTING_HEADER_BLOB_ID"))
+            .bodyBlobId(BLOB_ID_FACTORY.of("NON_EXISTING_BODY_BLOB_ID"))
             .build();
 
         assertThatCode(() -> Mono.from(testee.delete(parts)).block())

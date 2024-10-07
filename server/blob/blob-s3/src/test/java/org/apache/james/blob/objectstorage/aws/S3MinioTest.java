@@ -29,14 +29,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.net.URI;
-import java.nio.charset.StandardCharsets;
 import java.util.Optional;
 
-import org.apache.commons.lang3.RandomStringUtils;
 import org.apache.james.blob.api.BlobId;
 import org.apache.james.blob.api.BlobStoreDAO;
 import org.apache.james.blob.api.BlobStoreDAOContract;
-import org.apache.james.blob.api.HashBlobId;
 import org.apache.james.blob.api.TestBlobId;
 import org.apache.james.metrics.api.NoopGaugeRegistry;
 import org.apache.james.metrics.tests.RecordingMetricFactory;
@@ -48,7 +45,6 @@ import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
-import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.util.retry.Retry;
 import software.amazon.awssdk.services.s3.model.S3Exception;
@@ -61,6 +57,8 @@ public class S3MinioTest implements BlobStoreDAOContract {
     private static final String MINIO_IMAGE_FULL = MINIO_IMAGE + ":" + MINIO_TAG;
     private static final int MINIO_PORT = 9000;
     private static S3BlobStoreDAO testee;
+
+    private static S3ClientFactory s3ClientFactory;
 
     @Container
     private static final GenericContainer<?> minioContainer = new GenericContainer<>(MINIO_IMAGE_FULL)
@@ -86,12 +84,13 @@ public class S3MinioTest implements BlobStoreDAOContract {
                 .filter(UPLOAD_RETRY_EXCEPTION_PREDICATE)))
             .build();
 
-        testee = new S3BlobStoreDAO(s3Configuration, new TestBlobId.Factory(), new RecordingMetricFactory(), new NoopGaugeRegistry());
+        s3ClientFactory = new S3ClientFactory(s3Configuration, new RecordingMetricFactory(), new NoopGaugeRegistry());
+        testee = new S3BlobStoreDAO(s3ClientFactory, s3Configuration, new TestBlobId.Factory());
     }
 
     @AfterAll
     static void tearDownClass() {
-        testee.close();
+        s3ClientFactory.close();
     }
 
     @AfterEach
@@ -116,17 +115,5 @@ public class S3MinioTest implements BlobStoreDAOContract {
     void saveShouldWorkWhenValidBlobId() {
         Mono.from(testee.save(TEST_BUCKET_NAME, TEST_BLOB_ID, SHORT_BYTEARRAY)).block();
         assertThat(Mono.from(testee.readBytes(TEST_BUCKET_NAME, TEST_BLOB_ID)).block()).isEqualTo(SHORT_BYTEARRAY);
-    }
-
-    @Test
-    void saveShouldWorkForAllPayloadsWithHash() {
-        Flux.range(0, 1000)
-            .concatMap(i -> {
-                byte[] payload = RandomStringUtils.random(128).getBytes(StandardCharsets.UTF_8);
-                BlobId blobId = new HashBlobId.Factory().forPayload(payload);
-                return testee.save(TEST_BUCKET_NAME, blobId, payload);
-            })
-            .then()
-            .block();
     }
 }

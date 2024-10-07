@@ -21,9 +21,10 @@ package org.apache.james.rate.limiter
 
 import java.time.Duration
 
-import org.apache.james.backends.redis.{RedisConfiguration, DockerRedis, RedisExtension, StandaloneRedisConfiguration}
+import org.apache.james.backends.redis.{DockerRedis, RedisClientFactory, RedisConfiguration, RedisExtension, StandaloneRedisConfiguration}
 import org.apache.james.rate.limiter.api.{RateLimiterContract, RateLimiterFactory}
 import org.apache.james.rate.limiter.redis.RedisRateLimiterFactory
+import org.apache.james.server.core.filesystem.FileSystemImpl
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.extension.ExtendWith
 
@@ -37,7 +38,7 @@ class RedisRateLimiterTest extends RateLimiterContract {
     redisRateLimiterConfiguration = StandaloneRedisConfiguration.from(redis.redisURI().toString)
   }
 
-  override def testee(): RateLimiterFactory = new RedisRateLimiterFactory(redisRateLimiterConfiguration)
+  override def testee(): RateLimiterFactory = new RedisRateLimiterFactory(redisRateLimiterConfiguration, new RedisClientFactory(FileSystemImpl.forTesting()))
 
   override def sleep(duration: Duration): Unit = Thread.sleep(duration.toMillis)
 }

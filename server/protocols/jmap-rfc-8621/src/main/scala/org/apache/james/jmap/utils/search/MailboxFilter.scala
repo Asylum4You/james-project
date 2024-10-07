@@ -250,7 +250,9 @@ object MailboxFilter {
               SearchQuery.address(AddressType.Bcc, text.value),
               SearchQuery.address(AddressType.From, text.value),
               SearchQuery.subject(text.value),
-              SearchQuery.bodyContains(text.value))
+              SearchQuery.bodyContains(text.value),
+              SearchQuery.attachmentContains(text.value),
+              SearchQuery.attachmentFileName(text.value))
             .asJava)))
         case None => Right(Nil)
       }

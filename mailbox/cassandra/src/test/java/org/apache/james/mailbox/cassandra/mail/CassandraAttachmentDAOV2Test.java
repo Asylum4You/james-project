@@ -27,7 +27,7 @@ import java.util.Optional;
 import org.apache.james.backends.cassandra.CassandraCluster;
 import org.apache.james.backends.cassandra.CassandraClusterExtension;
 import org.apache.james.blob.api.BlobId;
-import org.apache.james.blob.api.HashBlobId;
+import org.apache.james.blob.api.PlainBlobId;
 import org.apache.james.mailbox.cassandra.ids.CassandraMessageId;
 import org.apache.james.mailbox.cassandra.mail.CassandraAttachmentDAOV2.DAOAttachment;
 import org.apache.james.mailbox.cassandra.modules.CassandraAttachmentModule;
@@ -42,7 +42,7 @@ import com.datastax.oss.driver.api.core.uuid.Uuids;
 class CassandraAttachmentDAOV2Test {
     private static final StringBackedAttachmentId ATTACHMENT_ID = StringBackedAttachmentId.from("id1");
     private static final StringBackedAttachmentId ATTACHMENT_ID_2 = StringBackedAttachmentId.from("id2");
-    private static final HashBlobId.Factory BLOB_ID_FACTORY = new HashBlobId.Factory();
+    private static final PlainBlobId.Factory BLOB_ID_FACTORY = new PlainBlobId.Factory();
 
     @RegisterExtension
     static CassandraClusterExtension cassandraCluster = new CassandraClusterExtension(CassandraAttachmentModule.MODULE);
@@ -79,7 +79,7 @@ class CassandraAttachmentDAOV2Test {
             .type("application/json")
             .size(4)
             .build();
-        BlobId blobId = BLOB_ID_FACTORY.from("blobId");
+        BlobId blobId = BLOB_ID_FACTORY.parse("blobId");
         DAOAttachment daoAttachment = CassandraAttachmentDAOV2.from(attachment, blobId);
         testee.storeAttachment(daoAttachment).block();
 
@@ -96,7 +96,7 @@ class CassandraAttachmentDAOV2Test {
             .type("application/json")
             .size(36)
             .build();
-        BlobId blobId = BLOB_ID_FACTORY.from("blobId");
+        BlobId blobId = BLOB_ID_FACTORY.parse("blobId");
         DAOAttachment daoAttachment = CassandraAttachmentDAOV2.from(attachment, blobId);
         testee.storeAttachment(daoAttachment).block();
 
@@ -121,7 +121,7 @@ class CassandraAttachmentDAOV2Test {
             .messageId(CassandraMessageId.Factory.of(Uuids.timeBased()))
             .size(36)
             .build();
-        BlobId blobId1 = BLOB_ID_FACTORY.from("blobId");
+        BlobId blobId1 = BLOB_ID_FACTORY.parse("blobId");
         DAOAttachment daoAttachment1 = CassandraAttachmentDAOV2.from(attachment1, blobId1);
         testee.storeAttachment(daoAttachment1).block();
 
@@ -131,7 +131,7 @@ class CassandraAttachmentDAOV2Test {
             .messageId(CassandraMessageId.Factory.of(Uuids.timeBased()))
             .size(36)
             .build();
-        BlobId blobId2 = BLOB_ID_FACTORY.from("blobId");
+        BlobId blobId2 = BLOB_ID_FACTORY.parse("blobId");
         DAOAttachment daoAttachment2 = CassandraAttachmentDAOV2.from(attachment2, blobId2);
         testee.storeAttachment(daoAttachment2).block();
 
@@ -147,7 +147,7 @@ class CassandraAttachmentDAOV2Test {
             .messageId(CassandraMessageId.Factory.of(Uuids.timeBased()))
             .size(36)
             .build();
-        BlobId blobId = BLOB_ID_FACTORY.from("blobId");
+        BlobId blobId = BLOB_ID_FACTORY.parse("blobId");
         DAOAttachment daoAttachment1 = CassandraAttachmentDAOV2.from(attachment1, blobId);
         testee.storeAttachment(daoAttachment1).block();
 

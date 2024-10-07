@@ -22,11 +22,12 @@ import static org.apache.james.backends.cassandra.Scenario.Builder.fail;
 import static org.assertj.core.api.Assertions.assertThatCode;
 
 import java.time.Duration;
+import java.util.UUID;
 
 import org.apache.james.backends.cassandra.CassandraCluster;
 import org.apache.james.backends.cassandra.CassandraClusterExtension;
 import org.apache.james.blob.api.BlobId;
-import org.apache.james.blob.api.HashBlobId;
+import org.apache.james.blob.api.PlainBlobId;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
@@ -42,11 +43,11 @@ class CassandraBlobStoreCacheTest implements BlobStoreCacheContract {
     private static final Duration _2_SEC_TTL = Duration.ofSeconds(2);
 
     private BlobStoreCache testee;
-    private HashBlobId.Factory blobIdFactory;
+    private PlainBlobId.Factory blobIdFactory;
 
     @BeforeEach
     void setUp(CassandraCluster cassandra) {
-        blobIdFactory = new HashBlobId.Factory();
+        blobIdFactory = new PlainBlobId.Factory();
         CassandraCacheConfiguration cacheConfiguration = new CassandraCacheConfiguration.Builder()
             .sizeThresholdInBytes(DEFAULT_THRESHOLD_IN_BYTES)
             .ttl(_2_SEC_TTL)
@@ -70,7 +71,7 @@ class CassandraBlobStoreCacheTest implements BlobStoreCacheContract {
             .forever()
             .whenQueryStartsWith("INSERT INTO blob_cache"));
 
-        BlobId blobId = blobIdFactory().randomId();
+        BlobId blobId = blobIdFactory().of(UUID.randomUUID().toString());
 
         assertThatCode(() -> Mono.from(testee.cache(blobId, EIGHT_KILOBYTES)).block())
             .doesNotThrowAnyException();

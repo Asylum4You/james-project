@@ -122,6 +122,63 @@ Response codes:
  - 200: All checks have answered with a Healthy or Degraded status. James services can still be used.
  - 503: At least one check have answered with a Unhealthy status
 
+Additional query parameters are supported:
+
+- `strict` allows you enable the strict mode. In this mode, if any checks have the result of Degraded or Unhealthy status, the response code will be 503. If omitted, degraded checks would be reported with status code 200.
+
+```
+curl -XGET http://ip:port/healthcheck?strict
+```
+
+### Check specific components
+
+Performs health checks for the given components. Components are referenced by their URL encoded names.
+
+```
+curl -XGET http://ip:port/healthcheck?check=HealthCheck1&check=HealthCheck%20two
+```
+
+Will return a list of healthChecks execution result, with an aggregated result:
+
+```
+{
+  "status": "healthy",
+  "checks": [
+    {
+      "componentName": "HealthCheck1",
+      "escapedComponentName": "HealthCheck1",
+      "status": "healthy"
+      "cause": null
+    },
+    {
+      "componentName": "HealthCheck two",
+      "escapedComponentName": "HealthCheck%20two",
+      "status": "healthy"
+      "cause": null
+    }
+  ]
+}
+```
+
+*status* field can be:
+
+* *healthy*: Component works normally
+* *degraded*: Component works in degraded mode. Some non-critical services may not be working, or latencies are high, for example. Cause contains explanations.
+* *unhealthy*: The component is currently not working. Cause contains explanations.
+
+Response codes:
+
+* 200: All checks have answered with a Healthy or Degraded status. James services can still be used.
+* 503: At least one check have answered with a Unhealthy status
+
+Additional query parameters are supported:
+
+- `strict` allows you enable the strict mode. In this mode, if any checks have the result of Degraded or Unhealthy status, the response code will be 503. If omitted, degraded checks would be reported with status code 200.
+
+```
+curl -XGET http://ip:port/healthcheck?strict&check=HealthCheck1&check=HealthCheck%20two
+```
+
 ### Check single component
 
 Performs a health check for the given component. The component is referenced by its URL encoded name.
@@ -146,6 +203,14 @@ Response codes:
  - 200: The check has answered with a Healthy or Degraded status.
  - 404: A component with the given name was not found.
  - 503: The check has anwered with a Unhealthy status.
+
+Additional query parameters are supported:
+
+- `strict` allows you enable the strict mode. In this mode, if any checks have the result of Degraded or Unhealthy status, the response code will be 503. If omitted, degraded checks would be reported with status code 200.
+
+```
+curl -XGET http://ip:port/healthcheck/checks/{backend-name}%20backend?strict
+```
  
 ### List all health checks
  
@@ -791,6 +856,69 @@ firewall rules.
 
 Due to all of those risks, a `I-KNOW-WHAT-I-M-DOING` header should be positioned to `ALL-SERVICES-ARE-OFFLINE` in order 
 to prevent accidental calls.
+
+
+#### Fixing mailboxes flag inconsistencies
+
+##### Fixing mailbox messages deleted flag inconsistencies
+
+This task is only available on top of Guice Cassandra products.
+
+```bash
+curl -XPOST /messages?task=SolveMessageDeletedInconsistencies
+```
+
+Will schedule a task for fixing mailbox messages `deleted` flag inconsistencies created by the
+mailbox denormalization process.
+
+Response codes:
+
+* 201: Success. Corresponding task id is returned.
+* 400: Error in the request. Details can be found in the reported error.
+
+The scheduled task will have the following type
+`solve-mailbox-flag-inconsistencies` and the following
+`additionalInformation` example:
+
+```json
+{
+"timestamp": "2024-09-17T04:58:33.683813161Z",
+"type": "solve-mailbox-flag-inconsistencies",
+"processedMailboxEntries": 1,
+"errors": ["551f0580-82fb-11ea-970e-f9c83d4cf8c2"],
+"targetFlag": "DELETED"
+}
+```
+
+##### Fixing mailbox messages recent flag inconsistencies
+
+This task is only available on top of Guice Cassandra products.
+
+```bash
+curl -XPOST /messages?task=SolveMessageRecentInconsistencies
+```
+
+Will schedule a task for fixing mailbox messages `recent` flag inconsistencies created by the
+mailbox denormalization process.
+
+Response codes:
+
+* 201: Success. Corresponding task id is returned.
+* 400: Error in the request. Details can be found in the reported error.
+
+The scheduled task will have the following type
+`solve-mailbox-flag-inconsistencies` and the following
+`additionalInformation` example:
+
+```json
+{
+"timestamp": "2024-09-17T04:59:10.042097161Z",
+"type": "solve-mailbox-flag-inconsistencies",
+"processedMailboxEntries": 2,
+"errors": ["551f0580-82fb-11ea-970e-f9c83d4cf8c2"],
+"targetFlag": "RECENT"
+}
+```
 
 #### Recomputing mailbox counters
 

@@ -22,6 +22,7 @@ package org.apache.james.queue.pulsar;
 import static org.apache.james.queue.api.Mails.defaultMail;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -35,7 +36,7 @@ import org.apache.james.backends.pulsar.DockerPulsarExtension;
 import org.apache.james.backends.pulsar.PulsarClients;
 import org.apache.james.backends.pulsar.PulsarConfiguration;
 import org.apache.james.blob.api.BucketName;
-import org.apache.james.blob.api.HashBlobId;
+import org.apache.james.blob.api.PlainBlobId;
 import org.apache.james.blob.api.Store;
 import org.apache.james.blob.mail.MimeMessagePartsId;
 import org.apache.james.blob.mail.MimeMessageStore;
@@ -68,7 +69,6 @@ import com.github.fge.lambdas.Throwing;
 import com.sksamuel.pulsar4s.ConsumerMessage;
 
 import reactor.core.publisher.Flux;
-import reactor.core.publisher.Mono;
 import scala.jdk.javaapi.OptionConverters;
 
 @Tag(Unstable.TAG)
@@ -78,7 +78,7 @@ public class PulsarMailQueueTest implements MailQueueContract, MailQueueMetricCo
     int maxConcurrency = 10;
     PulsarMailQueue mailQueue;
 
-    private HashBlobId.Factory blobIdFactory;
+    private PlainBlobId.Factory blobIdFactory;
     private Store<MimeMessage, MimeMessagePartsId> mimeMessageStore;
     private MailQueueItemDecoratorFactory factory;
     private MailQueueName mailQueueName;
@@ -91,7 +91,7 @@ public class PulsarMailQueueTest implements MailQueueContract, MailQueueMetricCo
     @BeforeEach
     void setUp(DockerPulsarExtension.DockerPulsar pulsar, MailQueueMetricExtension.MailQueueMetricTestSystem metricTestSystem) {
         this.metricTestSystem = metricTestSystem;
-        blobIdFactory = new HashBlobId.Factory();
+        blobIdFactory = new PlainBlobId.Factory();
 
         memoryBlobStore = new MemoryBlobStoreDAO();
         PassThroughBlobStore blobStore = new PassThroughBlobStore(memoryBlobStore, BucketName.DEFAULT, blobIdFactory);
@@ -150,7 +150,6 @@ public class PulsarMailQueueTest implements MailQueueContract, MailQueueMetricCo
                 system);
     }
 
-    @Disabled("JAMES-3700 We need to define a deadletter policy for the Pulsar MailQueue")
     @Test
     void badMessagesShouldNotAlterDelivery(DockerPulsarExtension.DockerPulsar pulsar) throws Exception {
         new JavaClient(pulsar.getConfiguration().brokerUri(),
@@ -161,11 +160,10 @@ public class PulsarMailQueueTest implements MailQueueContract, MailQueueMetricCo
                 .name("name")
                 .build());
 
-        MailQueue.MailQueueItem mail = Flux.from(getMailQueue().deQueue()).onErrorResume(e -> Mono.empty()).take(1).single().block();
+        MailQueue.MailQueueItem mail = Flux.from(getMailQueue().deQueue()).take(1).single().block();
         assertThat(mail.getMail().getName()).isEqualTo("name");
     }
 
-    @Disabled("JAMES-3700 We need to define a deadletter policy for the Pulsar MailQueue")
     @Test
     void badMessagesShouldBeMovedToADeadLetterTopic(DockerPulsarExtension.DockerPulsar pulsar) throws Exception {
         new JavaClient(pulsar.getConfiguration().brokerUri(),
@@ -176,13 +174,18 @@ public class PulsarMailQueueTest implements MailQueueContract, MailQueueMetricCo
                 .name("name")
                 .build());
 
-        try {
-            Flux.from(getMailQueue().deQueue()).take(1).single().block();
-        } catch (Exception e) {
-            // Expected to fail
-        }
+        getMailQueue().enQueue(defaultMail()
+                .name("name2")
+                .build());
+
+        Flux.from(getMailQueue().deQueue())
+                .delayElements(Duration.ofSeconds(3)) // retry is configured to 1 second
+                .take(2) // we need to have 1 retry before BAD goes to DLQ
+                .collectList()
+                .block();
+
         Optional<String> deadletterMessage = OptionConverters.toJava(new JavaClient(pulsar.getConfiguration().brokerUri(),
-                        String.format("persistent://%s/James-%s/dead-letter", pulsar.getConfiguration().namespace().asString(), mailQueueName.asString()))
+                        String.format("persistent://%s/James-%s-subscription-%s-DLQ", pulsar.getConfiguration().namespace().asString(), mailQueueName.asString(), mailQueueName.asString()))
                         .consumeOne())
                 .map(ConsumerMessage::value);
         assertThat(deadletterMessage).contains("BAD");
@@ -209,6 +212,8 @@ public class PulsarMailQueueTest implements MailQueueContract, MailQueueMetricCo
         Awaitility.await().untilAsserted(() ->
                 assertThat(Flux.merge(Flux.from(secondQueue.deQueue()), Flux.from(getManageableMailQueue().deQueue())).blockFirst().getMail().getName())
                         .isEqualTo("namez"));
+
+        secondQueue.close();
     }
 
     @Test
