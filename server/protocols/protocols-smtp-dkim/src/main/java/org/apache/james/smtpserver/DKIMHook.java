@@ -26,9 +26,13 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Predicate;
+import java.util.stream.Stream;
 
 import jakarta.inject.Inject;
+import jakarta.mail.Address;
 import jakarta.mail.MessagingException;
+import jakarta.mail.internet.AddressException;
+import jakarta.mail.internet.InternetAddress;
 
 import org.apache.commons.configuration2.Configuration;
 import org.apache.james.core.Domain;
@@ -41,11 +45,14 @@ import org.apache.james.jdkim.mailets.DKIMVerifier;
 import org.apache.james.protocols.smtp.SMTPSession;
 import org.apache.james.protocols.smtp.hook.HookResult;
 import org.apache.james.protocols.smtp.hook.HookReturnCode;
+import org.apache.james.util.StreamUtils;
 import org.apache.mailet.Mail;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 
 /**
@@ -84,12 +91,50 @@ public class DKIMHook implements JamesMessageHook {
 
     @FunctionalInterface
     interface DKIMCheckNeeded extends Predicate<Mail> {
+        static DKIMCheckNeeded or(ImmutableList<DKIMCheckNeeded> checkNeededs) {
+            return mail -> checkNeededs.stream()
+                .anyMatch(predicate -> predicate.test(mail));
+        }
+
         static DKIMCheckNeeded onlyForSenderDomain(Domain domain) {
             return mail -> mail.getMaybeSender()
                 .asOptional()
                 .map(MailAddress::getDomain)
                 .map(domain::equals)
                 .orElse(false);
+        }
+
+        static DKIMCheckNeeded onlyForHeaderFromDomain(Domain domain) {
+            return mail -> {
+                try {
+                    return StreamUtils.ofNullable(mail.getMessage().getFrom())
+                        .distinct()
+                        .flatMap(DKIMCheckNeeded::parseMailAddress)
+                        .findFirst()
+                        .map(MailAddress::getDomain)
+                        .map(domain::equals)
+                        .orElse(false);
+                } catch (MessagingException me) {
+                    try {
+                        LOGGER.info("Unable to parse the \"FROM\" header {}; ignoring.", mail.getMessage().getHeader("From"));
+                    } catch (MessagingException e) {
+                        LOGGER.info("Unable to parse the \"FROM\" header; ignoring.");
+                    }
+                }
+                return false;
+            };
+        }
+
+        private static Stream<MailAddress> parseMailAddress(Address from) {
+            if (from instanceof InternetAddress internetAddress) {
+                try {
+                    return Stream.of(new MailAddress(internetAddress.getAddress()));
+                } catch (AddressException e) {
+                    // Never happens as valid InternetAddress are valid MailAddress
+                    throw new RuntimeException(e);
+                }
+            }
+            return Stream.empty();
         }
 
         DKIMCheckNeeded ALL = any -> true;
@@ -142,30 +187,54 @@ public class DKIMHook implements JamesMessageHook {
     }
 
     public static class Config {
+        public static final ImmutableList<ValidatedEntity> DEFAULT_VALIDATED_ENTITIES = ImmutableList.of(ValidatedEntity.envelope, ValidatedEntity.headers);
+
         public static Config parse(Configuration config) {
             return new Config(
                 config.getBoolean("forceCRLF", true),
                 config.getBoolean("signatureRequired", true),
                 Optional.ofNullable(config.getString("onlyForSenderDomain", null))
                     .map(Domain::of),
+                Optional.ofNullable(config.getString("validatedEntities", null))
+                    .map(entities -> Stream.of(entities.split(","))
+                        .map(ValidatedEntity::from)
+                        .collect(ImmutableList.toImmutableList()))
+                    .orElse(DEFAULT_VALIDATED_ENTITIES),
                 Optional.ofNullable(config.getString("expectedDToken", null)));
+        }
+
+        public enum ValidatedEntity {
+            envelope,
+            headers;
+
+            static ValidatedEntity from(String rawValue) {
+                Preconditions.checkNotNull(rawValue);
+
+                return Stream.of(values())
+                    .filter(entity -> entity.name().equalsIgnoreCase(rawValue))
+                    .findAny()
+                    .orElseThrow(() -> new IllegalArgumentException(String.format("invalid validated entity '%s'", rawValue)));
+            }
         }
 
         private final boolean forceCRLF;
         private final boolean signatureRequired;
         private final Optional<Domain> onlyForSenderDomain;
+        private final ImmutableList<ValidatedEntity> validatedEntities;
         private final Optional<String> expectedDToken;
 
-        public Config(boolean forceCRLF, boolean signatureRequired, Optional<Domain> onlyForSenderDomain, Optional<String> expectedDToken) {
+        public Config(boolean forceCRLF, boolean signatureRequired, Optional<Domain> onlyForSenderDomain,
+                      ImmutableList<ValidatedEntity> validatedEntities, Optional<String> expectedDToken) {
             this.forceCRLF = forceCRLF;
             this.signatureRequired = signatureRequired;
             this.onlyForSenderDomain = onlyForSenderDomain;
+            this.validatedEntities = validatedEntities;
             this.expectedDToken = expectedDToken;
         }
 
         DKIMCheckNeeded dkimCheckNeeded() {
             return onlyForSenderDomain
-                .map(DKIMCheckNeeded::onlyForSenderDomain)
+                .map(domain -> DKIMCheckNeeded.or(computeDKIMChecksNeeded(domain)))
                 .orElse(DKIMCheckNeeded.ALL);
         }
 
@@ -176,12 +245,26 @@ public class DKIMHook implements JamesMessageHook {
                     .orElse(SignatureRecordValidation.ALLOW_ALL));
         }
 
+        private ImmutableList<DKIMCheckNeeded> computeDKIMChecksNeeded(Domain domain) {
+            return validatedEntities.stream()
+                .map(entity -> toDKIMCheck(entity, domain))
+                .collect(ImmutableList.toImmutableList());
+        }
+
+        private DKIMCheckNeeded toDKIMCheck(ValidatedEntity entity, Domain domain) {
+            return switch (entity) {
+                case envelope ->  DKIMCheckNeeded.onlyForSenderDomain(domain);
+                case headers -> DKIMCheckNeeded.onlyForHeaderFromDomain(domain);
+            };
+        }
+
         @Override
         public final boolean equals(Object o) {
             if (o instanceof Config config) {
                 return forceCRLF == config.forceCRLF
                     && signatureRequired == config.signatureRequired
                     && Objects.equals(onlyForSenderDomain, config.onlyForSenderDomain)
+                    && Objects.equals(validatedEntities, config.validatedEntities)
                     && Objects.equals(expectedDToken, config.expectedDToken);
             }
             return false;
@@ -189,7 +272,7 @@ public class DKIMHook implements JamesMessageHook {
 
         @Override
         public final int hashCode() {
-            return Objects.hash(forceCRLF, signatureRequired, onlyForSenderDomain, expectedDToken);
+            return Objects.hash(forceCRLF, signatureRequired, onlyForSenderDomain, validatedEntities, expectedDToken);
         }
     }
 
@@ -215,6 +298,9 @@ public class DKIMHook implements JamesMessageHook {
 
     @Override
     public HookResult onMessage(SMTPSession session, Mail mail) {
+        if (session.isRelayingAllowed()) {
+            return HookResult.DECLINED;
+        }
         if (!dkimCheckNeeded.test(mail)) {
             return HookResult.DECLINED;
         }

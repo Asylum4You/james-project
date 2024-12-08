@@ -21,6 +21,7 @@ package org.apache.james.protocols.smtp.core.esmtp;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Locale;
 
 import jakarta.inject.Inject;
 
@@ -81,7 +82,7 @@ public class EhloCmdHandler extends AbstractHookableCmdHandler<HeloHook> impleme
      */
     private Response doEHLO(SMTPSession session, String argument) {
         if (!isValid(argument)) {
-            LOGGER.error("Invalid EHLO argument received: {}. Must be a domain name or an IP address.", argument);
+            LOGGER.error("Invalid EHLO argument received: {} which must be a domain name or an IP address.", argument);
             return new SMTPResponse(SMTPRetCode.SYNTAX_ERROR_ARGUMENTS,
                 DSNStatus.getStatus(DSNStatus.PERMANENT, DSNStatus.DELIVERY_SYNTAX) + " Invalid domain name or ip supplied as HELO argument");
         }
@@ -132,7 +133,7 @@ public class EhloCmdHandler extends AbstractHookableCmdHandler<HeloHook> impleme
     }
 
     private static String removeEmIPV6Prefix(String ipv6) {
-        if (ipv6.startsWith("IPv6:")) {
+        if (ipv6.toLowerCase(Locale.US).startsWith("ipv6:")) {
             ipv6 = ipv6.substring(5);
         }
         return ipv6;

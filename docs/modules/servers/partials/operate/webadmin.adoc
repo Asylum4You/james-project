@@ -647,6 +647,18 @@ Response codes:
 
 * 200: The user name list was successfully retrieved
 
+Additional query parameters are supported:
+
+- `hasNoMailboxes` allows you to select users who don't have any mailboxes (also means that they have never logged in and received any emails).
+....
+curl -XGET http://ip:port/users?hasNoMailboxes
+....
+
+- `hasNotAllSystemMailboxes` allows you to select users who don't have enough system mailboxes (also means that they have never logged in but received some emails).
+....
+curl -XGET http://ip:port/users?hasNotAllSystemMailboxes
+....
+
 === Retrieving the list of allowed `From` headers for a given user
 
 This endpoint allows to know which From headers a given user is allowed to use when sending mails.
@@ -2566,6 +2578,163 @@ curl -XDELETE http://ip:port/quota/size
 Response codes:
 
 * 204: The quota has been updated to unlimited value.
+
+=== Administrating DropLists
+
+The DropList, also known as the mail blacklist, is a collection of
+domains and email addresses that are denied from sending emails within the system.
+
+Owner scopes:
+
+- *global*: contains entries that are blocked across all domains and addresses within the system.
+Entries in the global owner scope apply universally and affect all users and domains.
+- *domain*: each domain can have its own droplist, which contains entries specific to that domain.
+- *user*: allow to customize personalized droplist of blocked domains and email addresses.
+
+The `deniedEntityType` query parameter is optional and can take the values `domain` or `address`.
+
+==== Getting the DropList
+
+===== Global DropList
+
+....
+curl -XGET http://ip:port/droplist/global?deniedEntityType=null|domain|address
+....
+
+===== Domain DropList
+
+....
+curl -XGET http://ip:port/droplist/domain/target.com?deniedEntityType=null|domain|address
+....
+
+===== User DropList
+
+....
+curl -XGET http://ip:port/droplist/user/tagret@target.com?deniedEntityType=null|domain|address
+....
+
+The answer looks like:
+
+....
+[ "evil.com", "devil.com", "bad_guy@crime.com", "hacker@murder.org" ]
+....
+
+Response codes:
+
+* 200: The drop list was successfully retrieved
+* 400: Invalid `owner scope` or `deniedEntityType`
+
+==== Testing a denied entity existence
+
+===== Global DropList
+
+....
+curl -XHEAD http://ip:port/droplist/global/attacker@evil.com
+....
+
+....
+curl -XHEAD http://ip:port/droplist/global/evil.com
+....
+
+===== Domain DropList
+
+....
+curl -XHEAD http://ip:port/droplist/domain/target.com/attacker@evil.com
+....
+
+....
+curl -XHEAD http://ip:port/droplist/domain/target.com/evil.com
+....
+
+===== User DropList
+
+....
+curl -XHEAD http://ip:port/droplist/user/target@target.com/attacker@evil.com
+....
+
+....
+curl -XHEAD http://ip:port/droplist/user/target@target.com/evil.com
+....
+
+Response codes:
+
+* 200: The denied entity exists
+* 404: The denied entity does not exist
+
+==== Add Entry to the DropList
+
+The denied entity must be a valid email address or link:#_create_a_domain[domain].
+
+===== Global DropList
+
+....
+curl -XPUT http://ip:port/droplist/global/attacker@evil.com
+....
+
+....
+curl -XPUT http://ip:port/droplist/global/evil.com
+....
+
+===== Domain DropList
+
+....
+curl -XPUT http://ip:port/droplist/domain/target.com/attacker@evil.com
+....
+
+....
+curl -XPUT http://ip:port/droplist/domain/target.com/evil.com
+....
+
+===== User DropList
+
+....
+curl -XPUT http://ip:port/droplist/user/target@target.com/attacker@evil.com
+....
+
+....
+curl -XPUT http://ip:port/droplist/user/target@target.com/evil.com
+....
+
+Response codes:
+
+* 204: The denied entity was successfully added
+* 400: The denied entity is invalid
+
+==== Remove Entry from the DropList
+
+===== Global DropList
+
+....
+curl -XDELETE http://ip:port/droplist/global/attacker@evil.com
+....
+
+....
+curl -XDELETE http://ip:port/droplist/global/evil.com
+....
+
+===== Domain DropList
+
+....
+curl -XDELETE http://ip:port/droplist/domain/target.com/attacker@evil.com
+....
+
+....
+curl -XDELETE http://ip:port/droplist/domain/target.com/evil.com
+....
+
+===== User DropList
+
+....
+curl -XDELETE http://ip:port/droplist/user/target@target.com/attacker@evil.com
+....
+
+....
+curl -XDELETE http://ip:port/droplist/user/target@target.com/evil.com
+....
+
+Response codes:
+
+* 204: Entry deleted successfully.
 
 === Administrating Sieve quotas
 
@@ -4564,7 +4733,9 @@ This is an example of returned body.
 }
 ....
 
-== Reloading server certificates
+== Server administration
+
+=== Reloading server certificates
 
 Certificates for TCP based protocols (IMAP, SMTP, POP3, LMTP and ManageSieve) can be updated at
 runtime, without service interuption and without closing existing connections.
@@ -4586,3 +4757,141 @@ Return code:
 
 - 204: the certificate is reloaded
 - 400: Invalid request.
+
+=== Disconnecting users
+
+James maintains a set of stateful connections and provide an API allowing to close any of the existing
+connections, including:
+
+ - IMAP protocol
+ - SMTP protocol
+ - JMAP websocket and event source sub protocols
+
+James keeps track of active channels and would iterate through them, destroying corresponding channels.
+
+==== Disconnecting a specific user
+
+....
+curl -XDELETE /servers/channels/bob@domain.tld
+....
+
+Will destroy channels belonging to `bob@domain.tld`.
+
+Return code:
+
+- 204: the certificate is reloaded
+
+==== Disconnecting all users
+
+....
+curl -XDELETE /servers/channels
+....
+
+Will close all channels.
+
+Return code:
+
+- 204: the certificate is reloaded
+
+==== Disconnecting a group of users
+
+....
+curl -XDELETE /servers/channels -d `["badGuy1@domain.tld","badGuy1@domain.tld"]`
+....
+
+Will disconnect `badGuy1@domain.tld` and `badGuy2@domain.tld`.
+
+Return code:
+
+- 204: the certificate is reloaded
+- 400: Invalid request
+
+=== Listing connected users
+
+....
+curl --XGET /servers/connectedUsers
+....
+
+Will return a list of users having channels opened on the server:
+
+....
+[
+    "alice@domain.tld",
+    "bob@domain.tld"
+]
+....
+
+=== Listing channels of a user
+
+....
+curl -XGET /servers/channels/bob@domain
+....
+
+Will return a description and statistics for channels of a user:
+
+....
+[
+    {
+        "protocol": "IMAP",
+        "endpoint": "imapserver",
+        "remoteAddress": "127.0.0.1",
+        "connectionDate": "2024-11-21T10:46:37.476425406Z",
+        "isActive": true,
+        "isOpen": true,
+        "isWritable": true,
+        "isEncrypted": false,
+        "username": "bob@domain",
+        "protocolSpecificInformation": {
+            "loggedInUser": "bob@domain",
+            "isCompressed": "false",
+            "selectedMailbox": "1",
+            "isIdling": "false",
+            "requestCount": "3",
+            "userAgent": "{name=Thunderbird, version=102.7.1}",
+            "cumulativeWrittenBytes": "448",
+            "cumulativeReadBytes": "103",
+            "liveReadThroughputBytePerSecond": "0",
+            "liveWriteThroughputBytePerSecond": "0"
+        }
+    }
+]
+....
+
+
+=== Listing all channels
+
+....
+curl -XGET /servers/channels
+....
+
+Will return a description and statistics for channels of all users:
+
+....
+[
+    {
+        "protocol": "IMAP",
+        "endpoint": "imapserver",
+        "remoteAddress": "127.0.0.1",
+        "connectionDate": "2024-11-21T10:46:37.476425406Z",
+        "isActive": true,
+        "isOpen": true,
+        "isWritable": true,
+        "isEncrypted": false,
+        "username": "bob@domain",
+        "protocolSpecificInformation": {
+            "loggedInUser": "bob@domain",
+            "isCompressed": "false",
+            "selectedMailbox": "1",
+            "isIdling": "false",
+            "requestCount": "3",
+            "userAgent": "{name=Thunderbird, version=102.7.1}",
+            "cumulativeWrittenBytes": "448",
+            "cumulativeReadBytes": "103",
+            "liveReadThroughputBytePerSecond": "0",
+            "liveWriteThroughputBytePerSecond": "0"
+        }
+    }
+]
+....
+
+Be warned that the output can be very large if a significant count of channels is opened.

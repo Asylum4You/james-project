@@ -21,15 +21,18 @@ package org.apache.james.jmap.routes
 
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.atomic.AtomicReference
-import java.util.stream
+import java.util.function.Predicate
+import java.util.{Optional, stream}
 
 import cats.implicits._
+import com.google.common.collect.ImmutableMap
 import eu.timepit.refined.api.Refined
 import eu.timepit.refined.numeric.Positive
 import eu.timepit.refined.refineV
 import io.netty.handler.codec.http.HttpHeaderNames.CONTENT_TYPE
 import io.netty.handler.codec.http.{HttpMethod, QueryStringDecoder}
 import jakarta.inject.{Inject, Named}
+import org.apache.james.core.{ConnectionDescription, ConnectionDescriptionSupplier, Disconnector, Username}
 import org.apache.james.events.{EventBus, Registration, RegistrationKey}
 import org.apache.james.jmap.HttpConstants.JSON_CONTENT_TYPE
 import org.apache.james.jmap.JMAPUrls.EVENT_SOURCE
@@ -159,7 +162,8 @@ class EventSourceRoutes@Inject() (@Named(InjectionKeys.RFC_8621) val authenticat
                                   @Named(JMAPInjectionKeys.JMAP) eventBus: EventBus,
                                   pushSerializer: PushSerializer,
                                   typeStateFactory: TypeStateFactory,
-                                  delegationStore: DelegationStore) extends JMAPRoutes {
+                                  delegationStore: DelegationStore) extends JMAPRoutes with Disconnector with ConnectionDescriptionSupplier {
+  private val connectedUsers: java.util.concurrent.ConcurrentHashMap[ClientContext, ClientContext] = new java.util.concurrent.ConcurrentHashMap[ClientContext, ClientContext]
 
   override def routes(): stream.Stream[JMAPRoute] = stream.Stream.of(
     JMAPRoute.builder
@@ -185,6 +189,7 @@ class EventSourceRoutes@Inject() (@Named(InjectionKeys.RFC_8621) val authenticat
   private def registerSSE(response: HttpServerResponse, session: MailboxSession, options: EventSourceOptions): SMono[Unit] = {
     val sink: Sinks.Many[OutboundMessage] = Sinks.many().unicast().onBackpressureBuffer()
     val context = ClientContext(sink, new AtomicReference[Registration](), session)
+    connectedUsers.put(context, context)
 
     val pingDisposable = options.pingPolicy
       .asFlux()
@@ -207,6 +212,7 @@ class EventSourceRoutes@Inject() (@Named(InjectionKeys.RFC_8621) val authenticat
           .map(asSSEEvent),
         StandardCharsets.UTF_8).`then`
       .doFinally(_ => context.clean())
+      .doFinally(_ => connectedUsers.remove(context))
       .doFinally(_ => pingDisposable.dispose())
       .`then`())
       .`then`()
@@ -232,4 +238,35 @@ class EventSourceRoutes@Inject() (@Named(InjectionKeys.RFC_8621) val authenticat
       .sendString(SMono.fromCallable(() => ResponseSerializer.serialize(details).toString),
         StandardCharsets.UTF_8)
       .`then`)
+
+  override def disconnect(username: Predicate[Username]): Unit = {
+    val contexts = connectedUsers.values()
+      .stream()
+      .filter(context => username.test(context.session.getUser))
+      .toList
+
+    contexts
+      .forEach(context => {
+        context.clean()
+        connectedUsers.remove(context)
+      })
+  }
+
+  override def describeConnections(): stream.Stream[ConnectionDescription] = {
+    val writable = true
+    val encrypted = true
+    connectedUsers.values()
+      .stream()
+      .map(context => new ConnectionDescription(
+        "JMAP",
+        "EventSource",
+        Optional.empty(),
+        Optional.empty(),
+        context.pushRegistration.get() != null,
+        context.pushRegistration.get() != null,
+        writable,
+        !encrypted,
+        Optional.ofNullable(context.session.getUser),
+        ImmutableMap.of()))
+  }
 }

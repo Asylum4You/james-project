@@ -78,7 +78,7 @@ class TikaTextExtractorTest {
     }
 
     @Test
-    void shouldReturnEmptyParsedContentWhenTimeoutTriggered() throws Exception {
+    void shouldThrowExceptionWhenRequestTimeout() throws Exception {
         textExtractor = new TikaTextExtractor(new RecordingMetricFactory(), new TikaHttpClientImpl(TikaConfiguration.builder()
             .host(tika.getIp())
             .port(tika.getPort())
@@ -87,10 +87,10 @@ class TikaTextExtractorTest {
 
         InputStream inputStream = ClassLoader.getSystemResourceAsStream("documents/writter.docx");
 
-        assertThat(textExtractor.extractContentReactive(inputStream,
+        assertThatThrownBy(() -> textExtractor.extractContentReactive(inputStream,
                 ContentType.of("application/vnd.openxmlformats-officedocument.wordprocessingml.document"))
             .block())
-            .isEqualTo(ParsedContent.empty());
+            .hasRootCauseInstanceOf(TimeoutException.class);
     }
 
     @Test

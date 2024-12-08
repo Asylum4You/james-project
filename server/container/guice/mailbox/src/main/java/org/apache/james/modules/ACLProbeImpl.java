@@ -31,6 +31,7 @@ import org.apache.james.mailbox.exception.MailboxException;
 import org.apache.james.mailbox.model.MailboxACL;
 import org.apache.james.mailbox.model.MailboxACL.ACLCommand;
 import org.apache.james.mailbox.model.MailboxACL.Rfc4314Rights;
+import org.apache.james.mailbox.model.MailboxId;
 import org.apache.james.mailbox.model.MailboxPath;
 import org.apache.james.mailbox.probe.ACLProbe;
 import org.apache.james.utils.GuiceProbe;
@@ -45,24 +46,26 @@ public class ACLProbeImpl implements GuiceProbe, ACLProbe {
     }
 
     @Override
-    public void replaceRights(MailboxPath mailboxPath, String targetUser, Rfc4314Rights rights) throws MailboxException {
+    public void replaceRights(MailboxPath mailboxPath, String targetIdentifier, Rfc4314Rights rights) throws MailboxException {
         MailboxSession mailboxSession = mailboxManager.createSystemSession(mailboxPath.getUser());
 
-        ACLCommand command = MailboxACL.command().forUser(Username.of(targetUser)).rights(rights).asReplacement();
+        MailboxACL.EntryKey targetEntryKey = MailboxACL.EntryKey.deserialize(targetIdentifier);
+        ACLCommand command = MailboxACL.command().key(targetEntryKey).rights(rights).asReplacement();
         mailboxManager.applyRightsCommand(mailboxPath, command, mailboxSession);
     }
 
     @Override
-    public void addRights(MailboxPath mailboxPath, String targetUser, Rfc4314Rights rights) throws MailboxException {
+    public void addRights(MailboxPath mailboxPath, String targetIdentifier, Rfc4314Rights rights) throws MailboxException {
         MailboxSession mailboxSession = mailboxManager.createSystemSession(mailboxPath.getUser());
-        ACLCommand command = MailboxACL.command().forUser(Username.of(targetUser)).rights(rights).asAddition();
 
+        MailboxACL.EntryKey targetEntryKey = MailboxACL.EntryKey.deserialize(targetIdentifier);
+        ACLCommand command = MailboxACL.command().key(targetEntryKey).rights(rights).asReplacement();
         mailboxManager.applyRightsCommand(mailboxPath, command, mailboxSession);
     }
 
-    public void executeCommand(MailboxPath mailboxPath, ACLCommand command) throws MailboxException {
-        MailboxSession mailboxSession = mailboxManager.createSystemSession(mailboxPath.getUser());
-        mailboxManager.applyRightsCommand(mailboxPath, command, mailboxSession);
+    public void executeCommand(MailboxId mailboxId, Username ownerUser, ACLCommand command) throws MailboxException {
+        MailboxSession mailboxSession = mailboxManager.createSystemSession(ownerUser);
+        mailboxManager.applyRightsCommand(mailboxId, command, mailboxSession);
     }
 
     @Override

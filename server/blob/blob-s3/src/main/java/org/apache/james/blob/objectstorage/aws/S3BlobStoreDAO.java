@@ -28,6 +28,7 @@ import java.time.Duration;
 import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
@@ -62,15 +63,18 @@ import software.amazon.awssdk.services.s3.S3AsyncClient;
 import software.amazon.awssdk.services.s3.model.Bucket;
 import software.amazon.awssdk.services.s3.model.BucketAlreadyOwnedByYouException;
 import software.amazon.awssdk.services.s3.model.DeleteObjectsResponse;
+import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 import software.amazon.awssdk.services.s3.model.ListBucketsResponse;
 import software.amazon.awssdk.services.s3.model.ListObjectsV2Response;
 import software.amazon.awssdk.services.s3.model.NoSuchBucketException;
 import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 import software.amazon.awssdk.services.s3.model.ObjectIdentifier;
+import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.model.PutObjectResponse;
 import software.amazon.awssdk.services.s3.model.S3Object;
 
+@Singleton
 public class S3BlobStoreDAO implements BlobStoreDAO {
 
     private static class FileBackedOutputStreamByteSource extends ByteSource {
@@ -110,15 +114,17 @@ public class S3BlobStoreDAO implements BlobStoreDAO {
     private final S3AsyncClient client;
     private final S3BlobStoreConfiguration configuration;
     private final BlobId.Factory blobIdFactory;
+    private final S3RequestOption s3RequestOption;
 
     @Inject
-    @Singleton
-    S3BlobStoreDAO(S3ClientFactory s3ClientFactory,
-                   S3BlobStoreConfiguration configuration,
-                   BlobId.Factory blobIdFactory) {
+    public S3BlobStoreDAO(S3ClientFactory s3ClientFactory,
+                          S3BlobStoreConfiguration configuration,
+                          BlobId.Factory blobIdFactory,
+                          S3RequestOption s3RequestOption) {
         this.configuration = configuration;
         this.client = s3ClientFactory.get();
         this.blobIdFactory = blobIdFactory;
+        this.s3RequestOption = s3RequestOption;
 
         bucketNameResolver = BucketNameResolver.builder()
             .prefix(configuration.getBucketPrefix())
@@ -165,36 +171,36 @@ public class S3BlobStoreDAO implements BlobStoreDAO {
     }
 
     private Mono<FluxResponse> getObject(BucketName bucketName, BlobId blobId) {
-        return Mono.fromFuture(() ->
-            client.getObject(
-                builder -> builder.bucket(bucketName.asString()).key(blobId.asString()),
-                new AsyncResponseTransformer<GetObjectResponse, FluxResponse>() {
+        return buildGetObjectRequestBuilder(bucketName, blobId)
+            .flatMap(getObjectRequestBuilder -> Mono.fromFuture(() ->
+                    client.getObject(getObjectRequestBuilder.build(),
+                        new AsyncResponseTransformer<GetObjectResponse, FluxResponse>() {
 
-                    FluxResponse response;
+                            FluxResponse response;
 
-                    @Override
-                    public CompletableFuture<FluxResponse> prepare() {
-                        response = new FluxResponse();
-                        return response.supportingCompletableFuture;
-                    }
+                            @Override
+                            public CompletableFuture<FluxResponse> prepare() {
+                                response = new FluxResponse();
+                                return response.supportingCompletableFuture;
+                            }
 
-                    @Override
-                    public void onResponse(GetObjectResponse response) {
-                        this.response.sdkResponse = response;
-                    }
+                            @Override
+                            public void onResponse(GetObjectResponse response) {
+                                this.response.sdkResponse = response;
+                            }
 
-                    @Override
-                    public void exceptionOccurred(Throwable error) {
-                        this.response.supportingCompletableFuture.completeExceptionally(error);
-                    }
+                            @Override
+                            public void exceptionOccurred(Throwable error) {
+                                this.response.supportingCompletableFuture.completeExceptionally(error);
+                            }
 
-                    @Override
-                    public void onStream(SdkPublisher<ByteBuffer> publisher) {
-                        response.flux = Flux.from(publisher);
-                        response.supportingCompletableFuture.complete(response);
-                    }
-                }))
-            .switchIfEmpty(Mono.error(() -> new ObjectStoreIOException("Request was unexpectedly canceled, no GetObjectResponse")));
+                            @Override
+                            public void onStream(SdkPublisher<ByteBuffer> publisher) {
+                                response.flux = Flux.from(publisher);
+                                response.supportingCompletableFuture.complete(response);
+                            }
+                        }))
+                .switchIfEmpty(Mono.error(() -> new ObjectStoreIOException("Request was unexpectedly canceled, no GetObjectResponse"))));
     }
 
 
@@ -202,27 +208,42 @@ public class S3BlobStoreDAO implements BlobStoreDAO {
     public Mono<byte[]> readBytes(BucketName bucketName, BlobId blobId) {
         BucketName resolvedBucketName = bucketNameResolver.resolve(bucketName);
 
-        return Mono.fromFuture(() ->
-                client.getObject(
-                    builder -> builder.bucket(resolvedBucketName.asString()).key(blobId.asString()),
-                    new MinimalCopyBytesResponseTransformer(configuration, blobId)))
-            .onErrorMap(NoSuchBucketException.class, e -> new ObjectNotFoundException("Bucket not found " + resolvedBucketName.asString(), e))
-            .onErrorMap(NoSuchKeyException.class, e -> new ObjectNotFoundException("Blob not found " + blobId.asString() + " in bucket " + resolvedBucketName.asString(), e))
-            .publishOn(Schedulers.parallel())
-            .map(BytesWrapper::asByteArrayUnsafe)
-            .onErrorMap(e -> e.getCause() instanceof OutOfMemoryError, Throwable::getCause);
+        return buildGetObjectRequestBuilder(resolvedBucketName, blobId)
+            .flatMap(putObjectRequest -> Mono.fromFuture(() ->
+                    client.getObject(putObjectRequest.build(), new MinimalCopyBytesResponseTransformer(configuration, blobId)))
+                .onErrorMap(NoSuchBucketException.class, e -> new ObjectNotFoundException("Bucket not found " + resolvedBucketName.asString(), e))
+                .onErrorMap(NoSuchKeyException.class, e -> new ObjectNotFoundException("Blob not found " + blobId.asString() + " in bucket " + resolvedBucketName.asString(), e))
+                .publishOn(Schedulers.parallel())
+                .map(BytesWrapper::asByteArrayUnsafe)
+                .onErrorMap(e -> e.getCause() instanceof OutOfMemoryError, Throwable::getCause));
+    }
+
+    private Mono<GetObjectRequest.Builder> buildGetObjectRequestBuilder(BucketName bucketName, BlobId blobId) {
+        GetObjectRequest.Builder baseBuilder = GetObjectRequest.builder()
+            .bucket(bucketName.asString())
+            .key(blobId.asString());
+
+        if (s3RequestOption.ssec().enable()) {
+            return Mono.from(s3RequestOption.ssec().sseCustomerKeyFactory().get()
+                    .generate(bucketName, blobId))
+                .map(sseCustomerKey -> baseBuilder
+                    .sseCustomerAlgorithm(sseCustomerKey.ssecAlgorithm())
+                    .sseCustomerKey(sseCustomerKey.customerKey())
+                    .sseCustomerKeyMD5(sseCustomerKey.md5()));
+        }
+
+        return Mono.just(baseBuilder);
     }
 
     @Override
     public Mono<Void> save(BucketName bucketName, BlobId blobId, byte[] data) {
         BucketName resolvedBucketName = bucketNameResolver.resolve(bucketName);
 
-        return Mono.fromFuture(() ->
-                client.putObject(
-                    builder -> builder.bucket(resolvedBucketName.asString()).key(blobId.asString()).contentLength((long) data.length),
-                    AsyncRequestBody.fromBytes(data)))
-            .retryWhen(createBucketOnRetry(resolvedBucketName))
-            .publishOn(Schedulers.parallel())
+        return buildPutObjectRequestBuilder(resolvedBucketName, data.length, blobId)
+            .flatMap(putObjectRequest -> Mono.fromFuture(() ->
+                    client.putObject(putObjectRequest.build(), AsyncRequestBody.fromBytes(data)))
+                .retryWhen(createBucketOnRetry(resolvedBucketName))
+                .publishOn(Schedulers.parallel()))
             .then();
     }
 
@@ -265,12 +286,27 @@ public class S3BlobStoreDAO implements BlobStoreDAO {
     private Mono<PutObjectResponse> save(BucketName resolvedBucketName, BlobId blobId, InputStream stream, long contentLength) {
         int chunkSize = Math.min((int) contentLength, CHUNK_SIZE);
 
-        return Mono.fromFuture(() -> client.putObject(builder -> builder
-                .bucket(resolvedBucketName.asString())
-                .contentLength(contentLength)
-                .key(blobId.asString()),
-            AsyncRequestBody.fromPublisher(chunkStream(chunkSize, stream)
-                .subscribeOn(Schedulers.boundedElastic()))));
+        return buildPutObjectRequestBuilder(resolvedBucketName, contentLength, blobId)
+            .flatMap(putObjectRequest -> Mono.fromFuture(() -> client.putObject(putObjectRequest.build(),
+                AsyncRequestBody.fromPublisher(chunkStream(chunkSize, stream)
+                    .subscribeOn(Schedulers.boundedElastic())))));
+    }
+
+    private Mono<PutObjectRequest.Builder> buildPutObjectRequestBuilder(BucketName bucketName, long contentLength, BlobId blobId) {
+        PutObjectRequest.Builder baseBuilder = PutObjectRequest.builder()
+            .bucket(bucketName.asString())
+            .key(blobId.asString())
+            .contentLength(contentLength);
+
+        if (s3RequestOption.ssec().enable()) {
+            return Mono.from(s3RequestOption.ssec().sseCustomerKeyFactory().get().generate(bucketName, blobId))
+                .map(sseCustomerKey -> baseBuilder
+                    .sseCustomerAlgorithm(sseCustomerKey.ssecAlgorithm())
+                    .sseCustomerKey(sseCustomerKey.customerKey())
+                    .sseCustomerKeyMD5(sseCustomerKey.md5()));
+        }
+
+        return Mono.just(baseBuilder);
     }
 
     private Flux<ByteBuffer> chunkStream(int chunkSize, InputStream stream) {
@@ -313,7 +349,8 @@ public class S3BlobStoreDAO implements BlobStoreDAO {
                 .map(BlobId::asString)
                 .map(id -> ObjectIdentifier.builder().key(id).build())
                 .collect(ImmutableList.toImmutableList()))
-            .then();
+            .then()
+            .onErrorResume(NoSuchBucketException.class, e -> Mono.empty());
     }
 
     @Override
@@ -325,10 +362,10 @@ public class S3BlobStoreDAO implements BlobStoreDAO {
 
     private Mono<Void> deleteResolvedBucket(BucketName bucketName) {
         return emptyBucket(bucketName)
-            .onErrorResume(t -> Mono.just(bucketName))
+            .onErrorResume(throwable -> throwable instanceof CompletionException && throwable.getCause() instanceof NoSuchBucketException, t -> Mono.just(bucketName))
             .flatMap(ignore -> Mono.fromFuture(() ->
                 client.deleteBucket(builder -> builder.bucket(bucketName.asString()))))
-            .onErrorResume(t -> Mono.empty())
+            .onErrorResume(NoSuchBucketException.class, t -> Mono.empty())
             .then()
             .publishOn(Schedulers.parallel());
     }

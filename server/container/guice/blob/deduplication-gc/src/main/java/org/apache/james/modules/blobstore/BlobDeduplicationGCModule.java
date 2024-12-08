@@ -21,6 +21,7 @@ package org.apache.james.modules.blobstore;
 
 import java.io.FileNotFoundException;
 import java.time.Clock;
+import java.util.Optional;
 import java.util.Set;
 
 import org.apache.commons.configuration2.Configuration;
@@ -35,6 +36,7 @@ import org.apache.james.modules.blobstore.server.BlobRoutesModules;
 import org.apache.james.server.blob.deduplication.BlobGCTaskAdditionalInformationDTO;
 import org.apache.james.server.blob.deduplication.BlobGCTaskDTO;
 import org.apache.james.server.blob.deduplication.GenerationAwareBlobId;
+import org.apache.james.server.blob.deduplication.MinIOGenerationAwareBlobId;
 import org.apache.james.server.task.json.dto.AdditionalInformationDTO;
 import org.apache.james.server.task.json.dto.AdditionalInformationDTOModule;
 import org.apache.james.server.task.json.dto.TaskDTO;
@@ -58,7 +60,6 @@ public class BlobDeduplicationGCModule extends AbstractModule {
     @Override
     protected void configure() {
         bind(PlainBlobId.Factory.class).in(Scopes.SINGLETON);
-        bind(BlobId.Factory.class).to(GenerationAwareBlobId.Factory.class);
 
         bind(MetricableBlobStore.class).in(Scopes.SINGLETON);
         bind(BlobStore.class).to(MetricableBlobStore.class);
@@ -68,8 +69,15 @@ public class BlobDeduplicationGCModule extends AbstractModule {
 
     @Singleton
     @Provides
-    public GenerationAwareBlobId.Factory generationAwareBlobIdFactory(Clock clock, PlainBlobId.Factory delegate, GenerationAwareBlobId.Configuration configuration) {
-        return new GenerationAwareBlobId.Factory(clock, delegate, configuration);
+    public BlobId.Factory generationAwareBlobIdFactory(Clock clock, PlainBlobId.Factory delegate, GenerationAwareBlobId.Configuration configuration) {
+            String property = System.getProperty("james.s3.minio.compatibility.mode");
+            boolean compatibilityModeActivated = Optional.ofNullable(property).map(Boolean::parseBoolean).orElse(false);
+
+            if (compatibilityModeActivated) {
+                return new MinIOGenerationAwareBlobId.Factory(clock, configuration, delegate);
+            } else {
+                return new GenerationAwareBlobId.Factory(clock, delegate, configuration);
+            }
     }
 
     @Singleton
@@ -85,7 +93,7 @@ public class BlobDeduplicationGCModule extends AbstractModule {
 
     @ProvidesIntoSet
     public TaskDTOModule<? extends Task, ? extends TaskDTO> blobGCTask(BlobStoreDAO blobStoreDAO,
-                                                                       GenerationAwareBlobId.Factory generationAwareBlobIdFactory,
+                                                                       BlobId.Factory generationAwareBlobIdFactory,
                                                                        GenerationAwareBlobId.Configuration generationAwareBlobIdConfiguration,
                                                                        Set<BlobReferenceSource> blobReferenceSources,
                                                                        Clock clock) {

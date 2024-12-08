@@ -19,10 +19,13 @@
 
 package org.apache.james.imap.processor;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import jakarta.inject.Inject;
 
+import org.apache.james.imap.api.ImapConfiguration;
 import org.apache.james.imap.api.message.Capability;
 import org.apache.james.imap.api.message.response.StatusResponseFactory;
 import org.apache.james.imap.api.process.ImapSession;
@@ -32,6 +35,7 @@ import org.apache.james.mailbox.MailboxManager;
 import org.apache.james.metrics.api.MetricFactory;
 import org.apache.james.util.MDCBuilder;
 import org.apache.james.util.MDCStructuredLogger;
+import org.apache.james.util.ReactorUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -40,8 +44,11 @@ import com.google.common.collect.ImmutableList;
 import reactor.core.publisher.Mono;
 
 public class IdProcessor extends AbstractMailboxProcessor<IDRequest> implements CapabilityImplementingProcessor {
+    public static final String MDC_KEY = "bound_MDC";
     private static final Logger LOGGER = LoggerFactory.getLogger(IdProcessor.class);
     private static final ImmutableList<Capability> CAPABILITIES = ImmutableList.of(Capability.of("ID"));
+
+    private final Map<String, String> fields = new HashMap<>();
 
     @Inject
     public IdProcessor(MailboxManager mailboxManager, StatusResponseFactory factory, MetricFactory metricFactory) {
@@ -49,15 +56,36 @@ public class IdProcessor extends AbstractMailboxProcessor<IDRequest> implements 
     }
 
     @Override
+    public void configure(ImapConfiguration imapConfiguration) {
+        super.configure(imapConfiguration);
+        fields.putAll(imapConfiguration.getIdFieldsResponse());
+    }
+
+    @Override
     protected Mono<Void> processRequestReactive(IDRequest request, ImapSession session, Responder responder) {
-        MDCStructuredLogger.forLogger(LOGGER)
-            .field("parameters", request.getParameters().map(Object::toString).orElse("NIL"))
-            .log(logger -> logger.info("Received id information"));
+        responder.respond(new IdResponse(fields));
 
-        responder.respond(new IdResponse());
+        String mailUserAgent = request.getParameters().map(Object::toString).orElse("NIL");
+        addMailUserAgentToMDC(session, mailUserAgent);
+        session.setAttribute("userAgent", mailUserAgent);
 
-        return unsolicitedResponses(session, responder, false)
+        return logMailUserAgent(mailUserAgent)
+            .then(unsolicitedResponses(session, responder, false))
             .then(Mono.fromRunnable(() -> okComplete(request, responder)));
+    }
+
+    private Mono<Void> logMailUserAgent(String mailUserAgent) {
+        return ReactorUtils.logAsMono(() -> MDCStructuredLogger.forLogger(LOGGER)
+            .field("parameters", mailUserAgent)
+            .log(logger -> logger.info("Received id information")));
+    }
+
+    private void addMailUserAgentToMDC(ImapSession session, String mailUserAgent) {
+        Object maybeMDC = session.getAttribute(MDC_KEY);
+        if (maybeMDC instanceof MDCBuilder boundMDC) {
+            MDCBuilder newMDC = boundMDC.addToContext("mailUserAgent", mailUserAgent);
+            session.setAttribute(MDC_KEY, newMDC);
+        }
     }
 
     @Override

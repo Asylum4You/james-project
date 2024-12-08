@@ -27,10 +27,13 @@ import java.util.Set;
 
 import org.apache.commons.configuration2.Configuration;
 import org.apache.commons.configuration2.ex.ConfigurationException;
+import org.apache.james.core.ConnectionDescriptionSupplier;
+import org.apache.james.core.Disconnector;
 import org.apache.james.jmap.JMAPRoutes;
 import org.apache.james.jmap.JMAPRoutesHandler;
 import org.apache.james.jmap.Version;
 import org.apache.james.jmap.api.model.TypeName;
+import org.apache.james.jmap.api.pushsubscription.PushSubscriptionDisconnector;
 import org.apache.james.jmap.api.upload.UploadService;
 import org.apache.james.jmap.api.upload.UploadServiceDefaultImpl;
 import org.apache.james.jmap.change.EmailDeliveryTypeName$;
@@ -77,6 +80,7 @@ import org.apache.james.jmap.method.PushSubscriptionSetMethod;
 import org.apache.james.jmap.method.QuotaChangesMethod;
 import org.apache.james.jmap.method.QuotaGetMethod;
 import org.apache.james.jmap.method.QuotaQueryMethod;
+import org.apache.james.jmap.method.SearchSnippetGetMethod;
 import org.apache.james.jmap.method.SystemZoneIdProvider;
 import org.apache.james.jmap.method.ThreadChangesMethod;
 import org.apache.james.jmap.method.ThreadGetMethod;
@@ -171,6 +175,7 @@ public class RFC8621MethodsModule extends AbstractModule {
         methods.addBinding().to(DelegateSetMethod.class);
         methods.addBinding().to(DelegatedAccountSetMethod.class);
         methods.addBinding().to(MailboxQueryChangesMethod.class);
+        methods.addBinding().to(SearchSnippetGetMethod.class);
 
         Multibinder<JMAPRoutes> routes = Multibinder.newSetBinder(binder(), JMAPRoutes.class);
         routes.addBinding().to(SessionRoutes.class);
@@ -197,6 +202,15 @@ public class RFC8621MethodsModule extends AbstractModule {
         blobResolverMultibinder.addBinding().to(MessageBlobResolver.class);
         blobResolverMultibinder.addBinding().to(UploadResolver.class);
         blobResolverMultibinder.addBinding().to(MessagePartBlobResolver.class);
+
+        Multibinder<Disconnector> disconnectorMultibinder = Multibinder.newSetBinder(binder(), Disconnector.class);
+        disconnectorMultibinder.addBinding().to(WebSocketRoutes.class);
+        disconnectorMultibinder.addBinding().to(EventSourceRoutes.class);
+        disconnectorMultibinder.addBinding().to(PushSubscriptionDisconnector.class);
+
+        Multibinder<ConnectionDescriptionSupplier> connectionDescriptionSupplierMultibinder = Multibinder.newSetBinder(binder(), ConnectionDescriptionSupplier.class);
+        connectionDescriptionSupplierMultibinder.addBinding().to(WebSocketRoutes.class);
+        connectionDescriptionSupplierMultibinder.addBinding().to(EventSourceRoutes.class);
     }
 
     @ProvidesIntoSet

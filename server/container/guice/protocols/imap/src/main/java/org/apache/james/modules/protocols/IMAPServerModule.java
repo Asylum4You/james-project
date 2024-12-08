@@ -28,6 +28,8 @@ import org.apache.commons.configuration2.tree.ImmutableNode;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.james.ProtocolConfigurationSanitizer;
 import org.apache.james.RunArguments;
+import org.apache.james.core.ConnectionDescriptionSupplier;
+import org.apache.james.core.Disconnector;
 import org.apache.james.core.healthcheck.HealthCheck;
 import org.apache.james.filesystem.api.FileSystem;
 import org.apache.james.imap.ImapSuite;
@@ -50,12 +52,14 @@ import org.apache.james.imap.encode.base.EndImapEncoder;
 import org.apache.james.imap.encode.main.DefaultImapEncoderFactory;
 import org.apache.james.imap.encode.main.DefaultLocalizer;
 import org.apache.james.imap.main.DefaultImapDecoderFactory;
+import org.apache.james.imap.main.PathConverter;
 import org.apache.james.imap.message.response.UnpooledStatusResponseFactory;
 import org.apache.james.imap.processor.AuthenticateProcessor;
 import org.apache.james.imap.processor.CapabilityImplementingProcessor;
 import org.apache.james.imap.processor.CapabilityProcessor;
 import org.apache.james.imap.processor.DefaultProcessor;
 import org.apache.james.imap.processor.EnableProcessor;
+import org.apache.james.imap.processor.NamespaceSupplier;
 import org.apache.james.imap.processor.PermitEnableCapabilityProcessor;
 import org.apache.james.imap.processor.SelectProcessor;
 import org.apache.james.imap.processor.StatusProcessor;
@@ -104,6 +108,8 @@ public class IMAPServerModule extends AbstractModule {
         bind(SelectProcessor.class).in(Scopes.SINGLETON);
         bind(StatusProcessor.class).in(Scopes.SINGLETON);
         bind(EnableProcessor.class).in(Scopes.SINGLETON);
+        bind(NamespaceSupplier.class).to(NamespaceSupplier.Default.class).in(Scopes.SINGLETON);
+        bind(PathConverter.Factory.class).to(PathConverter.Factory.Default.class).in(Scopes.SINGLETON);
         bind(MailboxTyper.class).to(DefaultMailboxTyper.class).in(Scopes.SINGLETON);
 
         Multibinder.newSetBinder(binder(), GuiceProbe.class).addBinding().to(ImapGuiceProbe.class);
@@ -112,6 +118,9 @@ public class IMAPServerModule extends AbstractModule {
         bind(ConnectionCheckFactory.class).to(ConnectionCheckFactoryImpl.class);
 
         Multibinder.newSetBinder(binder(), HealthCheck.class).addBinding().to(IMAPHealthCheck.class);
+
+        Multibinder.newSetBinder(binder(), Disconnector.class).addBinding().to(IMAPServerFactory.class);
+        Multibinder.newSetBinder(binder(), ConnectionDescriptionSupplier.class).addBinding().to(IMAPServerFactory.class);
     }
 
     @Provides

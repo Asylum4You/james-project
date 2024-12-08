@@ -18,22 +18,38 @@
  ****************************************************************/
 package org.apache.james.imapserver.netty;
 
+import java.net.InetSocketAddress;
 import java.net.MalformedURLException;
+import java.net.SocketAddress;
 import java.net.URISyntaxException;
+import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Predicate;
+import java.util.stream.Stream;
 
 import org.apache.commons.configuration2.HierarchicalConfiguration;
 import org.apache.commons.configuration2.ex.ConfigurationException;
 import org.apache.commons.configuration2.tree.ImmutableNode;
+import org.apache.james.core.ConnectionDescription;
+import org.apache.james.core.ConnectionDescriptionSupplier;
+import org.apache.james.core.Disconnector;
+import org.apache.james.core.Username;
 import org.apache.james.imap.api.ConnectionCheck;
 import org.apache.james.imap.api.ImapConfiguration;
 import org.apache.james.imap.api.ImapConstants;
 import org.apache.james.imap.api.process.ImapProcessor;
+import org.apache.james.imap.api.process.ImapSession;
+import org.apache.james.imap.api.process.SelectedMailbox;
 import org.apache.james.imap.decode.ImapDecoder;
 import org.apache.james.imap.encode.ImapEncoder;
+import org.apache.james.mailbox.MailboxSession;
+import org.apache.james.mailbox.model.MailboxId;
 import org.apache.james.metrics.api.GaugeRegistry;
 import org.apache.james.protocols.api.OidcSASLConfiguration;
 import org.apache.james.protocols.lib.netty.AbstractConfigurableAsyncServer;
@@ -49,20 +65,31 @@ import org.slf4j.LoggerFactory;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Splitter;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 
+import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
+import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelPipeline;
+import io.netty.channel.group.DefaultChannelGroup;
 import io.netty.handler.codec.haproxy.HAProxyMessageDecoder;
 import io.netty.handler.stream.ChunkedWriteHandler;
+import io.netty.handler.traffic.AbstractTrafficShapingHandler;
+import io.netty.handler.traffic.ChannelTrafficShapingHandler;
+import io.netty.handler.traffic.TrafficCounter;
+import io.netty.util.AttributeKey;
+import io.netty.util.concurrent.GlobalEventExecutor;
 
 
 /**
  * NIO IMAP Server which use Netty.
  */
-public class IMAPServer extends AbstractConfigurableAsyncServer implements ImapConstants, IMAPServerMBean, NettyConstants {
+public class IMAPServer extends AbstractConfigurableAsyncServer implements ImapConstants, IMAPServerMBean, NettyConstants,
+    Disconnector, ConnectionDescriptionSupplier {
     private static final Logger LOG = LoggerFactory.getLogger(IMAPServer.class);
+    public static final AttributeKey<Instant> CONNECTION_DATE = AttributeKey.newInstance("connectionDate");
 
     public static class AuthenticationConfiguration {
         private static final boolean PLAIN_AUTH_DISALLOWED_DEFAULT = true;
@@ -136,6 +163,7 @@ public class IMAPServer extends AbstractConfigurableAsyncServer implements ImapC
     private final ImapMetrics imapMetrics;
     private final GaugeRegistry gaugeRegistry;
     private final Set<ConnectionCheck> connectionChecks;
+    private final DefaultChannelGroup imapChannelGroup;
 
     private String hello;
     private boolean compress;
@@ -144,11 +172,13 @@ public class IMAPServer extends AbstractConfigurableAsyncServer implements ImapC
     private int timeout;
     private int literalSizeLimit;
     private AuthenticationConfiguration authenticationConfiguration;
+    private Optional<TrafficShapingConfiguration> trafficShaping = Optional.empty();
     private Optional<ConnectionLimitUpstreamHandler> connectionLimitUpstreamHandler = Optional.empty();
     private Optional<ConnectionPerIpLimitUpstreamHandler> connectionPerIpLimitUpstreamHandler = Optional.empty();
     private boolean ignoreIDLEUponProcessing;
     private Duration heartbeatInterval;
     private ReactiveThrottler reactiveThrottler;
+
 
     public IMAPServer(ImapDecoder decoder, ImapEncoder encoder, ImapProcessor processor, ImapMetrics imapMetrics, GaugeRegistry gaugeRegistry, Set<ConnectionCheck> connectionChecks) {
         this.processor = processor;
@@ -157,6 +187,7 @@ public class IMAPServer extends AbstractConfigurableAsyncServer implements ImapC
         this.imapMetrics = imapMetrics;
         this.gaugeRegistry = gaugeRegistry;
         this.connectionChecks = connectionChecks;
+        this.imapChannelGroup = new DefaultChannelGroup(GlobalEventExecutor.INSTANCE);
     }
 
     @Override
@@ -185,6 +216,20 @@ public class IMAPServer extends AbstractConfigurableAsyncServer implements ImapC
         heartbeatInterval = imapConfiguration.idleTimeIntervalAsDuration();
         reactiveThrottler = new ReactiveThrottler(gaugeRegistry, imapConfiguration.getConcurrentRequests(), imapConfiguration.getMaxQueueSize());
         processor.configure(imapConfiguration);
+        if (configuration.getKeys("trafficShaping").hasNext()) {
+            trafficShaping = Optional.ofNullable(configuration.configurationAt("trafficShaping"))
+                .map(TrafficShapingConfiguration::from);
+        }
+    }
+
+    @Override
+    public void disconnect(Predicate<Username> user) {
+        imapChannelGroup.stream()
+            .filter(channel -> Optional.ofNullable(channel.attr(IMAP_SESSION_ATTRIBUTE_KEY).get())
+                .flatMap(session -> Optional.ofNullable(session.getUserName()))
+                .map(user::test)
+                .orElse(false))
+            .forEach(channel -> channel.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE));
     }
 
     private static Integer parseLiteralSizeLimit(HierarchicalConfiguration<ImmutableNode> configuration) {
@@ -208,7 +253,19 @@ public class IMAPServer extends AbstractConfigurableAsyncServer implements ImapC
                 .concurrentRequests(configuration.getInteger("concurrentRequests", ImapConfiguration.DEFAULT_CONCURRENT_REQUESTS))
                 .isProvisionDefaultMailboxes(configuration.getBoolean("provisionDefaultMailboxes", ImapConfiguration.DEFAULT_PROVISION_DEFAULT_MAILBOXES))
                 .withCustomProperties(configuration.getProperties("customProperties"))
+                .idFieldsResponse(getIdCommandResponseFields(configuration))
                 .build();
+    }
+
+    private static ImmutableMap<String, String> getIdCommandResponseFields(HierarchicalConfiguration<ImmutableNode> configuration) {
+        LinkedHashMap<String, String> fieldsMap = new LinkedHashMap<>();
+        configuration.configurationsAt("idCommandResponse.field")
+            .forEach(field -> {
+                String name = field.getString("[@name]");
+                String value = field.getString("[@value]");
+                fieldsMap.put(name, value);
+            });
+        return ImmutableMap.copyOf(fieldsMap);
     }
 
     private static TimeUnit getTimeIntervalUnit(String timeIntervalUnit) {
@@ -243,6 +300,8 @@ public class IMAPServer extends AbstractConfigurableAsyncServer implements ImapC
 
             @Override
             public void initChannel(Channel channel) {
+                channel.attr(CONNECTION_DATE).set(Clock.systemUTC().instant());
+
                 ChannelPipeline pipeline = channel.pipeline();
                 channel.config().setWriteBufferWaterMark(writeBufferWaterMark);
                 pipeline.addLast(TIMEOUT_HANDLER, new ImapIdleStateHandler(timeout));
@@ -268,6 +327,8 @@ public class IMAPServer extends AbstractConfigurableAsyncServer implements ImapC
                         channel.pipeline().addFirst(SSL_HANDLER, secure.sslHandler());
                     }
                 }
+                trafficShaping.map(TrafficShapingConfiguration::newHandler)
+                    .ifPresent(handler -> pipeline.addLast("trafficShaping",handler));
 
                 pipeline.addLast(CHUNK_WRITE_HANDLER, new ChunkedWriteHandler());
 
@@ -301,6 +362,7 @@ public class IMAPServer extends AbstractConfigurableAsyncServer implements ImapC
             .heartbeatInterval(heartbeatInterval)
             .ignoreIDLEUponProcessing(ignoreIDLEUponProcessing)
             .proxyRequired(proxyRequired)
+            .imapChannelGroup(imapChannelGroup)
             .build();
     }
 
@@ -320,5 +382,57 @@ public class IMAPServer extends AbstractConfigurableAsyncServer implements ImapC
     @VisibleForTesting
     ReactiveThrottler getReactiveThrottler() {
         return reactiveThrottler;
+    }
+
+    @Override
+    public Stream<ConnectionDescription> describeConnections() {
+        return imapChannelGroup.stream()
+            .map(channel -> {
+                Optional<ImapSession> imapSession = Optional.ofNullable(channel.attr(IMAP_SESSION_ATTRIBUTE_KEY).get());
+                Optional<TrafficCounter> trafficCounter = Optional.ofNullable(channel.pipeline().get(ChannelTrafficShapingHandler.class))
+                    .map(AbstractTrafficShapingHandler::trafficCounter);
+                return new ConnectionDescription(
+                    "IMAP",
+                    jmxName,
+                    Optional.ofNullable(channel.remoteAddress()).map(this::addressAsString),
+                    Optional.ofNullable(channel.attr(CONNECTION_DATE)).flatMap(attribute -> Optional.ofNullable(attribute.get())),
+                    channel.isActive(),
+                    channel.isOpen(),
+                    channel.isWritable(),
+                    imapSession.map(ImapSession::isTLSActive).orElse(false),
+                    imapSession.flatMap(session -> Optional.ofNullable(session.getUserName())),
+                    ImmutableMap.<String, String>builder()
+                        .put("loggedInUser", imapSession.flatMap(s -> Optional.ofNullable(s.getMailboxSession()))
+                            .flatMap(MailboxSession::getLoggedInUser)
+                            .map(Username::asString)
+                            .orElse(""))
+                        .put("isCompressed", Boolean.toString(imapSession.map(ImapSession::isCompressionActive).orElse(false)))
+                        .put("selectedMailbox", imapSession.flatMap(session -> Optional.ofNullable(session.getSelected()))
+                            .map(SelectedMailbox::getMailboxId)
+                            .map(MailboxId::serialize)
+                            .orElse(""))
+                        .put("isIdling", Boolean.toString(imapSession.flatMap(session -> Optional.ofNullable(session.getSelected()))
+                            .map(SelectedMailbox::isIdling)
+                            .orElse(false)))
+                        .put("requestCount", Long.toString(Optional.ofNullable(channel.attr(REQUEST_COUNTER))
+                            .flatMap(attribute -> Optional.ofNullable(attribute.get()))
+                            .map(AtomicLong::get)
+                            .orElse(0L)))
+                        .put("userAgent", imapSession.flatMap(s -> Optional.ofNullable(s.getAttribute("userAgent")))
+                            .map(Object::toString)
+                            .orElse(""))
+                        .put("cumulativeWrittenBytes", Long.toString(trafficCounter.map(TrafficCounter::cumulativeWrittenBytes).orElse(0L)))
+                        .put("cumulativeReadBytes", Long.toString(trafficCounter.map(TrafficCounter::cumulativeReadBytes).orElse(0L)))
+                        .put("liveReadThroughputBytePerSecond", Long.toString(trafficCounter.map(TrafficCounter::lastReadThroughput).orElse(0L)))
+                        .put("liveWriteThroughputBytePerSecond", Long.toString(trafficCounter.map(TrafficCounter::lastWriteThroughput).orElse(0L)))
+                        .build());
+            });
+    }
+
+    private String addressAsString(SocketAddress socketAddress) {
+        if (socketAddress instanceof InetSocketAddress address) {
+            return address.getAddress().getHostAddress();
+        }
+        return socketAddress.toString();
     }
 }

@@ -29,10 +29,10 @@ import org.apache.james.jmap.json.MailboxSerializer
 import org.apache.james.jmap.mail.{InvalidPatchException, InvalidPropertyException, InvalidUpdateException, MailboxGet, MailboxPatchObject, MailboxSetRequest, MailboxSetResponse, MailboxUpdateResponse, NameUpdate, ParentIdUpdate, ServerSetPropertyException, UnparsedMailboxId, UnsupportedPropertyUpdatedException, ValidatedMailboxPatchObject}
 import org.apache.james.jmap.method.MailboxSetUpdatePerformer.{MailboxUpdateFailure, MailboxUpdateResult, MailboxUpdateResults, MailboxUpdateSuccess}
 import org.apache.james.mailbox.MailboxManager.{MailboxSearchFetchType, RenameOption}
-import org.apache.james.mailbox.exception.{InsufficientRightsException, MailboxExistsException, MailboxNameException, MailboxNotFoundException}
+import org.apache.james.mailbox.exception.{DifferentDomainException, InsufficientRightsException, MailboxExistsException, MailboxNameException, MailboxNotFoundException}
 import org.apache.james.mailbox.model.search.{MailboxQuery, PrefixedWildcard}
 import org.apache.james.mailbox.model.{MailboxId, MailboxPath}
-import org.apache.james.mailbox.{MailboxManager, MailboxSession, MessageManager, Role, SubscriptionManager}
+import org.apache.james.mailbox.{DefaultMailboxes, MailboxManager, MailboxSession, MessageManager, Role, SubscriptionManager}
 import org.apache.james.util.{AuditTrail, ReactorUtils}
 import org.slf4j.LoggerFactory
 import reactor.core.scala.publisher.{SFlux, SMono}
@@ -87,6 +87,9 @@ object MailboxSetUpdatePerformer {
       case e: IllegalArgumentException =>
         LOGGER.info("Illegal argument in Mailbox/set update", e)
         SetError.invalidArguments(SetErrorDescription(e.getMessage), None)
+      case e: DifferentDomainException =>
+        LOGGER.info("Invalid arguments in Mailbox/set update", e)
+        SetError.invalidArguments(SetErrorDescription("Invalid arguments in Mailbox/set update: different domains"), None)
       case e =>
         LOGGER.error("Failed to update mailbox", e)
         SetError.serverFail(SetErrorDescription(e.getMessage))
@@ -161,31 +164,33 @@ class MailboxSetUpdatePerformer @Inject()(serializer: MailboxSerializer,
                                 validatedPatch: ValidatedMailboxPatchObject,
                                 mailboxSession: MailboxSession): SMono[MailboxUpdateResult] = {
     if (validatedPatch.shouldUpdateMailboxPath) {
-      SMono.fromCallable[MailboxUpdateResult](() => {
-        try {
-          val mailbox = mailboxManager.getMailbox(mailboxId, mailboxSession)
-          if (isASystemMailbox(mailbox)) {
-            throw SystemMailboxChangeException(mailboxId)
-          }
-          if (validatedPatch.parentIdUpdate.flatMap(_.newId).contains(mailboxId)) {
-            throw LoopInMailboxGraphException(mailboxId)
-          }
-          val oldPath = mailbox.getMailboxPath
-          val newPath = applyParentIdUpdate(mailboxId, validatedPatch.parentIdUpdate, mailboxSession)
-            .andThen(applyNameUpdate(validatedPatch.nameUpdate, mailboxSession))
-            .apply(oldPath)
-          if (!oldPath.equals(newPath)) {
-            mailboxManager.renameMailbox(mailboxId,
-              newPath,
-              RenameOption.RENAME_SUBSCRIPTIONS,
-              mailboxSession)
-          }
-          MailboxUpdateSuccess(mailboxId)
-        } catch {
-          case e: Exception => MailboxUpdateFailure(unparsedMailboxId, e, Some(validatedPatch))
-        }
-      })
-        .subscribeOn(ReactorUtils.BLOCKING_CALL_WRAPPER)
+      SMono(mailboxManager.getMailboxReactive(mailboxId, mailboxSession))
+        .flatMap(mailbox =>
+          SMono.fromCallable[MailboxUpdateResult](() => {
+            try {
+              if (isASystemMailbox(mailbox) && !DefaultMailboxes.INBOX.equalsIgnoreCase(mailbox.getMailboxPath.getName)) {
+                throw SystemMailboxChangeException(mailboxId)
+              }
+              if (validatedPatch.parentIdUpdate.flatMap(_.newId).contains(mailboxId)) {
+                throw LoopInMailboxGraphException(mailboxId)
+              }
+              val oldPath = mailbox.getMailboxPath
+              val newPath = applyParentIdUpdate(mailboxId, validatedPatch.parentIdUpdate, mailboxSession)
+                .andThen(applyNameUpdate(validatedPatch.nameUpdate, mailboxSession))
+                .apply(oldPath)
+              if (!oldPath.equals(newPath)) {
+                mailboxManager.renameMailbox(mailboxId,
+                  newPath,
+                  RenameOption.RENAME_SUBSCRIPTIONS,
+                  mailboxSession)
+              }
+              MailboxUpdateSuccess(mailboxId)
+            } catch {
+              case e: Exception => MailboxUpdateFailure(unparsedMailboxId, e, Some(validatedPatch))
+            }
+          }).subscribeOn(ReactorUtils.BLOCKING_CALL_WRAPPER)
+            .flatMap(updateResult => createInboxIfNeeded(mailbox.getMailboxPath, mailboxSession)
+              .`then`(SMono.just(updateResult))))
     } else {
       SMono.just[MailboxUpdateResult](MailboxUpdateSuccess(mailboxId))
     }
@@ -252,7 +257,7 @@ class MailboxSetUpdatePerformer @Inject()(serializer: MailboxSerializer,
           .action("Mailbox/set update")
           .parameters(() => ImmutableMap.of("loggedInUser", mailboxSession.getLoggedInUser.toScala.map(_.asString()).getOrElse(""),
             "delegator", mailboxSession.getUser.asString(),
-            "delegatee", partialUpdate.username.asString(),
+            "delegatee", partialUpdate.entryKey.getName,
             "mailboxId", mailboxId.serialize(),
             "rights", partialUpdate.rights.asJava.serialize()))
           .log("JMAP mailbox shared.")),
@@ -266,6 +271,21 @@ class MailboxSetUpdatePerformer @Inject()(serializer: MailboxSerializer,
 
   }
 
-  private def isASystemMailbox(mailbox: MessageManager): Boolean = Role.from(mailbox.getMailboxPath.getName).isPresent
+  private def createInboxIfNeeded(existingPath: MailboxPath, session: MailboxSession): SMono[Unit] = {
+    if (!existingPath.getName.equalsIgnoreCase(DefaultMailboxes.INBOX)) {
+      return SMono.empty
+    }
+    SMono(mailboxManager.mailboxExists(existingPath, session)).flatMap(exists => createInbox(exists, existingPath, session))
+  }
 
+  private def createInbox(exists: Boolean, existingPath: MailboxPath, session: MailboxSession): SMono[Unit] = {
+    if (exists) {
+      return SMono.empty
+    }
+    SMono(mailboxManager.createMailboxReactive(existingPath, session))
+      .`then`()
+  }
+
+  private def isASystemMailbox(mailbox: MessageManager): Boolean =
+    Role.from(mailbox.getMailboxPath.getName).isPresent
 }

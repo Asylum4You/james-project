@@ -37,7 +37,7 @@ Finally, please note that in case of a malformed URL the 400 bad request respons
  - [Administrating quotas by users](#Administrating_quotas_by_users)
  - [Administrating quotas by domains](#Administrating_quotas_by_domains)
  - [Administrating global quotas](#Administrating_global_quotas)
- - [Administrating DropLists](#administrating-droplists)
+ - [Administrating DropLists](#Administrating_DropLists)
  - [Cassandra Schema upgrades](#Cassandra_Schema_upgrades)
  - [Correcting ghost mailbox](#Correcting_ghost_mailbox)
  - [Creating address aliases](#Creating_address_aliases)
@@ -491,6 +491,18 @@ The answer looks like:
 Response codes:
 
  - 200: The user name list was successfully retrieved
+
+Additional query parameters are supported:
+
+- `hasNoMailboxes` allows you to select users who don't have any mailboxes (also means that they have never logged in and received any emails).
+```
+curl -XGET http://ip:port/users?hasNoMailboxes
+```
+
+- `hasNotAllSystemMailboxes` allows you to select users who don't have enough system mailboxes (also means that they have never logged in but received some emails).
+```
+curl -XGET http://ip:port/users?hasNotAllSystemMailboxes
+```
 
 ### Retrieving the list of allowed `From` headers for a given user
 
@@ -2532,22 +2544,10 @@ Owner scopes:
 
 The `deniedEntityType` query parameter is optional and can take the values `domain` or `address`.
 
-- [Getting the DropList](#getting-the-droplist)
-    * [Global DropList](#global-droplist)
-    * [Domain DropList](#domain-droplist)
-    * [User DropList](#user-droplist)
-- [Testing a denied entity existence](#testing-a-denied-entity-existence)
-    * [Global DropList](#global-droplist-1)
-    * [Domain DropList](#domain-droplist-1)
-    * [User DropList](#user-droplist-1)
-- [Add Entry to the DropList](#add-entry-to-the-droplist)
-    * [Global DropList](#global-droplist-2)
-    * [Domain DropList](#domain-droplist-2)
-    * [User DropList](#user-droplist-2)
-- [Remove Entry from the DropList](#remove-entry-from-the-droplist)
-    * [Global DropList](#global-droplist-3)
-    * [Domain DropList](#domain-droplist-3)
-    * [User DropList](#user-droplist-3)
+- [Getting the DropList](#Getting_the_DropList)
+- [Testing a denied entity existence](#Testing_a_denied_entity_existence)
+- [Add Entry to the DropList](#Add_Entry_to_the_DropList)
+- [Remove Entry from the DropList](#Remove_Entry_from_the_DropList)
 
 ### Getting the DropList
 #### Global DropList
@@ -4921,7 +4921,10 @@ Response codes :
  - 201: the taskId of the created task
  - 400: Invalid action argument for performing operation on mappings data
 
-## Reloading server certificates
+
+## Server administration
+
+### Reloading server certificates
 
 Certificates for TCP based protocols (IMAP, SMTP, POP3, LMTP and ManageSieve) can be updated at
 runtime, without service interuption and without closing existing connections.
@@ -4943,3 +4946,141 @@ Return code:
 
  - 204: the certificate is reloaded
  - 400: Invalid request.
+
+### Disconnecting users
+
+James maintains a set of stateful connections and provide an API allowing to close any of the existing
+connections, including:
+
+- IMAP protocol
+- SMTP protocol
+- JMAP websocket and event source sub protocols
+
+James keeps track of active channels and would iterate through them, destroying corresponding channels.
+
+#### Disconnecting a specific user
+
+```
+curl -XDELETE /servers/channels/bob@domain.tld
+```
+
+Will destroy channels belonging to `bob@domain.tld`.
+
+Return code:
+
+- 204: the certificate is reloaded
+
+#### Disconnecting all users
+
+```
+curl -XDELETE /servers/channels
+```
+
+Will close all channels.
+
+Return code:
+
+- 204: the certificate is reloaded
+
+#### Disconnecting a group of users
+
+```
+curl -XDELETE /servers/channels -d `["badGuy1@domain.tld","badGuy1@domain.tld"]`
+```
+
+Will disconnect `badGuy1@domain.tld` and `badGuy2@domain.tld`.
+
+Return code:
+
+- 204: the certificate is reloaded
+- 400: Invalid request
+
+### Listing connected users
+
+```
+curl -XGET /servers/connectedUsers
+```
+
+Will return a list of users having channels opened on the server:
+
+```
+[
+"alice@domain.tld",
+"bob@domain.tld"
+]
+```
+
+### Listing channels of a user
+
+```
+curl -XGET /servers/channels/bob@domain
+```
+
+Will return a description and statistics for channels of a user:
+
+```
+[
+ {
+  "protocol": "IMAP",
+  "endpoint": "imapserver",
+  "remoteAddress": "127.0.0.1",
+  "connectionDate": "2024-11-21T10:46:37.476425406Z",
+  "isActive": true,
+  "isOpen": true,
+  "isWritable": true,
+  "isEncrypted": false,
+  "username": "bob@domain",
+  "protocolSpecificInformation": {
+    "loggedInUser": "bob@domain",
+    "isCompressed": "false",
+    "selectedMailbox": "1",
+    "isIdling": "false",
+    "requestCount": "3",
+    "userAgent": "{name=Thunderbird, version=102.7.1}",
+    "cumulativeWrittenBytes": "448",
+    "cumulativeReadBytes": "103",
+    "liveReadThroughputBytePerSecond": "0",
+    "liveWriteThroughputBytePerSecond": "0"
+  }
+ }
+]
+```
+
+
+### Listing all channels
+
+```
+curl -XGET /servers/channels
+```
+
+Will return a description and statistics for channels of all users:
+
+```
+[
+ {
+  "protocol": "IMAP",
+  "endpoint": "imapserver",
+  "remoteAddress": "127.0.0.1",
+  "connectionDate": "2024-11-21T10:46:37.476425406Z",
+  "isActive": true,
+  "isOpen": true,
+  "isWritable": true,
+  "isEncrypted": false,
+  "username": "bob@domain",
+  "protocolSpecificInformation": {
+    "loggedInUser": "bob@domain",
+    "isCompressed": "false",
+    "selectedMailbox": "1",
+    "isIdling": "false",
+    "requestCount": "3",
+    "userAgent": "{name=Thunderbird, version=102.7.1}",
+    "cumulativeWrittenBytes": "448",
+    "cumulativeReadBytes": "103",
+    "liveReadThroughputBytePerSecond": "0",
+    "liveWriteThroughputBytePerSecond": "0"
+  }
+ }
+]
+```
+
+Be warned that the output can be very large if a significant count of channels is opened.

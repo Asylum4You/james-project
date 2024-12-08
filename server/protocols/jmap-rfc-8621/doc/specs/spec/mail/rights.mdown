@@ -21,6 +21,14 @@ If specified, behavioral changes and additional fields defined hereafter MUST ap
 
 If unspecified no additional fields to the Mailbox object are returned, and the behaviour needs to be exactly the one of `urn:ietf:params:jmap:mail`.
 
+## Addition to the capability object
+
+Servers supporting *subaddressing* need to advertise it through the session capabilities by adding the following field to the `urn:apache:james:params:jmap:mail:shares` capability object:
+
+- `subaddressingSupported`: *true*
+
+If this field is not present, then it should be assumed that subaddressing is NOT supported.
+
 ## Addition to existing data types
 
 The following data types are defined:
@@ -39,6 +47,7 @@ The following `Right`s are defined:
  - `"w"` Write: the user can alter the Keywords of messages contained in this Mailbox, except the `$Seen` keyword
  - `"s"` Seen: the user can alter the `$Seen` keyword of messages contained in this Mailbox
  - `"e"` Expunge: the user can mark Email as Expunged in this Mailbox. This action is not achievable using JMAP.
+ - `"p"` Post: the user can send an Email to this Mailbox. This is used with the identifier `anyone` in the context of subaddressing.
 
 `UserRights` is an array of `Right`, representing the actions a user can perform on a mailbox.
 
@@ -64,7 +73,7 @@ Namely:
  - `Mailbox/get`, `Mailbox/query`, `Mailbox/queryChanges`, `Mailbox/changes` need to accept or return delegated.
  - `Thread/get`, `Thread/changes` need to accept of return Threads in mailboxes the account user can access.
  - `Email/get`, `Email/set`, `Email/query`, `Email/changes`, `Email/queryChanges`, `Email/copy`, `Email/import`, `Email/import` need to accept or return matching Emails in delegated mailboxes the account user can access.
- - `SearchSnippet/get` needs to accept delegated Emails as a valid input.
+ - `SearchSnippet/get` needs to accept or return matching search snippet in delegated mailboxes the account user can access.
 
 Sharee MUST not be able to modify a shared mailbox via `Mailbox/set`.
 

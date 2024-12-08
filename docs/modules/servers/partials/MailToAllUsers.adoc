@@ -1,0 +1,17 @@
+=== MailToAllUsers
+
+A mailet that helps to email to all users in the system.
+
+==== Sample configuration
+
+[source,xml]
+----
+<matcher name="notify-matcher" match="org.apache.james.mailetcontainer.impl.matchers.And">
+    <matcher match="SenderIs=admin@gov.org"/>
+    <matcher match="RecipientIs=all@gov.org"/>
+</matcher>
+<mailet match="notify-matcher" class="MailToAllUsers"/>
+----
+
+
+

@@ -20,6 +20,8 @@
 package org.apache.james;
 
 import org.apache.james.data.UsersRepositoryModuleChooser;
+import org.apache.james.mailbox.extractor.TextExtractor;
+import org.apache.james.mailbox.store.extractor.JsoupTextExtractor;
 import org.apache.james.modules.MailboxModule;
 import org.apache.james.modules.MailetProcessingModule;
 import org.apache.james.modules.RunArgumentsModule;
@@ -31,6 +33,7 @@ import org.apache.james.modules.mailbox.DefaultEventModule;
 import org.apache.james.modules.mailbox.JPAMailboxModule;
 import org.apache.james.modules.mailbox.LuceneSearchMailboxModule;
 import org.apache.james.modules.mailbox.MemoryDeadLetterModule;
+import org.apache.james.modules.mailbox.ReIndexingTaskSerializationModule;
 import org.apache.james.modules.protocols.IMAPServerModule;
 import org.apache.james.modules.protocols.LMTPServerModule;
 import org.apache.james.modules.protocols.ManageSieveServerModule;
@@ -81,14 +84,19 @@ public class JPAJamesServerMain implements JamesServerMain {
         new SMTPServerModule(),
         WEBADMIN);
 
+    private static final Module SEARCH_MODULE = Modules.combine(
+        new LuceneSearchMailboxModule(),
+        binder -> binder.bind(TextExtractor.class).toInstance(new JsoupTextExtractor()));
+
     private static final Module JPA_SERVER_MODULE = Modules.combine(
+        SEARCH_MODULE,
         new ActiveMQQueueModule(),
         new NaiveDelegationStoreModule(),
         new DefaultProcessorsConfigurationProviderModule(),
         new JPADataModule(),
         new JPAMailboxModule(),
         new MailboxModule(),
-        new LuceneSearchMailboxModule(),
+        new ReIndexingTaskSerializationModule(),
         new NoJwtModule(),
         new RawPostDequeueDecoratorModule(),
         new SieveJPARepositoryModules(),

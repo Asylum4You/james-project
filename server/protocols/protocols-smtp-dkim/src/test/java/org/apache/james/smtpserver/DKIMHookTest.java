@@ -19,6 +19,7 @@
 
 package org.apache.james.smtpserver;
 
+import static org.apache.james.smtpserver.DKIMHook.Config.DEFAULT_VALIDATED_ENTITIES;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.Optional;
@@ -26,8 +27,10 @@ import java.util.Optional;
 import org.apache.commons.configuration2.BaseHierarchicalConfiguration;
 import org.apache.james.core.Domain;
 import org.apache.james.core.MaybeSender;
+import org.apache.james.core.builder.MimeMessageBuilder;
 import org.apache.james.jdkim.tagvalue.SignatureRecordImpl;
 import org.apache.james.protocols.smtp.hook.HookReturnCode;
+import org.apache.james.smtpserver.DKIMHook.Config.ValidatedEntity;
 import org.apache.mailet.base.test.FakeMail;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -70,6 +73,34 @@ class DKIMHookTest {
                 .test(FakeMail.builder()
                     .name("mail")
                     .sender("bob@other.com")
+                    .build()))
+                .isFalse();
+        }
+
+        @Test
+        void onlyForSenderDomainShouldKeepWhenHeaderFromDomainMatches() throws Exception {
+            assertThat(DKIMHook.DKIMCheckNeeded.onlyForHeaderFromDomain(Domain.LOCALHOST)
+                .test(FakeMail.builder()
+                    .name("mail")
+                    .sender("bob@other.com")
+                    .mimeMessage(MimeMessageBuilder.mimeMessageBuilder()
+                        .addFrom("bob@localhost")
+                        .setText("This is my email")
+                        .build())
+                    .build()))
+                .isTrue();
+        }
+
+        @Test
+        void onlyForSenderDomainShouldRejectWhenHeaderFromDomainDoesNotMatches() throws Exception {
+            assertThat(DKIMHook.DKIMCheckNeeded.onlyForHeaderFromDomain(Domain.LOCALHOST)
+                .test(FakeMail.builder()
+                    .name("mail")
+                    .sender("bob@other.com")
+                    .mimeMessage(MimeMessageBuilder.mimeMessageBuilder()
+                        .addFrom("bob@other.com")
+                        .setText("This is my email")
+                        .build())
                     .build()))
                 .isFalse();
         }
@@ -205,7 +236,8 @@ class DKIMHookTest {
             BaseHierarchicalConfiguration configuration = new BaseHierarchicalConfiguration();
 
             assertThat(DKIMHook.Config.parse(configuration))
-                .isEqualTo(new DKIMHook.Config(true, true, Optional.empty(), Optional.empty()));
+                .isEqualTo(new DKIMHook.Config(true, true, Optional.empty(),
+                    DEFAULT_VALIDATED_ENTITIES, Optional.empty()));
         }
 
         @Test
@@ -214,11 +246,12 @@ class DKIMHookTest {
             configuration.addProperty("forceCRLF", false);
             configuration.addProperty("signatureRequired", false);
             configuration.addProperty("onlyForSenderDomain", "linagora.com");
+            configuration.addProperty("validatedEntities", "envelope");
             configuration.addProperty("expectedDToken", "apache.org");
 
             assertThat(DKIMHook.Config.parse(configuration))
-                .isEqualTo(new DKIMHook.Config(false, false,
-                    Optional.of(Domain.of("linagora.com")), Optional.of("apache.org")));
+                .isEqualTo(new DKIMHook.Config(false, false, Optional.of(Domain.of("linagora.com")),
+                    ImmutableList.of(ValidatedEntity.envelope), Optional.of("apache.org")));
         }
     }
 }

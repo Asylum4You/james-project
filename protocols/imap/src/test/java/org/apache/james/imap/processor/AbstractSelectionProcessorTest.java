@@ -30,6 +30,8 @@ import org.apache.james.imap.api.message.IdRange;
 import org.apache.james.imap.api.message.UidRange;
 import org.apache.james.imap.api.message.response.StatusResponseFactory;
 import org.apache.james.imap.api.process.SelectedMailbox;
+import org.apache.james.imap.main.PathConverter;
+import org.apache.james.mailbox.MailboxCounterCorrector;
 import org.apache.james.mailbox.MailboxManager;
 import org.apache.james.mailbox.MessageUid;
 import org.apache.james.metrics.api.MetricFactory;
@@ -45,7 +47,8 @@ public class AbstractSelectionProcessorTest {
         EventBus eventBus = null;
         StatusResponseFactory statusResponseFactory = null;
         MetricFactory metricFactory = null;
-        testee = new SelectProcessor(mailboxManager, eventBus, statusResponseFactory, metricFactory);
+        MailboxCounterCorrector mailboxCounterCorrector = null;
+        testee = new SelectProcessor(mailboxManager, eventBus, statusResponseFactory, metricFactory, PathConverter.Factory.DEFAULT, mailboxCounterCorrector);
     }
 
     @Test

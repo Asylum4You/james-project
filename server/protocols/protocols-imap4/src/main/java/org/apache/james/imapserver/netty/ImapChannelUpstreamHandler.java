@@ -18,6 +18,7 @@
  ****************************************************************/
 package org.apache.james.imapserver.netty;
 
+import static org.apache.james.imap.api.process.ImapSession.MDC_KEY;
 import static org.apache.james.imapserver.netty.IMAPServer.AuthenticationConfiguration;
 
 import java.io.Closeable;
@@ -31,6 +32,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 import javax.net.ssl.SSLHandshakeException;
 
@@ -64,6 +66,7 @@ import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.channel.group.ChannelGroup;
 import io.netty.handler.codec.DecoderException;
 import io.netty.handler.codec.TooLongFrameException;
 import io.netty.handler.ssl.NotSslRecordException;
@@ -78,7 +81,6 @@ import reactor.core.publisher.Mono;
 @ChannelHandler.Sharable
 public class ImapChannelUpstreamHandler extends ChannelInboundHandlerAdapter implements NettyConstants {
     private static final Logger LOGGER = LoggerFactory.getLogger(ImapChannelUpstreamHandler.class);
-    public static final String MDC_KEY = "bound_MDC";
 
     public static class ImapChannelUpstreamHandlerBuilder {
         private String hello;
@@ -93,6 +95,7 @@ public class ImapChannelUpstreamHandler extends ChannelInboundHandlerAdapter imp
         private ReactiveThrottler reactiveThrottler;
         private Set<ConnectionCheck> connectionChecks;
         private boolean proxyRequired;
+        private ChannelGroup imapChannelGroup;
 
         public ImapChannelUpstreamHandlerBuilder reactiveThrottler(ReactiveThrottler reactiveThrottler) {
             this.reactiveThrottler = reactiveThrottler;
@@ -154,8 +157,13 @@ public class ImapChannelUpstreamHandler extends ChannelInboundHandlerAdapter imp
             return this;
         }
 
+        public ImapChannelUpstreamHandlerBuilder imapChannelGroup(ChannelGroup imapChannelGroup) {
+            this.imapChannelGroup = imapChannelGroup;
+            return this;
+        }
+
         public ImapChannelUpstreamHandler build() {
-            return new ImapChannelUpstreamHandler(hello, processor, encoder, compress, secure, imapMetrics, authenticationConfiguration, ignoreIDLEUponProcessing, (int) heartbeatInterval.toSeconds(), reactiveThrottler, connectionChecks, proxyRequired);
+            return new ImapChannelUpstreamHandler(hello, processor, encoder, compress, secure, imapMetrics, authenticationConfiguration, ignoreIDLEUponProcessing, (int) heartbeatInterval.toSeconds(), reactiveThrottler, connectionChecks, proxyRequired, imapChannelGroup);
         }
     }
 
@@ -181,11 +189,12 @@ public class ImapChannelUpstreamHandler extends ChannelInboundHandlerAdapter imp
     private final ReactiveThrottler reactiveThrottler;
     private final Set<ConnectionCheck> connectionChecks;
     private final boolean proxyRequired;
+    private final ChannelGroup imapChannelGroup;
 
     public ImapChannelUpstreamHandler(String hello, ImapProcessor processor, ImapEncoder encoder, boolean compress,
                                       Encryption secure, ImapMetrics imapMetrics, AuthenticationConfiguration authenticationConfiguration,
                                       boolean ignoreIDLEUponProcessing, int heartbeatIntervalSeconds, ReactiveThrottler reactiveThrottler,
-                                      Set<ConnectionCheck> connectionChecks, boolean proxyRequired) {
+                                      Set<ConnectionCheck> connectionChecks, boolean proxyRequired, ChannelGroup imapChannelGroup) {
         this.hello = hello;
         this.processor = processor;
         this.encoder = encoder;
@@ -199,15 +208,18 @@ public class ImapChannelUpstreamHandler extends ChannelInboundHandlerAdapter imp
         this.reactiveThrottler = reactiveThrottler;
         this.connectionChecks = connectionChecks;
         this.proxyRequired = proxyRequired;
+        this.imapChannelGroup = imapChannelGroup;
     }
 
     @Override
     public void channelActive(ChannelHandlerContext ctx) throws Exception {
+        imapChannelGroup.add(ctx.channel());
         SessionId sessionId = SessionId.generate();
         ImapSession imapsession = new NettyImapSession(ctx.channel(), secure, compress, authenticationConfiguration.isSSLRequired(),
             authenticationConfiguration.isPlainAuthEnabled(), sessionId,
             authenticationConfiguration.getOidcSASLConfiguration());
         ctx.channel().attr(IMAP_SESSION_ATTRIBUTE_KEY).set(imapsession);
+        ctx.channel().attr(REQUEST_COUNTER).set(new AtomicLong());
         ctx.channel().attr(LINEARIZER_ATTRIBUTE_KEY).set(new ImapLinerarizer());
         MDCBuilder boundMDC = IMAPMDCContext.boundMDC(ctx)
             .addToContext(MDCBuilder.SESSION_ID, sessionId.asString());
@@ -254,12 +266,7 @@ public class ImapChannelUpstreamHandler extends ChannelInboundHandlerAdapter imp
 
     private MDCBuilder mdc(ImapSession imapSession) {
         return Optional.ofNullable(imapSession)
-            .map(session -> {
-                MDCBuilder boundMDC = (MDCBuilder) session.getAttribute(MDC_KEY);
-
-                return IMAPMDCContext.from(session)
-                    .addToContext(boundMDC);
-            })
+            .map(ImapSession::mdc)
             .orElseGet(MDCBuilder::create);
     }
 
@@ -267,6 +274,7 @@ public class ImapChannelUpstreamHandler extends ChannelInboundHandlerAdapter imp
     public void channelInactive(ChannelHandlerContext ctx) throws Exception {
         // remove the stored attribute for the channel to free up resources
         // See JAMES-1195
+        imapChannelGroup.remove(ctx.channel());
         ImapSession imapSession = ctx.channel().attr(IMAP_SESSION_ATTRIBUTE_KEY).getAndSet(null);
         try (Closeable closeable = mdc(imapSession).build()) {
             InetSocketAddress address = (InetSocketAddress) ctx.channel().remoteAddress();
@@ -297,7 +305,7 @@ public class ImapChannelUpstreamHandler extends ChannelInboundHandlerAdapter imp
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
         ImapSession imapSession = ctx.channel().attr(IMAP_SESSION_ATTRIBUTE_KEY).getAndSet(null);
         String username = retrieveUsername(imapSession);
-        try (Closeable closeable = mdc(ctx).build()) {
+        try (Closeable closeable = mdc(imapSession).build()) {
             if (cause instanceof SocketException) {
                 LOGGER.info("Socket exception encountered for user {}: {}", username, cause.getMessage());
             } else if (isSslHandshkeException(cause)) {
@@ -305,7 +313,7 @@ public class ImapChannelUpstreamHandler extends ChannelInboundHandlerAdapter imp
             } else if (isNotSslRecordException(cause)) {
                 LOGGER.info("Not an SSL record {}", cause.getMessage());
             } else if (!(cause instanceof ClosedChannelException)) {
-                LOGGER.warn("Error while processing imap request", cause);
+                LOGGER.error("Error while processing imap request", cause);
             }
 
             if (cause instanceof TooLongFrameException) {
@@ -395,6 +403,9 @@ public class ImapChannelUpstreamHandler extends ChannelInboundHandlerAdapter imp
         imapCommandsMetric.increment();
         ImapSession session = ctx.channel().attr(IMAP_SESSION_ATTRIBUTE_KEY).get();
         Attribute<Disposable> disposableAttribute = ctx.channel().attr(REQUEST_IN_FLIGHT_ATTRIBUTE_KEY);
+        Optional.ofNullable(ctx.channel().attr(REQUEST_COUNTER))
+            .flatMap(counter -> Optional.ofNullable(counter.get()))
+            .ifPresent(AtomicLong::incrementAndGet);
 
         ImapLinerarizer linearalizer = ctx.channel().attr(LINEARIZER_ATTRIBUTE_KEY).get();
         synchronized (linearalizer) {
@@ -450,11 +461,13 @@ public class ImapChannelUpstreamHandler extends ChannelInboundHandlerAdapter imp
                     ctx.fireChannelReadComplete();
                     if (signal.isOnComplete() || signal.isOnError()) {
                         if (waitingMessage != null && signal.isOnComplete()) {
-                            channelRead(ctx, waitingMessage);
+                            ctx.channel().eventLoop().execute(
+                                () -> channelRead(ctx, waitingMessage));
                         }
                     }
                 }))
-                .contextWrite(ReactorUtils.context("imap", mdc(session))), message)
+                .contextWrite(ReactorUtils.context("imap", mdc(session))), message,
+                runnable -> ctx.channel().eventLoop().execute(runnable))
             // Manage throttling errors
             .doOnError(ctx::fireExceptionCaught)
             .doFinally(Throwing.consumer(any -> {

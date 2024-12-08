@@ -18,20 +18,30 @@
  ****************************************************************/
 package org.apache.james.smtpserver.netty;
 
+import static org.apache.james.protocols.netty.BasicChannelInboundHandler.CONNECTION_DATE;
+import static org.apache.james.protocols.netty.BasicChannelInboundHandler.SESSION_ATTRIBUTE_KEY;
 import static org.apache.james.smtpserver.netty.SMTPServer.AuthenticationAnnounceMode.ALWAYS;
 import static org.apache.james.smtpserver.netty.SMTPServer.AuthenticationAnnounceMode.NEVER;
 
+import java.net.InetSocketAddress;
 import java.net.MalformedURLException;
+import java.net.SocketAddress;
 import java.net.URISyntaxException;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Predicate;
+import java.util.stream.Stream;
 
 import jakarta.inject.Inject;
 
 import org.apache.commons.configuration2.HierarchicalConfiguration;
 import org.apache.commons.configuration2.ex.ConfigurationException;
 import org.apache.commons.configuration2.tree.ImmutableNode;
+import org.apache.james.core.ConnectionDescription;
+import org.apache.james.core.ConnectionDescriptionSupplier;
+import org.apache.james.core.Disconnector;
+import org.apache.james.core.Username;
 import org.apache.james.dnsservice.api.DNSService;
 import org.apache.james.dnsservice.library.netmatcher.NetMatcher;
 import org.apache.james.protocols.api.OidcSASLConfiguration;
@@ -44,6 +54,7 @@ import org.apache.james.protocols.netty.AllButStartTlsLineChannelHandlerFactory;
 import org.apache.james.protocols.netty.ChannelHandlerFactory;
 import org.apache.james.protocols.smtp.SMTPConfiguration;
 import org.apache.james.protocols.smtp.SMTPProtocol;
+import org.apache.james.protocols.smtp.SMTPSession;
 import org.apache.james.smtpserver.CoreCmdHandlerLoader;
 import org.apache.james.smtpserver.ExtendedSMTPSession;
 import org.apache.james.smtpserver.jmx.JMXHandlersLoader;
@@ -51,14 +62,20 @@ import org.apache.james.util.Size;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 
+import io.netty.buffer.Unpooled;
+import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.channel.group.DefaultChannelGroup;
+import io.netty.util.concurrent.GlobalEventExecutor;
+
 
 /**
  * NIO SMTPServer which use Netty
  */
-public class SMTPServer extends AbstractProtocolAsyncServer implements SMTPServerMBean {
+public class SMTPServer extends AbstractProtocolAsyncServer implements SMTPServerMBean, Disconnector, ConnectionDescriptionSupplier {
     private static final Logger LOGGER = LoggerFactory.getLogger(SMTPServer.class);
     private SMTPProtocol transport;
 
@@ -184,6 +201,7 @@ public class SMTPServer extends AbstractProtocolAsyncServer implements SMTPServe
      */
     private final SMTPConfiguration theConfigData = new SMTPHandlerConfigurationDataImpl();
     private final SmtpMetrics smtpMetrics;
+    private final DefaultChannelGroup smtpChannelGroup;
     private Set<String> disabledFeatures = ImmutableSet.of();
 
     private boolean addressBracketsEnforcement = true;
@@ -195,6 +213,7 @@ public class SMTPServer extends AbstractProtocolAsyncServer implements SMTPServe
 
     public SMTPServer(SmtpMetrics smtpMetrics) {
         this.smtpMetrics = smtpMetrics;
+        this.smtpChannelGroup = new DefaultChannelGroup(GlobalEventExecutor.INSTANCE);
     }
 
     @Inject
@@ -392,7 +411,7 @@ public class SMTPServer extends AbstractProtocolAsyncServer implements SMTPServe
 
     @Override
     protected ChannelInboundHandlerAdapter createCoreHandler() {
-        return new SMTPChannelInboundHandler(transport, getEncryption(), proxyRequired, smtpMetrics);
+        return new SMTPChannelInboundHandler(transport, getEncryption(), proxyRequired, smtpMetrics, smtpChannelGroup);
     }
 
     @Override
@@ -412,5 +431,43 @@ public class SMTPServer extends AbstractProtocolAsyncServer implements SMTPServe
 
     public AuthenticationAnnounceMode getAuthRequired() {
         return authenticationConfiguration.getAuthenticationAnnounceMode();
+    }
+
+    @Override
+    public void disconnect(Predicate<Username> user) {
+        smtpChannelGroup.stream()
+            .filter(channel -> {
+                if (channel.attr(SESSION_ATTRIBUTE_KEY).get() instanceof SMTPSession smtpSession) {
+                    return user.test(smtpSession.getUsername());
+                }
+                return false;
+            })
+            .forEach(channel -> channel.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE));
+    }
+
+    @Override
+    public Stream<ConnectionDescription> describeConnections() {
+        return smtpChannelGroup.stream()
+            .map(channel -> {
+                Optional<ProtocolSession> pSession = Optional.ofNullable(channel.attr(SESSION_ATTRIBUTE_KEY).get())
+                    .map(session -> (ProtocolSession) session);
+                return new ConnectionDescription("SMTP",
+                    jmxName,
+                    Optional.ofNullable(channel.remoteAddress()).map(this::addressAsString),
+                    Optional.ofNullable(channel.attr(CONNECTION_DATE)).flatMap(attribute -> Optional.ofNullable(attribute.get())),
+                    channel.isActive(),
+                    channel.isOpen(),
+                    channel.isWritable(),
+                    pSession.map(p -> p.getSSLSession().isPresent()).orElse(false),
+                    pSession.flatMap(session -> Optional.ofNullable(session.getUsername())),
+                    ImmutableMap.of());
+            });
+    }
+
+    private String addressAsString(SocketAddress socketAddress) {
+        if (socketAddress instanceof InetSocketAddress address) {
+            return address.getAddress().getHostAddress();
+        }
+        return socketAddress.toString();
     }
 }

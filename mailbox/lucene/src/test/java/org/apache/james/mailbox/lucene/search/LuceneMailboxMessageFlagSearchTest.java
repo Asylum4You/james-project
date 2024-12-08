@@ -18,7 +18,7 @@
  ****************************************************************/
 package org.apache.james.mailbox.lucene.search;
 
-import static org.apache.james.mailbox.lucene.search.LuceneMessageSearchIndex.ID_FIELD;
+import static org.apache.james.mailbox.lucene.search.DocumentFieldConstants.ID_FIELD;
 import static org.apache.james.mailbox.lucene.search.LuceneTestsUtils.documentStringFormatter;
 import static org.apache.james.mailbox.lucene.search.LuceneTestsUtils.getAllDocumentsFromRepository;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -47,6 +47,7 @@ import org.apache.james.mailbox.model.MessageRange;
 import org.apache.james.mailbox.model.SearchQuery;
 import org.apache.james.mailbox.store.StoreMailboxManager;
 import org.apache.james.mailbox.store.StoreMessageManager;
+import org.apache.james.mailbox.store.extractor.JsoupTextExtractor;
 import org.apache.james.mailbox.store.search.MessageSearchIndex;
 import org.apache.james.utils.UpdatableTickingClock;
 import org.apache.lucene.document.Document;
@@ -156,7 +157,7 @@ class LuceneMailboxMessageFlagSearchTest {
                 .listeningSearchIndex(Throwing.function(preInstanciationStage -> new LuceneMessageSearchIndex(
                         preInstanciationStage.getMapperFactory(), new InMemoryId.Factory(), new ByteBuffersDirectory(),
                         new InMemoryMessageId.Factory(),
-                        preInstanciationStage.getSessionProvider())))
+                        preInstanciationStage.getSessionProvider(), new JsoupTextExtractor())))
                 .noPreDeletionHooks()
                 .storeQuotaManager()
                 .build();

@@ -222,7 +222,6 @@ class IMAPServerTest {
     class ConnectionCheckTest {
 
         IMAPServer imapServer;
-        private final IpConnectionCheck ipConnectionCheck = new IpConnectionCheck();
         private int port;
 
         @BeforeEach
@@ -246,6 +245,17 @@ class IMAPServerTest {
 
             assertThatThrownBy(() -> testIMAPClient.connect("127.0.0.1", port)
                 .login(USER.asString(), USER_PASS)
+                .append("INBOX", SMALL_MESSAGE));
+        }
+
+        @Test
+        void logoutShouldDisconnectUser() throws Exception {
+            testIMAPClient.connect("127.0.0.1", port)
+                .login(USER.asString(), USER_PASS);
+
+            imapServer.disconnect(USER::equals);
+
+            assertThatThrownBy(() -> testIMAPClient
                 .append("INBOX", SMALL_MESSAGE));
         }
 
@@ -2198,6 +2208,63 @@ class IMAPServerTest {
         }
 
         @Test
+        void idleShouldBeAllowedWhenAuthenticatedState() throws Exception {
+            // Given an authenticated user
+            clientConnection.write(ByteBuffer.wrap(String.format("a0 LOGIN %s %s\r\n", USER.asString(), USER_PASS).getBytes(StandardCharsets.UTF_8)));
+            readBytes(clientConnection);
+
+            // When IDLE command is issued (Authenticated state)
+            clientConnection.write(ByteBuffer.wrap(("a3 IDLE\r\n").getBytes(StandardCharsets.UTF_8)));
+
+            // Then the server should respond Idling response
+            Awaitility.await().atMost(Duration.ofSeconds(2)).untilAsserted(() ->
+                assertThat(readStringUntil(clientConnection, s -> s.contains("+ Idling")))
+                    .isNotNull());
+        }
+
+        @Test
+        void idleShouldDoNothingResponseWhenAuthenticatedStateAndHasNewMessages() throws Exception {
+            // Given an authenticated user
+            clientConnection.write(ByteBuffer.wrap(String.format("a0 LOGIN %s %s\r\n", USER.asString(), USER_PASS).getBytes(StandardCharsets.UTF_8)));
+            readBytes(clientConnection);
+
+            // When IDLE command is issued (Authenticated state)
+            clientConnection.write(ByteBuffer.wrap(("a3 IDLE\r\n").getBytes(StandardCharsets.UTF_8)));
+            readStringUntil(clientConnection, s -> s.contains("+ Idling"));
+
+            // And a new message is appended
+            inbox.appendMessage(MessageManager.AppendCommand.builder().build("h: value\r\n\r\nbody".getBytes()), mailboxSession);
+
+            ImmutableList.Builder<String> listenerResult = ImmutableList.builder();
+            Mono.fromCallable(() -> new String(readBytes(clientConnection), StandardCharsets.US_ASCII))
+                .doOnNext(listenerResult::add)
+                .subscribeOn(Schedulers.boundedElastic()).subscribe();
+
+            Thread.sleep(200);
+            // Then the server should not send any response
+            assertThat(listenerResult.build()).isEmpty();
+        }
+
+        @Test
+        void idleShouldBeInterruptibleWhenAuthenticatedState() throws Exception {
+            // Given an authenticated user
+            clientConnection.write(ByteBuffer.wrap(String.format("a0 LOGIN %s %s\r\n", USER.asString(), USER_PASS).getBytes(StandardCharsets.UTF_8)));
+            readBytes(clientConnection);
+
+            // When IDLE command is issued (Authenticated state)
+            clientConnection.write(ByteBuffer.wrap(("a3 IDLE\r\n").getBytes(StandardCharsets.UTF_8)));
+            readStringUntil(clientConnection, s -> s.contains("+ Idling"));
+
+            // And DONE command is issued
+            clientConnection.write(ByteBuffer.wrap(("DONE\r\n").getBytes(StandardCharsets.UTF_8)));
+
+            // Then the server should respond IDLE completed
+            Awaitility.await().atMost(Duration.ofSeconds(2)).untilAsserted(() ->
+                assertThat(readStringUntil(clientConnection, s -> s.contains("a3 OK IDLE completed.")))
+                    .isNotNull());
+        }
+
+        @Test
         void idleShouldSendInitialContinuation() throws Exception {
             clientConnection.write(ByteBuffer.wrap(String.format("a0 LOGIN %s %s\r\n", USER.asString(), USER_PASS).getBytes(StandardCharsets.UTF_8)));
             readBytes(clientConnection);
@@ -2630,11 +2697,12 @@ class IMAPServerTest {
         private MailboxSession mailboxSession;
         private MessageManager inbox;
         private SocketChannel clientConnection;
+        private int port;
 
         @BeforeEach
         void beforeEach() throws Exception {
             imapServer = createImapServer("imapServer.xml");
-            int port = imapServer.getListenAddresses().get(0).getPort();
+            port = imapServer.getListenAddresses().get(0).getPort();
             mailboxSession = memoryIntegrationResources.getMailboxManager().createSystemSession(USER);
             memoryIntegrationResources.getMailboxManager()
                 .createMailbox(MailboxPath.inbox(USER), mailboxSession);
@@ -2665,6 +2733,28 @@ class IMAPServerTest {
                 .sendCommand("COMPRESS DEFLATE");
 
             assertThat(reply).contains("AAAB BAD COMPRESS failed. Unknown command.");
+        }
+
+        @Test
+        void linearizerShouldBeUsableConcurrently() throws Exception {
+            ConcurrentTestRunner.builder()
+                .operation((a, b) ->  {
+                    SocketChannel clientConnection = SocketChannel.open();
+                    clientConnection.connect(new InetSocketAddress(LOCALHOST_IP, port));
+                    readBytes(clientConnection);
+
+                    clientConnection.write(ByteBuffer.wrap(String.format("a0 LOGIN %s %s\r\n", USER.asString(), USER_PASS).getBytes(StandardCharsets.UTF_8)));
+                    readBytes(clientConnection);
+
+                    for (int i = 0; i < 100; i++) {
+                        clientConnection.write(ByteBuffer.wrap("a0 SELECT INBOX\r\na0 UNSELECT\r\n".getBytes()));
+                    }
+                    clientConnection.write(ByteBuffer.wrap("a1 NOOP\r\n".getBytes()));
+
+                    readStringUntil(clientConnection, s -> s.contains("a1 OK"));
+                }).threadCount(32)
+                .operationCount(1)
+                .runSuccessfullyWithin(Duration.ofMinutes(10));
         }
 
         @Test
@@ -3358,4 +3448,38 @@ class IMAPServerTest {
                     .runSuccessfullyWithin(Duration.ofMinutes(10));
         }
     }
+    
+    @Nested
+    class IDCommandTest {
+        IMAPServer imapServer;
+
+        @AfterEach
+        void tearDown() {
+            if (imapServer != null) {   
+                imapServer.destroy();
+            }
+        }
+
+        @Test
+        void idCommandShouldReturnNILWhenNoConfigured() throws Exception {
+            imapServer = createImapServer("imapServer.xml");
+
+            assertThat(
+                testIMAPClient.connect("127.0.0.1", imapServer.getListenAddresses().getFirst().getPort())
+                    .sendCommand("ID (\"name\" \"Apache James\")"))
+                .contains("* ID NIL")
+                .contains("OK ID completed.");
+        }
+
+        @Test
+        void idCommandShouldReturnConfiguredResponse() throws Exception {
+            imapServer = createImapServer("imapServerIdCommandResponseFields.xml");
+            assertThat(
+                testIMAPClient.connect("127.0.0.1", imapServer.getListenAddresses().getFirst().getPort())
+                    .sendCommand("ID (\"name\" \"Apache James\")"))
+                .contains("* ID (\"name\" \"Apache James\" \"version\" \"3.9.0\")")
+                .contains("OK ID completed.");
+        }
+    }
+
 }

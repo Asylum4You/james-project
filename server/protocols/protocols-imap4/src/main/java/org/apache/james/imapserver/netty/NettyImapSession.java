@@ -30,8 +30,11 @@ import javax.net.ssl.SSLEngine;
 import javax.net.ssl.SSLSession;
 
 import org.apache.commons.lang3.NotImplementedException;
+import org.apache.james.core.Username;
 import org.apache.james.imap.api.ImapSessionState;
+import org.apache.james.imap.api.message.response.ImapResponseMessage;
 import org.apache.james.imap.api.process.ImapLineHandler;
+import org.apache.james.imap.api.process.ImapProcessor;
 import org.apache.james.imap.api.process.ImapSession;
 import org.apache.james.imap.api.process.SelectedMailbox;
 import org.apache.james.imap.encode.ImapResponseWriter;
@@ -40,6 +43,7 @@ import org.apache.james.mailbox.MailboxSession;
 import org.apache.james.protocols.api.OidcSASLConfiguration;
 import org.apache.james.protocols.netty.Encryption;
 import org.apache.james.protocols.netty.LineHandlerAware;
+import org.apache.james.util.MDCBuilder;
 
 import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
@@ -112,6 +116,21 @@ public class NettyImapSession implements ImapSession, NettyConstants {
     }
 
     @Override
+    public ImapProcessor.Responder threadSafe(ImapProcessor.Responder responder) {
+        return new ImapProcessor.Responder() {
+            @Override
+            public void respond(ImapResponseMessage message) {
+                channel.eventLoop().execute(() -> responder.respond(message));
+            }
+
+            @Override
+            public void flush() {
+                channel.eventLoop().execute(responder::flush);
+            }
+        };
+    }
+
+    @Override
     public Mono<Void> logout() {
         return closeMailbox()
             .then(Mono.fromRunnable(() -> state = ImapSessionState.LOGOUT));
@@ -142,6 +161,7 @@ public class NettyImapSession implements ImapSession, NettyConstants {
                 .orElse(Mono.empty()));
     }
 
+
     @Override
     public MailboxSession getMailboxSession() {
         return mailboxSession;
@@ -150,6 +170,25 @@ public class NettyImapSession implements ImapSession, NettyConstants {
     @Override
     public void setMailboxSession(MailboxSession mailboxSession) {
         this.mailboxSession = mailboxSession;
+        addUserToMDC(mailboxSession);
+    }
+
+    private void addUserToMDC(MailboxSession mailboxSession) {
+        setAttribute(MDC_KEY, mdc()
+            .addToContext(MDCBuilder.USER, Optional.ofNullable(mailboxSession.getUser())
+                .map(Username::asString)
+                .orElse("")));
+    }
+
+    @Override
+    public MDCBuilder mdc() {
+        SelectedMailbox mailbox = selectedMailbox.get();
+        if (mailbox != null) {
+            return MDCBuilder.create()
+                .addToContext(ImapSession.super.mdc())
+                .addToContext("selectedMailbox", mailbox.getMailboxId().serialize());
+        }
+        return ImapSession.super.mdc();
     }
 
     @Override
@@ -308,11 +347,6 @@ public class NettyImapSession implements ImapSession, NettyConstants {
             .map(SslHandler.class::cast)
             .map(SslHandler::engine)
             .map(SSLEngine::getSession);
-    }
-
-    @Override
-    public boolean supportMultipleNamespaces() {
-        return false;
     }
 
     @Override
