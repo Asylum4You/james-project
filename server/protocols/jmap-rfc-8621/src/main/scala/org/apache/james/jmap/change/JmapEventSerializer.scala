@@ -19,9 +19,11 @@
 
 package org.apache.james.jmap.change
 
+import java.util
 import java.util.Optional
 
 import com.fasterxml.jackson.annotation.JsonProperty
+import com.google.common.collect.ImmutableList
 import jakarta.inject.Inject
 import org.apache.james.core.Username
 import org.apache.james.events.Event.EventId
@@ -90,4 +92,13 @@ case class JmapEventSerializer @Inject()(stateChangeEventDTOFactory: StateChange
   override def toJsonBytes(event: Event): Array[Byte] =  genericSerializer.serializeToBytes(event)
 
   override def fromBytes(serialized: Array[Byte]): Event = genericSerializer.deserializeFromBytes(serialized)
+
+  override def toJson(event: util.Collection[Event]): String = {
+    if (event.size() != 1) {
+      throw new IllegalArgumentException("Not supported for multiple events, please serialize separately")
+    }
+    toJson(event.iterator().next())
+  }
+
+  override def asEvents(serialized: String): util.List[Event] = ImmutableList.of(asEvent(serialized))
 }
