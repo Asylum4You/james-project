@@ -25,6 +25,9 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
+import org.apache.james.mailbox.model.MailboxConstants;
+import org.apache.james.mailbox.model.MailboxFolderDelimiterAwareTest;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import com.google.re2j.Pattern;
@@ -32,1058 +35,1110 @@ import com.google.re2j.Pattern;
 import nl.jqno.equalsverifier.EqualsVerifier;
 
 class PrefixedRegexTest {
-    private static final char PATH_DELIMITER = '.';
-    private static final String PREFIX = "name";
-    private static final String EMPTY_PREFIX = "";
-
-    @Test
-    public void shouldMatchBeanContract() {
-        EqualsVerifier.forClass(PrefixedRegex.class)
-            .withIgnoredFields("pattern")
-            .withPrefabValues(Pattern.class, Pattern.compile("a"), Pattern.compile("b"))
-            .verify();
-    }
-
-    @Test
-    void slowRegexShouldNotBeConstructedByFuzzing() throws Exception {
-        ExecutorService executorService = Executors.newSingleThreadExecutor();
-
-        try {
-            executorService.submit(() -> {
-                PrefixedRegex prefixedRegex = new PrefixedRegex("", "%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%a", PATH_DELIMITER);
-
-                prefixedRegex.isExpressionMatch("aa%%%%%%%%%%%%%%%%");
-            }).get(30, TimeUnit.SECONDS);
-        } finally {
-            executorService.shutdownNow();
+    @Nested
+    public class DotDelimiter extends TestBase {
+        @Override
+        public char folderDelimiter() {
+            return MailboxConstants.MailboxFolderDelimiter.DOT.value;
         }
     }
 
-    @Test
-    void isWildShouldReturnTrueWhenOnlyFreeWildcard() {
-        PrefixedRegex prefixedRegex = new PrefixedRegex(PREFIX, "*", PATH_DELIMITER);
-
-        boolean actual = prefixedRegex.isWild();
+    @Nested
+    public class SlashDelimiter extends TestBase {
+        @Override
+        public char folderDelimiter() {
+            return MailboxConstants.MailboxFolderDelimiter.SLASH.value;
+        }
+    }
 
-        assertThat(actual).isTrue();
+    @Nested
+    public class PipeDelimiter extends TestBase {
+        @Override
+        public char folderDelimiter() {
+            return MailboxConstants.MailboxFolderDelimiter.PIPE.value;
+        }
     }
 
-    @Test
-    void isWildShouldReturnTrueWhenOnlyLocalWildcard() {
-        PrefixedRegex prefixedRegex = new PrefixedRegex(PREFIX, "%", PATH_DELIMITER);
+    @Nested
+    public class CommaDelimiter extends TestBase {
+        @Override
+        public char folderDelimiter() {
+            return MailboxConstants.MailboxFolderDelimiter.COMMA.value;
+        }
+    }
 
-        boolean actual = prefixedRegex.isWild();
+    @Nested
+    public class ColonDelimiter extends TestBase {
+        @Override
+        public char folderDelimiter() {
+            return MailboxConstants.MailboxFolderDelimiter.COLON.value;
+        }
+    }
 
-        assertThat(actual).isTrue();
+    @Nested
+    public class SemicolonDelimiter extends TestBase {
+        @Override
+        public char folderDelimiter() {
+            return MailboxConstants.MailboxFolderDelimiter.SEMICOLON.value;
+        }
     }
 
-    @Test
-    void isWildShouldReturnTrueWhenFreeWildcardAtBeginning() {
-        PrefixedRegex prefixedRegex = new PrefixedRegex(PREFIX, "*One", PATH_DELIMITER);
+    abstract static class TestBase extends MailboxFolderDelimiterAwareTest {
+        private static final String PREFIX = "name";
+        private static final String EMPTY_PREFIX = "";
 
-        boolean actual = prefixedRegex.isWild();
+        @Test
+        public void shouldMatchBeanContract() {
+            EqualsVerifier.forClass(PrefixedRegex.class)
+                    .withIgnoredFields("pattern")
+                    .withPrefabValues(Pattern.class, Pattern.compile("a"), Pattern.compile("b"))
+                    .verify();
+        }
 
-        assertThat(actual).isTrue();
-    }
+        @Test
+        void slowRegexShouldNotBeConstructedByFuzzing() throws Exception {
+            ExecutorService executorService = Executors.newSingleThreadExecutor();
 
-    @Test
-    void isWildShouldReturnTrueWhenLocalWildcardAtBeginning() {
-        PrefixedRegex prefixedRegex = new PrefixedRegex(PREFIX, "%One", PATH_DELIMITER);
+            try {
+                executorService.submit(() -> {
+                    PrefixedRegex prefixedRegex = new PrefixedRegex("", "%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%a", folderDelimiter());
 
-        boolean actual = prefixedRegex.isWild();
+                    prefixedRegex.isExpressionMatch("aa%%%%%%%%%%%%%%%%");
+                }).get(30, TimeUnit.SECONDS);
+            } finally {
+                executorService.shutdownNow();
+            }
+        }
 
-        assertThat(actual).isTrue();
-    }
+        @Test
+        void isWildShouldReturnTrueWhenOnlyFreeWildcard() {
+            PrefixedRegex prefixedRegex = new PrefixedRegex(PREFIX, "*", folderDelimiter());
 
-    @Test
-    void isWildShouldReturnTrueWhenFreeWildcardInMiddle() {
-        PrefixedRegex prefixedRegex = new PrefixedRegex(PREFIX, "A*A", PATH_DELIMITER);
+            boolean actual = prefixedRegex.isWild();
 
-        boolean actual = prefixedRegex.isWild();
+            assertThat(actual).isTrue();
+        }
 
-        assertThat(actual).isTrue();
-    }
+        @Test
+        void isWildShouldReturnTrueWhenOnlyLocalWildcard() {
+            PrefixedRegex prefixedRegex = new PrefixedRegex(PREFIX, "%", folderDelimiter());
 
-    @Test
-    void isWildShouldReturnTrueWhenLocalWildcardInMiddle() {
-        PrefixedRegex prefixedRegex = new PrefixedRegex(PREFIX, "A%A", PATH_DELIMITER);
+            boolean actual = prefixedRegex.isWild();
 
-        boolean actual = prefixedRegex.isWild();
+            assertThat(actual).isTrue();
+        }
 
-        assertThat(actual).isTrue();
-    }
+        @Test
+        void isWildShouldReturnTrueWhenFreeWildcardAtBeginning() {
+            PrefixedRegex prefixedRegex = new PrefixedRegex(PREFIX, "*One", folderDelimiter());
 
-    @Test
-    void isWildShouldReturnTrueWhenFreeWildcardAtEnd() {
-        PrefixedRegex prefixedRegex = new PrefixedRegex(PREFIX, "One*", PATH_DELIMITER);
+            boolean actual = prefixedRegex.isWild();
 
-        boolean actual = prefixedRegex.isWild();
+            assertThat(actual).isTrue();
+        }
 
-        assertThat(actual).isTrue();
-    }
+        @Test
+        void isWildShouldReturnTrueWhenLocalWildcardAtBeginning() {
+            PrefixedRegex prefixedRegex = new PrefixedRegex(PREFIX, "%One", folderDelimiter());
 
-    @Test
-    void isWildShouldReturnTrueWhenLocalWildcardAtEnd() {
-        PrefixedRegex prefixedRegex = new PrefixedRegex(PREFIX, "One%", PATH_DELIMITER);
+            boolean actual = prefixedRegex.isWild();
 
-        boolean actual = prefixedRegex.isWild();
+            assertThat(actual).isTrue();
+        }
 
-        assertThat(actual).isTrue();
-    }
+        @Test
+        void isWildShouldReturnTrueWhenFreeWildcardInMiddle() {
+            PrefixedRegex prefixedRegex = new PrefixedRegex(PREFIX, "A*A", folderDelimiter());
 
-    @Test
-    void isWildShouldReturnFalseWhenEmptyExpression() {
-        PrefixedRegex prefixedRegex = new PrefixedRegex(PREFIX, "", PATH_DELIMITER);
+            boolean actual = prefixedRegex.isWild();
 
-        boolean actual = prefixedRegex.isWild();
+            assertThat(actual).isTrue();
+        }
 
-        assertThat(actual).isFalse();
-    }
+        @Test
+        void isWildShouldReturnTrueWhenLocalWildcardInMiddle() {
+            PrefixedRegex prefixedRegex = new PrefixedRegex(PREFIX, "A%A", folderDelimiter());
 
-    @Test
-    void isWildShouldReturnFalseWhenNullExpression() {
-        PrefixedRegex prefixedRegex = new PrefixedRegex(PREFIX, null, PATH_DELIMITER);
+            boolean actual = prefixedRegex.isWild();
 
-        boolean actual = prefixedRegex.isWild();
+            assertThat(actual).isTrue();
+        }
 
-        assertThat(actual).isFalse();
-    }
+        @Test
+        void isWildShouldReturnTrueWhenFreeWildcardAtEnd() {
+            PrefixedRegex prefixedRegex = new PrefixedRegex(PREFIX, "One*", folderDelimiter());
 
-    @Test
-    void isWildShouldReturnFalseWhenNoWildcard() {
-        PrefixedRegex prefixedRegex = new PrefixedRegex(PREFIX, "ONE", PATH_DELIMITER);
+            boolean actual = prefixedRegex.isWild();
 
-        boolean actual = prefixedRegex.isWild();
+            assertThat(actual).isTrue();
+        }
 
-        assertThat(actual).isFalse();
-    }
+        @Test
+        void isWildShouldReturnTrueWhenLocalWildcardAtEnd() {
+            PrefixedRegex prefixedRegex = new PrefixedRegex(PREFIX, "One%", folderDelimiter());
 
-    @Test
-    void getCombinedNameShouldWork() {
-        PrefixedRegex prefixedRegex = new PrefixedRegex(PREFIX, "mailbox", PATH_DELIMITER);
+            boolean actual = prefixedRegex.isWild();
 
-        String actual = prefixedRegex.getCombinedName();
+            assertThat(actual).isTrue();
+        }
 
-        assertThat(actual).isEqualTo("name.mailbox");
-    }
+        @Test
+        void isWildShouldReturnFalseWhenEmptyExpression() {
+            PrefixedRegex prefixedRegex = new PrefixedRegex(PREFIX, "", folderDelimiter());
 
-    @Test
-    void getCombinedNameShouldWorkWhenEmptyExpression() {
-        PrefixedRegex prefixedRegex = new PrefixedRegex(PREFIX, "", PATH_DELIMITER);
+            boolean actual = prefixedRegex.isWild();
 
-        String actual = prefixedRegex.getCombinedName();
+            assertThat(actual).isFalse();
+        }
 
-        assertThat(actual).isEqualTo("name");
-    }
+        @Test
+        void isWildShouldReturnFalseWhenNullExpression() {
+            PrefixedRegex prefixedRegex = new PrefixedRegex(PREFIX, null, folderDelimiter());
 
-    @Test
-    void getCombinedNameShouldReturnEmptyStringWhenNullMailboxPathAndExpression() {
-        String prefix = null;
-        String regex = null;
-        PrefixedRegex prefixedRegex = new PrefixedRegex(prefix, regex, PATH_DELIMITER);
+            boolean actual = prefixedRegex.isWild();
 
-        String actual = prefixedRegex.getCombinedName();
+            assertThat(actual).isFalse();
+        }
 
-        assertThat(actual).isEmpty();
-    }
+        @Test
+        void isWildShouldReturnFalseWhenNoWildcard() {
+            PrefixedRegex prefixedRegex = new PrefixedRegex(PREFIX, "ONE", folderDelimiter());
 
-    @Test
-    void getCombinedNameShouldIgnoreDelimiterWhenPresentAtBeginningOfExpression() {
-        PrefixedRegex prefixedRegex = new PrefixedRegex(PREFIX, ".mailbox", PATH_DELIMITER);
+            boolean actual = prefixedRegex.isWild();
 
-        String actual = prefixedRegex.getCombinedName();
+            assertThat(actual).isFalse();
+        }
 
-        assertThat(actual).isEqualTo("name.mailbox");
-    }
+        @Test
+        void getCombinedNameShouldWork() {
+            PrefixedRegex prefixedRegex = new PrefixedRegex(PREFIX, "mailbox", folderDelimiter());
 
-    @Test
-    void getCombinedNameShouldIgnoreDelimiterWhenPresentAtEndOfMailboxName() {
-        PrefixedRegex prefixedRegex = new PrefixedRegex(PREFIX + ".", ".mailbox", PATH_DELIMITER);
+            String actual = prefixedRegex.getCombinedName();
 
-        String actual = prefixedRegex.getCombinedName();
+            assertThat(actual).isEqualTo(adjustToActiveFolderDelimiter("name.mailbox"));
+        }
 
-        assertThat(actual).isEqualTo("name.mailbox");
-    }
+        @Test
+        void getCombinedNameShouldWorkWhenEmptyExpression() {
+            PrefixedRegex prefixedRegex = new PrefixedRegex(PREFIX, "", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldReturnFalseWhenNullExpression() {
-        PrefixedRegex testee = new PrefixedRegex(PREFIX, null, PATH_DELIMITER);
+            String actual = prefixedRegex.getCombinedName();
 
-        boolean actual = testee.isExpressionMatch("folder");
+            assertThat(actual).isEqualTo("name");
+        }
 
-        assertThat(actual).isFalse();
-    }
+        @Test
+        void getCombinedNameShouldReturnEmptyStringWhenNullMailboxPathAndExpression() {
+            String prefix = null;
+            String regex = null;
+            PrefixedRegex prefixedRegex = new PrefixedRegex(prefix, regex, folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldMatchFolderWhenMatching() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "mailbox", PATH_DELIMITER);
+            String actual = prefixedRegex.getCombinedName();
 
-        boolean actual = testee.isExpressionMatch("mailbox");
+            assertThat(actual).isEmpty();
+        }
 
-        assertThat(actual).isTrue();
-    }
+        @Test
+        void getCombinedNameShouldIgnoreDelimiterWhenPresentAtBeginningOfExpression() {
+            PrefixedRegex prefixedRegex = new PrefixedRegex(PREFIX, adjustToActiveFolderDelimiter(".mailbox"), folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldReturnTrueWhenNameBeginsWithDelimiter() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "mailbox", PATH_DELIMITER);
+            String actual = prefixedRegex.getCombinedName();
 
-        boolean actual = testee.isExpressionMatch(".mailbox");
+            assertThat(actual).isEqualTo(adjustToActiveFolderDelimiter("name.mailbox"));
+        }
 
-        assertThat(actual).isTrue();
-    }
+        @Test
+        void getCombinedNameShouldIgnoreDelimiterWhenPresentAtEndOfMailboxName() {
+            PrefixedRegex prefixedRegex = new PrefixedRegex(
+                    PREFIX + adjustToActiveFolderDelimiter("."),
+                    adjustToActiveFolderDelimiter(".mailbox"),
+                    folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldReturnFalseWhenNameEndsWithDelimiter() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "mailbox", PATH_DELIMITER);
+            String actual = prefixedRegex.getCombinedName();
 
-        boolean actual = testee.isExpressionMatch("mailbox.");
+            assertThat(actual).isEqualTo(adjustToActiveFolderDelimiter("name.mailbox"));
+        }
 
-        assertThat(actual).isFalse();
-    }
+        @Test
+        void isExpressionMatchShouldReturnFalseWhenNullExpression() {
+            PrefixedRegex testee = new PrefixedRegex(PREFIX, null, folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldNotMatchFolderWhenNoMatching() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "mailbox", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch("folder");
 
-        boolean actual = testee.isExpressionMatch("sub");
+            assertThat(actual).isFalse();
+        }
 
-        assertThat(actual).isFalse();
-    }
+        @Test
+        void isExpressionMatchShouldMatchFolderWhenMatching() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "mailbox", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldNotMatchFolderWithExpandedEndName() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "mailbox", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch("mailbox");
 
-        boolean actual = testee.isExpressionMatch("mailbox123");
+            assertThat(actual).isTrue();
+        }
 
-        assertThat(actual).isFalse();
-    }
+        @Test
+        void isExpressionMatchShouldReturnTrueWhenNameBeginsWithDelimiter() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "mailbox", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldNotMatchSubFolder() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "mailbox", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch(adjustToActiveFolderDelimiter(".mailbox"));
 
-        boolean actual = testee.isExpressionMatch("mailbox.123");
+            assertThat(actual).isTrue();
+        }
 
-        assertThat(actual).isFalse();
-    }
+        @Test
+        void isExpressionMatchShouldReturnFalseWhenNameEndsWithDelimiter() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "mailbox", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldReturnTrueWhenEmptyNameAndExpression() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch(adjustToActiveFolderDelimiter("mailbox."));
 
-        boolean actual = testee.isExpressionMatch("");
+            assertThat(actual).isFalse();
+        }
 
-        assertThat(actual).isTrue();
-    }
+        @Test
+        void isExpressionMatchShouldNotMatchFolderWhenNoMatching() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "mailbox", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldReturnFalseWhenEmptyExpressionAndNameBeginsWithDelimiter() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch("sub");
 
-        boolean actual = testee.isExpressionMatch(".123");
+            assertThat(actual).isFalse();
+        }
 
-        assertThat(actual).isFalse();
-    }
+        @Test
+        void isExpressionMatchShouldNotMatchFolderWithExpandedEndName() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "mailbox", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldNotMatchFolderWhenEmptyExpression() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch("mailbox123");
 
-        boolean actual = testee.isExpressionMatch("folder");
+            assertThat(actual).isFalse();
+        }
 
-        assertThat(actual).isFalse();
-    }
+        @Test
+        void isExpressionMatchShouldNotMatchSubFolder() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "mailbox", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldReturnTrueWhenEmptyNameAndOnlyLocalWildcard() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "%", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch(adjustToActiveFolderDelimiter("mailbox.123"));
 
-        boolean actual = testee.isExpressionMatch("");
+            assertThat(actual).isFalse();
+        }
 
-        assertThat(actual).isTrue();
-    }
+        @Test
+        void isExpressionMatchShouldReturnTrueWhenEmptyNameAndExpression() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldReturnTrueWhenOnlyLocalWildcard() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "%", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch("");
 
-        boolean actual = testee.isExpressionMatch("folder");
+            assertThat(actual).isTrue();
+        }
 
-        assertThat(actual).isTrue();
-    }
+        @Test
+        void isExpressionMatchShouldReturnFalseWhenEmptyExpressionAndNameBeginsWithDelimiter() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldNotMatchSubFolderWhenOnlyLocalWildcard() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "%", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch(adjustToActiveFolderDelimiter(".123"));
 
-        boolean actual = testee.isExpressionMatch("mailbox.sub");
+            assertThat(actual).isFalse();
+        }
 
-        assertThat(actual).isFalse();
-    }
+        @Test
+        void isExpressionMatchShouldNotMatchFolderWhenEmptyExpression() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldReturnTrueWhenEmptyNameAndOnlyFreeWildcard() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "*", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch("folder");
 
-        boolean actual = testee.isExpressionMatch("");
+            assertThat(actual).isFalse();
+        }
 
-        assertThat(actual).isTrue();
-    }
+        @Test
+        void isExpressionMatchShouldReturnTrueWhenEmptyNameAndOnlyLocalWildcard() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "%", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldMatchFolderWhenOnlyFreeWildcard() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "*", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch("");
 
-        boolean actual = testee.isExpressionMatch("sub");
+            assertThat(actual).isTrue();
+        }
 
-        assertThat(actual).isTrue();
-    }
+        @Test
+        void isExpressionMatchShouldReturnTrueWhenOnlyLocalWildcard() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "%", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldMatchSubFolderWhenOnlyFreeWildcard() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "*", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch("folder");
 
-        boolean actual = testee.isExpressionMatch("mailbox.sub");
+            assertThat(actual).isTrue();
+        }
 
-        assertThat(actual).isTrue();
-    }
+        @Test
+        void isExpressionMatchShouldNotMatchSubFolderWhenOnlyLocalWildcard() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "%", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldReturnFalseWhenEmptyNameAndLocalWildcardAtEnd() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "mailbox%", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch(adjustToActiveFolderDelimiter("mailbox.sub"));
 
-        boolean actual = testee.isExpressionMatch("");
+            assertThat(actual).isFalse();
+        }
 
-        assertThat(actual).isFalse();
-    }
+        @Test
+        void isExpressionMatchShouldReturnTrueWhenEmptyNameAndOnlyFreeWildcard() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "*", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldReturnFalseWhenLocalWildcardAtEndAndNoMatching() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "mailbox%", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch("");
 
-        boolean actual = testee.isExpressionMatch("sub");
+            assertThat(actual).isTrue();
+        }
 
-        assertThat(actual).isFalse();
-    }
+        @Test
+        void isExpressionMatchShouldMatchFolderWhenOnlyFreeWildcard() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "*", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldMatchFolderWhenLocalWildcardAtEndNotUsed() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "mailbox%", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch("sub");
 
-        boolean actual = testee.isExpressionMatch("mailbox");
+            assertThat(actual).isTrue();
+        }
 
-        assertThat(actual).isTrue();
-    }
+        @Test
+        void isExpressionMatchShouldMatchSubFolderWhenOnlyFreeWildcard() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "*", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldReturnTrueWhenLocalWildcardAtEndUsed() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "mailbox%", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch(adjustToActiveFolderDelimiter("mailbox.sub"));
 
-        boolean actual = testee.isExpressionMatch("mailboxsub");
+            assertThat(actual).isTrue();
+        }
 
-        assertThat(actual).isTrue();
-    }
+        @Test
+        void isExpressionMatchShouldReturnFalseWhenEmptyNameAndLocalWildcardAtEnd() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "mailbox%", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldNotMatchSubFolderWhenLocalWildcardAtEnd() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "mailbox%", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch("");
 
-        boolean actual = testee.isExpressionMatch("mailbox.sub");
+            assertThat(actual).isFalse();
+        }
 
-        assertThat(actual).isFalse();
-    }
+        @Test
+        void isExpressionMatchShouldReturnFalseWhenLocalWildcardAtEndAndNoMatching() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "mailbox%", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldReturnFalseWhenEmptyNameAndLocalWildcardAtBeginning() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "%mailbox", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch("sub");
 
-        boolean actual = testee.isExpressionMatch("");
+            assertThat(actual).isFalse();
+        }
 
-        assertThat(actual).isFalse();
-    }
+        @Test
+        void isExpressionMatchShouldMatchFolderWhenLocalWildcardAtEndNotUsed() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "mailbox%", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldNotMatchFolderWhenLocalWildcardAtBeginningAndNoMatching() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "%mailbox", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch("mailbox");
 
-        boolean actual = testee.isExpressionMatch("sub");
+            assertThat(actual).isTrue();
+        }
 
-        assertThat(actual).isFalse();
-    }
+        @Test
+        void isExpressionMatchShouldReturnTrueWhenLocalWildcardAtEndUsed() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "mailbox%", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldMatchFolderWhenLocalWildcardAtBeginningNotUsed() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "%mailbox", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch("mailboxsub");
 
-        boolean actual = testee.isExpressionMatch("mailbox");
+            assertThat(actual).isTrue();
+        }
 
-        assertThat(actual).isTrue();
-    }
+        @Test
+        void isExpressionMatchShouldNotMatchSubFolderWhenLocalWildcardAtEnd() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "mailbox%", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldMatchFolderWhenLocalWildcardAtBeginningUsed() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "%mailbox", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch(adjustToActiveFolderDelimiter("mailbox.sub"));
 
-        boolean actual = testee.isExpressionMatch("submailbox");
+            assertThat(actual).isFalse();
+        }
 
-        assertThat(actual).isTrue();
-    }
+        @Test
+        void isExpressionMatchShouldReturnFalseWhenEmptyNameAndLocalWildcardAtBeginning() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "%mailbox", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldNotMatchSubFolderWhenLocalWildcardAtBeginning() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "%mailbox", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch("");
 
-        boolean actual = testee.isExpressionMatch("sub.mailbox");
+            assertThat(actual).isFalse();
+        }
 
-        assertThat(actual).isFalse();
-    }
+        @Test
+        void isExpressionMatchShouldNotMatchFolderWhenLocalWildcardAtBeginningAndNoMatching() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "%mailbox", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldNotMatchDeeplyNestedFolderWhenLocalWildcardAtBeginning() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "%mailbox", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch("sub");
 
-        boolean actual = testee.isExpressionMatch("sub.mailbox.sub");
+            assertThat(actual).isFalse();
+        }
 
-        assertThat(actual).isFalse();
-    }
+        @Test
+        void isExpressionMatchShouldMatchFolderWhenLocalWildcardAtBeginningNotUsed() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "%mailbox", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldReturnFalseWhenEmptyNameAndLocalWildcardInMiddle() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub%mailbox", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch("mailbox");
 
-        boolean actual = testee.isExpressionMatch("");
+            assertThat(actual).isTrue();
+        }
 
-        assertThat(actual).isFalse();
-    }
+        @Test
+        void isExpressionMatchShouldMatchFolderWhenLocalWildcardAtBeginningUsed() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "%mailbox", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldReturnFalseWhenLocalWildcardInMiddleAndMissingEndName() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub%mailbox", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch("submailbox");
 
-        boolean actual = testee.isExpressionMatch("sub");
+            assertThat(actual).isTrue();
+        }
 
-        assertThat(actual).isFalse();
-    }
+        @Test
+        void isExpressionMatchShouldNotMatchSubFolderWhenLocalWildcardAtBeginning() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "%mailbox", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldMatchFolderWhenLocalWildcardInMiddleAndMatching() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub%mailbox", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch(adjustToActiveFolderDelimiter("sub.mailbox"));
 
-        boolean actual = testee.isExpressionMatch("submailbox");
+            assertThat(actual).isFalse();
+        }
 
-        assertThat(actual).isTrue();
-    }
+        @Test
+        void isExpressionMatchShouldNotMatchDeeplyNestedFolderWhenLocalWildcardAtBeginning() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "%mailbox", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldMatchFolderWhenLocalWildcardInMiddle() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub%mailbox", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch(adjustToActiveFolderDelimiter("sub.mailbox.sub"));
 
-        boolean actual = testee.isExpressionMatch("sub123mailbox");
+            assertThat(actual).isFalse();
+        }
 
-        assertThat(actual).isTrue();
-    }
+        @Test
+        void isExpressionMatchShouldReturnFalseWhenEmptyNameAndLocalWildcardInMiddle() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub%mailbox", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldNotMatchSubFolderWhenLocalWildcardInMiddle() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub%mailbox", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch("");
 
-        boolean actual = testee.isExpressionMatch("sub.mailbox");
+            assertThat(actual).isFalse();
+        }
 
-        assertThat(actual).isFalse();
-    }
+        @Test
+        void isExpressionMatchShouldReturnFalseWhenLocalWildcardInMiddleAndMissingEndName() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub%mailbox", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldNotMatchSubFolderWhenLocalWildcardInMiddleAndExpandedMiddleName() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub%mailbox", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch("sub");
 
-        boolean actual = testee.isExpressionMatch("sub.123mailbox");
+            assertThat(actual).isFalse();
+        }
 
-        assertThat(actual).isFalse();
-    }
+        @Test
+        void isExpressionMatchShouldMatchFolderWhenLocalWildcardInMiddleAndMatching() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub%mailbox", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldReturnFalseWhenLocalWildcardInMiddleAndMissingBeginningName() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub%mailbox", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch("submailbox");
 
-        boolean actual = testee.isExpressionMatch("mailbox");
+            assertThat(actual).isTrue();
+        }
 
-        assertThat(actual).isFalse();
-    }
+        @Test
+        void isExpressionMatchShouldMatchFolderWhenLocalWildcardInMiddle() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub%mailbox", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldNotMatchDeeplyNestedFolderWhenLocalWildcardInMiddle() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub%mailbox", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch("sub123mailbox");
 
-        boolean actual = testee.isExpressionMatch("subw.hat.eve.rmailbox");
+            assertThat(actual).isTrue();
+        }
 
-        assertThat(actual).isFalse();
-    }
+        @Test
+        void isExpressionMatchShouldNotMatchSubFolderWhenLocalWildcardInMiddle() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub%mailbox", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldMatchSubFolderWhenFreeWildcardAtEnd() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "mailbox*", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch(adjustToActiveFolderDelimiter("sub.mailbox"));
 
-        boolean actual = testee.isExpressionMatch("mailbox.sub");
+            assertThat(actual).isFalse();
+        }
 
-        assertThat(actual).isTrue();
-    }
+        @Test
+        void isExpressionMatchShouldNotMatchSubFolderWhenLocalWildcardInMiddleAndExpandedMiddleName() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub%mailbox", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldReturnFalseWhenEmptyNameAndFreeWildcardAtEnd() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "mailbox*", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch(adjustToActiveFolderDelimiter("sub.123mailbox"));
 
-        boolean actual = testee.isExpressionMatch("");
+            assertThat(actual).isFalse();
+        }
 
-        assertThat(actual).isFalse();
-    }
+        @Test
+        void isExpressionMatchShouldReturnFalseWhenLocalWildcardInMiddleAndMissingBeginningName() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub%mailbox", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldNotMatchFolderWhenFreeWildcardAtEndAndNoMatching() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "mailbox*", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch("mailbox");
 
-        boolean actual = testee.isExpressionMatch("sub");
+            assertThat(actual).isFalse();
+        }
 
-        assertThat(actual).isFalse();
-    }
+        @Test
+        void isExpressionMatchShouldNotMatchDeeplyNestedFolderWhenLocalWildcardInMiddle() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub%mailbox", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldMatchFolderWhenFreeWildcardAtEndNotUsed() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "mailbox*", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch(adjustToActiveFolderDelimiter("subw.hat.eve.rmailbox"));
 
-        boolean actual = testee.isExpressionMatch("mailbox");
+            assertThat(actual).isFalse();
+        }
 
-        assertThat(actual).isTrue();
-    }
+        @Test
+        void isExpressionMatchShouldMatchSubFolderWhenFreeWildcardAtEnd() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "mailbox*", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldMatchFolderWhenFreeWildcardAtEndUsed() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "mailbox*", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch(adjustToActiveFolderDelimiter("mailbox.sub"));
 
-        boolean actual = testee.isExpressionMatch("mailbox123");
+            assertThat(actual).isTrue();
+        }
 
-        assertThat(actual).isTrue();
-    }
+        @Test
+        void isExpressionMatchShouldReturnFalseWhenEmptyNameAndFreeWildcardAtEnd() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "mailbox*", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldReturnFalseWhenEmptyNameAndFreeWildcardAtBeginning() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "*mailbox", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch("");
 
-        boolean actual = testee.isExpressionMatch("");
+            assertThat(actual).isFalse();
+        }
 
-        assertThat(actual).isFalse();
-    }
+        @Test
+        void isExpressionMatchShouldNotMatchFolderWhenFreeWildcardAtEndAndNoMatching() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "mailbox*", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldNotMatchFolderWhenFreeWildcardAtBeginningAndNoMatching() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "*mailbox", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch("sub");
 
-        boolean actual = testee.isExpressionMatch("sub");
+            assertThat(actual).isFalse();
+        }
 
-        assertThat(actual).isFalse();
-    }
+        @Test
+        void isExpressionMatchShouldMatchFolderWhenFreeWildcardAtEndNotUsed() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "mailbox*", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldMatchFolderWhenFreeWildcardAtBeginningNotUsed() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "*mailbox", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch("mailbox");
 
-        boolean actual = testee.isExpressionMatch("mailbox");
+            assertThat(actual).isTrue();
+        }
 
-        assertThat(actual).isTrue();
-    }
+        @Test
+        void isExpressionMatchShouldMatchFolderWhenFreeWildcardAtEndUsed() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "mailbox*", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldMatchFolderWhenFreeWildcardAtBeginningUsed() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "*mailbox", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch("mailbox123");
 
-        boolean actual = testee.isExpressionMatch("submailbox");
+            assertThat(actual).isTrue();
+        }
 
-        assertThat(actual).isTrue();
-    }
+        @Test
+        void isExpressionMatchShouldReturnFalseWhenEmptyNameAndFreeWildcardAtBeginning() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "*mailbox", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldMatchSubFolderWhenFreeWildcardAtBeginning() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "*mailbox", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch("");
 
-        boolean actual = testee.isExpressionMatch("sub.mailbox");
+            assertThat(actual).isFalse();
+        }
 
-        assertThat(actual).isTrue();
-    }
+        @Test
+        void isExpressionMatchShouldNotMatchFolderWhenFreeWildcardAtBeginningAndNoMatching() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "*mailbox", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldReturnFalseWhenEmptyNameAndFreeWildcardInMiddle() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub*mailbox", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch("sub");
 
-        boolean actual = testee.isExpressionMatch("");
+            assertThat(actual).isFalse();
+        }
 
-        assertThat(actual).isFalse();
-    }
+        @Test
+        void isExpressionMatchShouldMatchFolderWhenFreeWildcardAtBeginningNotUsed() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "*mailbox", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldNotMatchFolderWhenFreeWildcardInMiddleAndMissingEndName() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub*mailbox", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch("mailbox");
 
-        boolean actual = testee.isExpressionMatch("sub");
+            assertThat(actual).isTrue();
+        }
 
-        assertThat(actual).isFalse();
-    }
+        @Test
+        void isExpressionMatchShouldMatchFolderWhenFreeWildcardAtBeginningUsed() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "*mailbox", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldMatchFolderWhenFreeWildcardInMiddleNotUsed() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub*mailbox", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch("submailbox");
 
-        boolean actual = testee.isExpressionMatch("submailbox");
+            assertThat(actual).isTrue();
+        }
 
-        assertThat(actual).isTrue();
-    }
+        @Test
+        void isExpressionMatchShouldMatchSubFolderWhenFreeWildcardAtBeginning() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "*mailbox", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldMatchSubFolderWhenFreeWildcardInMiddle() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub*mailbox", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch(adjustToActiveFolderDelimiter("sub.mailbox"));
 
-        boolean actual = testee.isExpressionMatch("sub.mailbox");
+            assertThat(actual).isTrue();
+        }
 
-        assertThat(actual).isTrue();
-    }
+        @Test
+        void isExpressionMatchShouldReturnFalseWhenEmptyNameAndFreeWildcardInMiddle() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub*mailbox", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldReturnFalseWhenFreeWildcardInMiddleNotUsedAndMissingBeginningName() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub*mailbox", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch("");
 
-        boolean actual = testee.isExpressionMatch("mailbox");
+            assertThat(actual).isFalse();
+        }
 
-        assertThat(actual).isFalse();
-    }
+        @Test
+        void isExpressionMatchShouldNotMatchFolderWhenFreeWildcardInMiddleAndMissingEndName() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub*mailbox", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldMatchDeeplyNestedFolderWhenFreeWildcardInMiddle() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub*mailbox", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch("sub");
 
-        boolean actual = testee.isExpressionMatch("subw.hat.eve.rmailbox");
+            assertThat(actual).isFalse();
+        }
 
-        assertThat(actual).isTrue();
-    }
+        @Test
+        void isExpressionMatchShouldMatchFolderWhenFreeWildcardInMiddleNotUsed() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub*mailbox", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldReturnFalseWhenEmptyNameAndDoubleFreeWildcardInMiddle() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub**mailbox", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch("submailbox");
 
-        boolean actual = testee.isExpressionMatch("");
+            assertThat(actual).isTrue();
+        }
 
-        assertThat(actual).isFalse();
-    }
+        @Test
+        void isExpressionMatchShouldMatchSubFolderWhenFreeWildcardInMiddle() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub*mailbox", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldReturnFalseWhenDoubleFreeWildcardInMiddleAndMissingEndName() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub**mailbox", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch(adjustToActiveFolderDelimiter("sub.mailbox"));
 
-        boolean actual = testee.isExpressionMatch("sub");
+            assertThat(actual).isTrue();
+        }
 
-        assertThat(actual).isFalse();
-    }
+        @Test
+        void isExpressionMatchShouldReturnFalseWhenFreeWildcardInMiddleNotUsedAndMissingBeginningName() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub*mailbox", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldReturnTrueWhenDoubleFreeWildcardInMiddleNotUsed() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub**mailbox", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch("mailbox");
 
-        boolean actual = testee.isExpressionMatch("submailbox");
+            assertThat(actual).isFalse();
+        }
 
-        assertThat(actual).isTrue();
-    }
+        @Test
+        void isExpressionMatchShouldMatchDeeplyNestedFolderWhenFreeWildcardInMiddle() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub*mailbox", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldMatchSubFolderWhenDoubleFreeWildcardInMiddle() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub**mailbox", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch(adjustToActiveFolderDelimiter("subw.hat.eve.rmailbox"));
 
-        boolean actual = testee.isExpressionMatch("sub.mailbox");
+            assertThat(actual).isTrue();
+        }
 
-        assertThat(actual).isTrue();
-    }
+        @Test
+        void isExpressionMatchShouldReturnFalseWhenEmptyNameAndDoubleFreeWildcardInMiddle() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub**mailbox", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldReturnFalseWhenDoubleFreeWildcardInMiddleAndMissingBeginningName() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub**mailbox", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch("");
 
-        boolean actual = testee.isExpressionMatch("mailbox");
+            assertThat(actual).isFalse();
+        }
 
-        assertThat(actual).isFalse();
-    }
+        @Test
+        void isExpressionMatchShouldReturnFalseWhenDoubleFreeWildcardInMiddleAndMissingEndName() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub**mailbox", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldMatchDeeplyNestedFolderWhenDoubleFreeWildcardInMiddle() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub**mailbox", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch("sub");
 
-        boolean actual = testee.isExpressionMatch("subw.hat.eve.rmailbox");
+            assertThat(actual).isFalse();
+        }
 
-        assertThat(actual).isTrue();
-    }
+        @Test
+        void isExpressionMatchShouldReturnTrueWhenDoubleFreeWildcardInMiddleNotUsed() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub**mailbox", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldReturnFalseWhenEmptyNameAndFreeLocalWildcardInMiddle() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub*%mailbox", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch("submailbox");
 
-        boolean actual = testee.isExpressionMatch("");
+            assertThat(actual).isTrue();
+        }
 
-        assertThat(actual).isFalse();
-    }
+        @Test
+        void isExpressionMatchShouldMatchSubFolderWhenDoubleFreeWildcardInMiddle() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub**mailbox", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldReturnFalseWhenFreeLocalWildcardInMiddleAndMissingEndName() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub*%mailbox", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch(adjustToActiveFolderDelimiter("sub.mailbox"));
 
-        boolean actual = testee.isExpressionMatch("sub");
+            assertThat(actual).isTrue();
+        }
 
-        assertThat(actual).isFalse();
-    }
+        @Test
+        void isExpressionMatchShouldReturnFalseWhenDoubleFreeWildcardInMiddleAndMissingBeginningName() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub**mailbox", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldMatchFolderWhenFreeLocalWildcardInMiddleNotUsed() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub*%mailbox", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch("mailbox");
 
-        boolean actual = testee.isExpressionMatch("submailbox");
+            assertThat(actual).isFalse();
+        }
 
-        assertThat(actual).isTrue();
-    }
+        @Test
+        void isExpressionMatchShouldMatchDeeplyNestedFolderWhenDoubleFreeWildcardInMiddle() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub**mailbox", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldMatchSubFolderWhenFreeLocalWildcardInMiddle() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub*%mailbox", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch(adjustToActiveFolderDelimiter("subw.hat.eve.rmailbox"));
 
-        boolean actual = testee.isExpressionMatch("sub.mailbox");
+            assertThat(actual).isTrue();
+        }
 
-        assertThat(actual).isTrue();
-    }
+        @Test
+        void isExpressionMatchShouldReturnFalseWhenEmptyNameAndFreeLocalWildcardInMiddle() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub*%mailbox", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldReturnFalseWhenFreeLocalWildcardInMiddleAndMissingBeginningName() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub*%mailbox", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch("");
 
-        boolean actual = testee.isExpressionMatch("mailbox");
+            assertThat(actual).isFalse();
+        }
 
-        assertThat(actual).isFalse();
-    }
+        @Test
+        void isExpressionMatchShouldReturnFalseWhenFreeLocalWildcardInMiddleAndMissingEndName() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub*%mailbox", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldMatchDeeplyNestedFolderWhenFreeLocalWildcardInMiddle() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub*%mailbox", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch("sub");
 
-        boolean actual = testee.isExpressionMatch("subw.hat.eve.rmailbox");
+            assertThat(actual).isFalse();
+        }
 
-        assertThat(actual).isTrue();
-    }
+        @Test
+        void isExpressionMatchShouldMatchFolderWhenFreeLocalWildcardInMiddleNotUsed() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub*%mailbox", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldReturnFalseWhenEmptyNameAndLocalFreeWildcardInMiddle() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub%*mailbox", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch("submailbox");
 
-        boolean actual = testee.isExpressionMatch("");
+            assertThat(actual).isTrue();
+        }
 
-        assertThat(actual).isFalse();
-    }
+        @Test
+        void isExpressionMatchShouldMatchSubFolderWhenFreeLocalWildcardInMiddle() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub*%mailbox", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldNotMatchFolderWhenLocalFreeWildcardInMiddleAndMissingEndName() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub%*mailbox", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch(adjustToActiveFolderDelimiter("sub.mailbox"));
 
-        boolean actual = testee.isExpressionMatch("sub");
+            assertThat(actual).isTrue();
+        }
 
-        assertThat(actual).isFalse();
-    }
+        @Test
+        void isExpressionMatchShouldReturnFalseWhenFreeLocalWildcardInMiddleAndMissingBeginningName() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub*%mailbox", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldMatchFolderWhenLocalFreewildcardInMiddleNotUsed() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub%*mailbox", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch("mailbox");
 
-        boolean actual = testee.isExpressionMatch("submailbox");
+            assertThat(actual).isFalse();
+        }
 
-        assertThat(actual).isTrue();
-    }
+        @Test
+        void isExpressionMatchShouldMatchDeeplyNestedFolderWhenFreeLocalWildcardInMiddle() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub*%mailbox", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldMatchSubFolderWhenLocalFreeWildcardInMiddle() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub%*mailbox", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch(adjustToActiveFolderDelimiter("subw.hat.eve.rmailbox"));
 
-        boolean actual = testee.isExpressionMatch("sub.mailbox");
+            assertThat(actual).isTrue();
+        }
 
-        assertThat(actual).isTrue();
-    }
+        @Test
+        void isExpressionMatchShouldReturnFalseWhenEmptyNameAndLocalFreeWildcardInMiddle() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub%*mailbox", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldNotMatchFolderWhenLocalFreeWildcardInMiddleAndMissingBeginningName() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub%*mailbox", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch("");
 
-        boolean actual = testee.isExpressionMatch("mailbox");
+            assertThat(actual).isFalse();
+        }
 
-        assertThat(actual).isFalse();
-    }
+        @Test
+        void isExpressionMatchShouldNotMatchFolderWhenLocalFreeWildcardInMiddleAndMissingEndName() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub%*mailbox", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldMatchDeeplyNestedFolderWhenLocalFreeWildcardInMiddle() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub%*mailbox", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch("sub");
 
-        boolean actual = testee.isExpressionMatch("subw.hat.eve.rmailbox");
+            assertThat(actual).isFalse();
+        }
 
-        assertThat(actual).isTrue();
-    }
+        @Test
+        void isExpressionMatchShouldMatchFolderWhenLocalFreewildcardInMiddleNotUsed() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub%*mailbox", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldMatchFolderWhenMultipleFreeWildcards() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub*mailbox*sub**", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch("submailbox");
 
-        boolean actual = testee.isExpressionMatch("submailboxsub");
+            assertThat(actual).isTrue();
+        }
 
-        assertThat(actual).isTrue();
-    }
+        @Test
+        void isExpressionMatchShouldMatchSubFolderWhenLocalFreeWildcardInMiddle() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub%*mailbox", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldMatchDeeplyNestedFolderWhenMultipleFreeWildcardsNotUsed() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub*mailbox*sub**", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch(adjustToActiveFolderDelimiter("sub.mailbox"));
 
-        boolean actual = testee.isExpressionMatch("sub.mailbox.sub");
+            assertThat(actual).isTrue();
+        }
 
-        assertThat(actual).isTrue();
-    }
+        @Test
+        void isExpressionMatchShouldNotMatchFolderWhenLocalFreeWildcardInMiddleAndMissingBeginningName() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub%*mailbox", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldMatchDeeplyNestedFolderWhenMultipleFreeWildcardsUsed() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub*mailbox*sub**", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch("mailbox");
 
-        boolean actual = testee.isExpressionMatch("subtosh.boshmailboxtosh.boshsubboshtosh");
+            assertThat(actual).isFalse();
+        }
 
-        assertThat(actual).isTrue();
-    }
+        @Test
+        void isExpressionMatchShouldMatchDeeplyNestedFolderWhenLocalFreeWildcardInMiddle() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub%*mailbox", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldNotMatchDeeplyNestedFolderWhenMultipleFreeWildcardsAndMissingMiddleName() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub*mailbox*sub**", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch(adjustToActiveFolderDelimiter("subw.hat.eve.rmailbox"));
 
-        boolean actual = testee.isExpressionMatch("sub.a.sub");
+            assertThat(actual).isTrue();
+        }
 
-        assertThat(actual).isFalse();
-    }
+        @Test
+        void isExpressionMatchShouldMatchFolderWhenMultipleFreeWildcards() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub*mailbox*sub**", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldNotMatchDeeplyNestedFolderWhenMultipleFreeWildcardsAndMissingEndName() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub*mailbox*sub**", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch("submailboxsub");
 
-        boolean actual = testee.isExpressionMatch("sub.a.submailbox.u");
+            assertThat(actual).isTrue();
+        }
 
-        assertThat(actual).isFalse();
-    }
+        @Test
+        void isExpressionMatchShouldMatchDeeplyNestedFolderWhenMultipleFreeWildcardsNotUsed() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub*mailbox*sub**", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldNotMatchDeeplyNestedFolderWhenMultipleFreeWildcardsAndMissingBeginningdName() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub*mailbox*sub**", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch(adjustToActiveFolderDelimiter("sub.mailbox.sub"));
 
-        boolean actual = testee.isExpressionMatch("utosh.boshmailboxtosh.boshsubasubboshtoshmailboxu");
+            assertThat(actual).isTrue();
+        }
 
-        assertThat(actual).isFalse();
-    }
+        @Test
+        void isExpressionMatchShouldMatchDeeplyNestedFolderWhenMultipleFreeWildcardsUsed() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub*mailbox*sub**", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldMatchFolderWhenMixedLocalFreeWildcardsNotUsed() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub%mailbox*sub", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch(adjustToActiveFolderDelimiter("subtosh.boshmailboxtosh.boshsubboshtosh"));
 
-        boolean actual = testee.isExpressionMatch("submailboxsub");
+            assertThat(actual).isTrue();
+        }
 
-        assertThat(actual).isTrue();
-    }
+        @Test
+        void isExpressionMatchShouldNotMatchDeeplyNestedFolderWhenMultipleFreeWildcardsAndMissingMiddleName() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub*mailbox*sub**", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldNotMatchSubFolderWhenMixedLocalFreeWildcards() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub%mailbox*sub", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch(adjustToActiveFolderDelimiter("sub.a.sub"));
 
-        boolean actual = testee.isExpressionMatch("sub.mailboxsub");
+            assertThat(actual).isFalse();
+        }
 
-        assertThat(actual).isFalse();
-    }
+        @Test
+        void isExpressionMatchShouldNotMatchDeeplyNestedFolderWhenMultipleFreeWildcardsAndMissingEndName() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub*mailbox*sub**", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldMatchFolderWhenMixedFreeLocalWildcardsNotUsed() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub*mailbox%sub", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch(adjustToActiveFolderDelimiter("sub.a.submailbox.u"));
 
-        boolean actual = testee.isExpressionMatch("submailboxsub");
+            assertThat(actual).isFalse();
+        }
 
-        assertThat(actual).isTrue();
-    }
+        @Test
+        void isExpressionMatchShouldNotMatchDeeplyNestedFolderWhenMultipleFreeWildcardsAndMissingBeginningdName() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub*mailbox*sub**", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldMatchSubFolderWhenMixedFreeLocalWildcards() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub*mailbox%sub", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch(adjustToActiveFolderDelimiter("utosh.boshmailboxtosh.boshsubasubboshtoshmailboxu"));
 
-        boolean actual = testee.isExpressionMatch("sub.mailboxsub");
+            assertThat(actual).isFalse();
+        }
 
-        assertThat(actual).isTrue();
-    }
+        @Test
+        void isExpressionMatchShouldMatchFolderWhenMixedLocalFreeWildcardsNotUsed() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub%mailbox*sub", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldNotMatchSubFolderWhenMixedFreeLocalWildcards() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub*mailbox%sub", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch("submailboxsub");
 
-        boolean actual = testee.isExpressionMatch("submailbox.sub");
+            assertThat(actual).isTrue();
+        }
 
-        assertThat(actual).isFalse();
-    }
+        @Test
+        void isExpressionMatchShouldNotMatchSubFolderWhenMixedLocalFreeWildcards() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub%mailbox*sub", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldMatchFolderWhenMixedFreeLocalWildcards() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub*mailbox%sub", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch(adjustToActiveFolderDelimiter("sub.mailboxsub"));
 
-        boolean actual = testee.isExpressionMatch("submailboxwhateversub");
+            assertThat(actual).isFalse();
+        }
 
-        assertThat(actual).isTrue();
-    }
+        @Test
+        void isExpressionMatchShouldMatchFolderWhenMixedFreeLocalWildcardsNotUsed() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub*mailbox%sub", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldNotMatchSubFolderEndingWithDelimiterWhenMixedFreeLocalWildcards() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub*mailbox%sub", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch("submailboxsub");
 
-        boolean actual = testee.isExpressionMatch("submailboxsub.Whatever.");
+            assertThat(actual).isTrue();
+        }
 
-        assertThat(actual).isFalse();
-    }
+        @Test
+        void isExpressionMatchShouldMatchSubFolderWhenMixedFreeLocalWildcards() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub*mailbox%sub", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldNotMatchDeeplyNestedFolderWhenMixedFreeLocalWildcards() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub*mailbox%sub", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch(adjustToActiveFolderDelimiter("sub.mailboxsub"));
 
-        boolean actual = testee.isExpressionMatch("sub.mailboxsub.sub");
+            assertThat(actual).isTrue();
+        }
 
-        assertThat(actual).isFalse();
-    }
+        @Test
+        void isExpressionMatchShouldNotMatchSubFolderWhenMixedFreeLocalWildcards() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub*mailbox%sub", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldMatchSubFoldeWhenMixedFreeLocalWildcards() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub*mailbox%sub", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch(adjustToActiveFolderDelimiter("submailbox.sub"));
 
-        boolean actual = testee.isExpressionMatch("sub.mailboxsub");
+            assertThat(actual).isFalse();
+        }
 
-        assertThat(actual).isTrue();
-    }
+        @Test
+        void isExpressionMatchShouldMatchFolderWhenMixedFreeLocalWildcards() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub*mailbox%sub", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldMatchDeeplyNestedFoldeWhenMixedFreeLocalWildcards() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub*mailbox%sub", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch("submailboxwhateversub");
 
-        boolean actual = testee.isExpressionMatch("sub.whatever.mailbox123sub");
+            assertThat(actual).isTrue();
+        }
 
-        assertThat(actual).isTrue();
-    }
+        @Test
+        void isExpressionMatchShouldNotMatchSubFolderEndingWithDelimiterWhenMixedFreeLocalWildcards() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub*mailbox%sub", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldNotMatchFolderWhenTwoLocalPathDelimitedWildcards() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "%.%", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch(adjustToActiveFolderDelimiter("submailboxsub.Whatever."));
 
-        boolean actual = testee.isExpressionMatch("mailbox");
+            assertThat(actual).isFalse();
+        }
 
-        assertThat(actual).isFalse();
-    }
+        @Test
+        void isExpressionMatchShouldNotMatchDeeplyNestedFolderWhenMixedFreeLocalWildcards() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub*mailbox%sub", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldNotMatchDeeplyNestedFolderWhenTwoLocalPathDelimitedWildcards() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "%.%", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch(adjustToActiveFolderDelimiter("sub.mailboxsub.sub"));
 
-        boolean actual = testee.isExpressionMatch("mailbox.sub.sub");
+            assertThat(actual).isFalse();
+        }
 
-        assertThat(actual).isFalse();
-    }
+        @Test
+        void isExpressionMatchShouldMatchSubFoldeWhenMixedFreeLocalWildcards() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub*mailbox%sub", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldMatchSubFolderWhenTwoLocalPathDelimitedWildcards() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "%.%", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch(adjustToActiveFolderDelimiter("sub.mailboxsub"));
 
-        boolean actual = testee.isExpressionMatch("mailbox.sub");
+            assertThat(actual).isTrue();
+        }
 
-        assertThat(actual).isTrue();
-    }
+        @Test
+        void isExpressionMatchShouldMatchDeeplyNestedFoldeWhenMixedFreeLocalWildcards() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "sub*mailbox%sub", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldMatchSubFolderWhenFreeWildcardAndPathDelimiterAtBeginning() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "*.test", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch(adjustToActiveFolderDelimiter("sub.whatever.mailbox123sub"));
 
-        boolean actual = testee.isExpressionMatch("blah.test");
+            assertThat(actual).isTrue();
+        }
 
-        assertThat(actual).isTrue();
-    }
+        @Test
+        void isExpressionMatchShouldNotMatchFolderWhenTwoLocalPathDelimitedWildcards() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, adjustToActiveFolderDelimiter("%.%"), folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldNotMatchSubFolderWhenWhenFreeWildcardAndPathDelimiterAtBeginning() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "*.test", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch("mailbox");
 
-        boolean actual = testee.isExpressionMatch("blah.test3");
+            assertThat(actual).isFalse();
+        }
 
-        assertThat(actual).isFalse();
-    }
+        @Test
+        void isExpressionMatchShouldNotMatchDeeplyNestedFolderWhenTwoLocalPathDelimitedWildcards() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, adjustToActiveFolderDelimiter("%.%"), folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldNotMatchDeeplyNestedFolderWhenFreeWildcardAndPathDelimiterAtBeginning() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "*.test", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch(adjustToActiveFolderDelimiter("mailbox.sub.sub"));
 
-        boolean actual = testee.isExpressionMatch("blah.test.go");
+            assertThat(actual).isFalse();
+        }
 
-        assertThat(actual).isFalse();
-    }
+        @Test
+        void isExpressionMatchShouldMatchSubFolderWhenTwoLocalPathDelimitedWildcards() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, adjustToActiveFolderDelimiter("%.%"), folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldIgnoreRegexInjection() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "folder^$!)(%3", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch(adjustToActiveFolderDelimiter("mailbox.sub"));
 
-        boolean actual = testee.isExpressionMatch("folder^$!)(123");
+            assertThat(actual).isTrue();
+        }
 
-        assertThat(actual).isTrue();
-    }
+        @Test
+        void isExpressionMatchShouldMatchSubFolderWhenFreeWildcardAndPathDelimiterAtBeginning() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, adjustToActiveFolderDelimiter("*.test"), folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldIgnoreRegexInjectionWhenUsingEndOfQuoteAndNoMatching() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "\\Efo.", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch(adjustToActiveFolderDelimiter("blah.test"));
 
-        boolean actual = testee.isExpressionMatch("\\Efol");
+            assertThat(actual).isTrue();
+        }
 
-        assertThat(actual).isFalse();
-    }
+        @Test
+        void isExpressionMatchShouldNotMatchSubFolderWhenWhenFreeWildcardAndPathDelimiterAtBeginning() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, adjustToActiveFolderDelimiter("*.test"), folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldIgnoreRegexInjectionWhenUsingEndOfQuoteAndMatching() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "\\Efo.", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch(adjustToActiveFolderDelimiter("blah.test3"));
 
-        boolean actual = testee.isExpressionMatch("\\Efo.");
+            assertThat(actual).isFalse();
+        }
 
-        assertThat(actual).isTrue();
-    }
+        @Test
+        void isExpressionMatchShouldNotMatchDeeplyNestedFolderWhenFreeWildcardAndPathDelimiterAtBeginning() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, adjustToActiveFolderDelimiter("*.test"), folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldIgnoreRegexInjectionWhenUsingBeginOfQuoteAndNoMatching() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "\\Qfo?", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch(adjustToActiveFolderDelimiter("blah.test.go"));
 
-        boolean actual = testee.isExpressionMatch("\\Qfol");
+            assertThat(actual).isFalse();
+        }
 
-        assertThat(actual).isFalse();
-    }
+        @Test
+        void isExpressionMatchShouldIgnoreRegexInjection() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "folder^$!)(%3", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldIgnoreRegexInjectionWhenUsingBeginOfQuoteAndMatching() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "\\Qfo?", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch("folder^$!)(123");
 
-        boolean actual = testee.isExpressionMatch("\\Qfo?");
+            assertThat(actual).isTrue();
+        }
 
-        assertThat(actual).isTrue();
-    }
+        @Test
+        void isExpressionMatchShouldIgnoreRegexInjectionWhenUsingEndOfQuoteAndNoMatching() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "\\Efo.", folderDelimiter());
 
-    @Test
-    void isExpressionMatchShouldNotEscapeFreeWildcard() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "folder\\*", PATH_DELIMITER);
+            boolean actual = testee.isExpressionMatch("\\Efol");
 
-        boolean actual = testee.isExpressionMatch("folder\\123");
+            assertThat(actual).isFalse();
+        }
 
-        assertThat(actual).isTrue();
-    }
+        @Test
+        void isExpressionMatchShouldIgnoreRegexInjectionWhenUsingEndOfQuoteAndMatching() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "\\Efo.", folderDelimiter());
+
+            boolean actual = testee.isExpressionMatch("\\Efo.");
+
+            assertThat(actual).isTrue();
+        }
+
+        @Test
+        void isExpressionMatchShouldIgnoreRegexInjectionWhenUsingBeginOfQuoteAndNoMatching() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "\\Qfo?", folderDelimiter());
+
+            boolean actual = testee.isExpressionMatch("\\Qfol");
+
+            assertThat(actual).isFalse();
+        }
+
+        @Test
+        void isExpressionMatchShouldIgnoreRegexInjectionWhenUsingBeginOfQuoteAndMatching() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "\\Qfo?", folderDelimiter());
+
+            boolean actual = testee.isExpressionMatch("\\Qfo?");
+
+            assertThat(actual).isTrue();
+        }
+
+        @Test
+        void isExpressionMatchShouldNotEscapeFreeWildcard() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "folder\\*", folderDelimiter());
+
+            boolean actual = testee.isExpressionMatch("folder\\123");
+
+            assertThat(actual).isTrue();
+        }
 
-    @Test
-    void isExpressionMatchShouldNotEscapeLocalWildcard() {
-        PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "folder\\%", PATH_DELIMITER);
+        @Test
+        void isExpressionMatchShouldNotEscapeLocalWildcard() {
+            PrefixedRegex testee = new PrefixedRegex(EMPTY_PREFIX, "folder\\%", folderDelimiter());
 
-        boolean actual = testee.isExpressionMatch("folder\\123");
+            boolean actual = testee.isExpressionMatch("folder\\123");
 
-        assertThat(actual).isTrue();
+            assertThat(actual).isTrue();
+        }
     }
 }

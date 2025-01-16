@@ -63,15 +63,16 @@ public interface PathConverter {
     class Default implements PathConverter {
         private static final int NAMESPACE = 0;
         private static final int USER = 1;
-        public static final Escaper USERNAME_ESCAPER = Escapers.builder()
-            .addEscape('.', "__")
-            .addEscape('_', "_-")
-            .build();
 
         private final MailboxSession mailboxSession;
+        private final Escaper usernameEscaper;
 
         private Default(MailboxSession mailboxSession) {
             this.mailboxSession = mailboxSession;
+            this.usernameEscaper = Escapers.builder()
+                    .addEscape(mailboxSession.getPathDelimiter(), "__")
+                    .addEscape('_', "_-")
+                    .build();
         }
 
         public MailboxPath buildFullPath(String mailboxName) {
@@ -112,7 +113,7 @@ public interface PathConverter {
                     return new MailboxPath(MailboxConstants.USER_NAMESPACE, null, sanitizeMailboxName(mailboxName));
                 }
                 String username = mailboxPathParts.get(USER);
-                String unescapedUsername = username.replace("__", ".")
+                String unescapedUsername = username.replace("__", String.valueOf(MailboxConstants.FOLDER_DELIMITER))
                     .replace("_-", "_");
                 Username user = Username.from(unescapedUsername, session.getUser().getDomainPart().map(Domain::asString));
                 String mailboxName = Joiner.on(session.getPathDelimiter()).join(Iterables.skip(mailboxPathParts, 2));
@@ -151,7 +152,7 @@ public interface PathConverter {
                         sb.append(session.getPathDelimiter());
                     }
 
-                    sb.append(USERNAME_ESCAPER.escape(mailboxPath.getUser().getLocalPart()));
+                    sb.append(usernameEscaper.escape(mailboxPath.getUser().getLocalPart()));
                 }
             }
             if (mailboxPath.getName() != null && !mailboxPath.getName().isEmpty()) {

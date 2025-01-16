@@ -19,36 +19,74 @@
 
 package org.apache.james.imap.main;
 
-import org.junit.jupiter.api.BeforeEach;
+import org.apache.james.mailbox.model.MailboxConstants;
 import org.junit.jupiter.api.Nested;
 
-public class DefaultPathConverterTest implements PathConverterBasicContract {
-
-    private PathConverter pathConverter;
-
-    @BeforeEach
-    void setup() {
-        pathConverter = PathConverter.Factory.DEFAULT.forSession(mailboxSession);
-    }
-
-    @Override
-    public PathConverter pathConverter() {
-        return pathConverter;
+public class DefaultPathConverterTest {
+    @Nested
+    public class DotDelimiter extends TestBase {
+        @Override
+        public char folderDelimiter() {
+            return MailboxConstants.MailboxFolderDelimiter.DOT.value;
+        }
     }
 
     @Nested
-    class WithEmailTest implements PathConverterBasicContract.WithEmail {
-
-        private PathConverter pathConverter;
-
-        @BeforeEach
-        void setup() {
-            pathConverter = PathConverter.Factory.DEFAULT.forSession(mailboxSession);
+    public class SlashDelimiter extends TestBase {
+        @Override
+        public char folderDelimiter() {
+            return MailboxConstants.MailboxFolderDelimiter.SLASH.value;
         }
+    }
+
+    @Nested
+    public class PipeDelimiter extends TestBase {
+        @Override
+        public char folderDelimiter() {
+            return MailboxConstants.MailboxFolderDelimiter.PIPE.value;
+        }
+    }
+
+    @Nested
+    public class CommaDelimiter extends TestBase {
+        @Override
+        public char folderDelimiter() {
+            return MailboxConstants.MailboxFolderDelimiter.COMMA.value;
+        }
+    }
+
+    @Nested
+    public class ColonDelimiter extends TestBase {
+        @Override
+        public char folderDelimiter() {
+            return MailboxConstants.MailboxFolderDelimiter.COLON.value;
+        }
+    }
+
+    @Nested
+    public class SemicolonDelimiter extends TestBase {
+        @Override
+        public char folderDelimiter() {
+            return MailboxConstants.MailboxFolderDelimiter.SEMICOLON.value;
+        }
+    }
+
+    public abstract static class TestBase extends PathConverterBasicContract {
+        private final PathConverter pathConverter = PathConverter.Factory.DEFAULT.forSession(mailboxSession);
 
         @Override
         public PathConverter pathConverter() {
             return pathConverter;
+        }
+
+        @Nested
+        public class WithEmail extends PathConverterBasicContract.WithEmail {
+            private final PathConverter pathConverter = PathConverter.Factory.DEFAULT.forSession(mailboxWithEmailSession);
+
+            @Override
+            public PathConverter pathConverter() {
+                return pathConverter;
+            }
         }
     }
 }
