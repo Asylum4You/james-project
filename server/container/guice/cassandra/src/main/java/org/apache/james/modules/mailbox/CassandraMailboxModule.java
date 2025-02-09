@@ -75,6 +75,7 @@ import org.apache.james.mailbox.cassandra.mail.CassandraACLDAOV2;
 import org.apache.james.mailbox.cassandra.mail.CassandraACLMapper;
 import org.apache.james.mailbox.cassandra.mail.CassandraApplicableFlagDAO;
 import org.apache.james.mailbox.cassandra.mail.CassandraAttachmentDAOV2;
+import org.apache.james.mailbox.cassandra.mail.CassandraAttachmentMapper;
 import org.apache.james.mailbox.cassandra.mail.CassandraDeletedMessageDAO;
 import org.apache.james.mailbox.cassandra.mail.CassandraFirstUnseenDAO;
 import org.apache.james.mailbox.cassandra.mail.CassandraMailboxCounterDAO;
@@ -123,6 +124,8 @@ import org.apache.james.mailbox.store.mail.MessageMapperFactory;
 import org.apache.james.mailbox.store.mail.ModSeqProvider;
 import org.apache.james.mailbox.store.mail.ThreadIdGuessingAlgorithm;
 import org.apache.james.mailbox.store.mail.UidProvider;
+import org.apache.james.mailbox.store.mail.model.impl.MessageParser;
+import org.apache.james.mailbox.store.mail.model.impl.MessageParserImpl;
 import org.apache.james.mailbox.store.user.SubscriptionMapperFactory;
 import org.apache.james.user.api.DeleteUserDataTaskStep;
 import org.apache.james.user.api.UsernameChangeTaskStep;
@@ -215,6 +218,8 @@ public class CassandraMailboxModule extends AbstractModule {
         bind(SessionProvider.class).to(SessionProviderImpl.class);
         bind(AttachmentContentLoader.class).to(AttachmentManager.class);
         bind(MailboxCounterCorrector.class).to(CassandraMailboxCounterCorrector.class);
+        bind(MessageParser.class).toInstance(new MessageParserImpl());
+        bind(CassandraAttachmentMapper.AttachmentIdAssignationStrategy.class).to(CassandraAttachmentMapper.AttachmentIdAssignationStrategy.Default.class);
 
         bind(Limit.class).annotatedWith(Names.named(CassandraEmailChangeRepository.LIMIT_NAME)).toInstance(Limit.of(256));
         bind(Limit.class).annotatedWith(Names.named(CassandraMailboxChangeRepository.LIMIT_NAME)).toInstance(Limit.of(256));

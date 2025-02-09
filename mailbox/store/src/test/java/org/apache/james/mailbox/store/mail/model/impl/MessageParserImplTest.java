@@ -40,12 +40,12 @@ import org.apache.james.mime4j.message.DefaultMessageWriter;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-class MessageParserTest {
-    MessageParser testee;
+class MessageParserImplTest {
+    MessageParserImpl testee;
 
     @BeforeEach
     void setup() {
-        testee = new MessageParser();
+        testee = new MessageParserImpl();
     }
 
     @Test

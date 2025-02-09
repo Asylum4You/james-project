@@ -244,7 +244,7 @@
             <email>eric@apache.org</email>
             <roles>
                 <role>Developer</role>
-                <role>PMC Chair</role>
+                <role>PMC Member</role>
             </roles>
             <timezone />
         </developer>
@@ -284,6 +284,7 @@
             <organization>Linagora</organization>
             <organizationUrl>https://linagora.com</organizationUrl>
             <roles>
+                <role>PMC Chair</role>
                 <role>PMC Member</role>
                 <role>Developer</role>
             </roles>
@@ -316,6 +317,26 @@
             <id>jhelou</id>
             <name>Jean Helou</name>
             <email>jhelou@apache.org</email>
+            <roles>
+                <role>PMC Member</role>
+                <role>Developer</role>
+            </roles>
+            <timezone />
+        </developer>
+        <developer>
+            <id>rcordier</id>
+            <name>Rene Cordier</name>
+            <email>rcordier@apache.org</email>
+            <roles>
+                <role>PMC Member</role>
+                <role>Developer</role>
+            </roles>
+            <timezone />
+        </developer>
+        <developer>
+            <id>hqtran</id>
+            <name>Quan TRAN</name>
+            <email>hqtran@apache.org</email>
             <roles>
                 <role>Developer</role>
             </roles>
@@ -601,7 +622,7 @@
         <james.groupId>org.apache.james</james.groupId>
         <james.protocols.groupId>${james.groupId}.protocols</james.protocols.groupId>
         <activemq.version>6.1.0</activemq.version>
-        <apache-mime4j.version>0.8.11</apache-mime4j.version>
+        <apache-mime4j.version>0.8.12</apache-mime4j.version>
         <apache.openjpa.version>4.0.0</apache.openjpa.version>
         <derby.version>10.14.2.0</derby.version>
         <log4j2.version>2.23.1</log4j2.version>
@@ -663,6 +684,7 @@
         <scala.version>${scala.base}.14</scala.version>
         <doclint>none</doclint>
         <mockito.version>5.10.0</mockito.version>
+        <ical4j.version>4.1.0</ical4j.version>
         <jacoco-maven-plugin.version>0.8.12</jacoco-maven-plugin.version>
         <javacrumbs.json-unit.version>3.2.7</javacrumbs.json-unit.version>
     </properties>
@@ -732,17 +754,6 @@
             <dependency>
                 <groupId>${james.groupId}</groupId>
                 <artifactId>apache-james-backends-redis</artifactId>
-                <version>${project.version}</version>
-                <type>test-jar</type>
-            </dependency>
-            <dependency>
-                <groupId>${james.groupId}</groupId>
-                <artifactId>apache-james-linshare</artifactId>
-                <version>${project.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>${james.groupId}</groupId>
-                <artifactId>apache-james-linshare</artifactId>
                 <version>${project.version}</version>
                 <type>test-jar</type>
             </dependency>
@@ -2809,6 +2820,11 @@
                 <groupId>org.junit.vintage</groupId>
                 <artifactId>junit-vintage-engine</artifactId>
                 <version>${junit.vintage.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.mnode.ical4j</groupId>
+                <artifactId>ical4j</artifactId>
+                <version>${ical4j.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.mock-server</groupId>
