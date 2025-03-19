@@ -26,7 +26,8 @@ import org.apache.james.jmap.core.SetError
 import org.apache.james.jmap.core.SetError.SetErrorDescription
 import org.apache.james.jmap.mail.{MailboxGet, MailboxSetError, MailboxSetRequest, RemoveEmailsOnDestroy, UnparsedMailboxId}
 import org.apache.james.jmap.method.MailboxSetDeletePerformer.{MailboxDeletionFailure, MailboxDeletionResult, MailboxDeletionResults, MailboxDeletionSuccess}
-import org.apache.james.mailbox.exception.MailboxNotFoundException
+import org.apache.james.jmap.method.MailboxSetMethod.assertCapabilityIfSharedMailbox
+import org.apache.james.mailbox.exception.{InsufficientRightsException, MailboxNotFoundException}
 import org.apache.james.mailbox.model.{FetchGroup, MailboxId, MessageRange}
 import org.apache.james.mailbox.{MailboxManager, MailboxSession, MessageManager, Role, SubscriptionManager}
 import org.apache.james.util.{AuditTrail, ReactorUtils}
@@ -57,6 +58,9 @@ object MailboxSetDeletePerformer {
       case e: IllegalArgumentException =>
         LOGGER.info("Illegal argument in Mailbox/set delete", e)
         SetError.invalidArguments(SetErrorDescription(s"${mailboxId.id} is not a mailboxId: ${e.getMessage}"))
+      case e: InsufficientRightsException =>
+        LOGGER.info("Attempt to delete a mailbox without sufficient rights")
+        SetError.invalidArguments(SetErrorDescription(e.getMessage))
       case e =>
         LOGGER.error("Failed to delete mailbox", e)
         SetError.serverFail(SetErrorDescription(exception.getMessage))
@@ -82,24 +86,25 @@ class MailboxSetDeletePerformer @Inject()(mailboxManager: MailboxManager,
                                           subscriptionManager: SubscriptionManager,
                                           mailboxIdFactory: MailboxId.Factory) {
 
-  def deleteMailboxes(mailboxSession: MailboxSession, mailboxSetRequest: MailboxSetRequest): SMono[MailboxDeletionResults] =
+  def deleteMailboxes(mailboxSession: MailboxSession, mailboxSetRequest: MailboxSetRequest, supportSharedMailbox: Boolean): SMono[MailboxDeletionResults] =
     SFlux.fromIterable(mailboxSetRequest.destroy.getOrElse(Seq()).toSet)
-      .flatMap(id => delete(mailboxSession, id, mailboxSetRequest.onDestroyRemoveEmails.getOrElse(RemoveEmailsOnDestroy(false)))
+      .flatMap(id => delete(mailboxSession, id, mailboxSetRequest.onDestroyRemoveEmails.getOrElse(RemoveEmailsOnDestroy(false)), supportSharedMailbox)
         .onErrorRecover(e => MailboxDeletionFailure(id, e)),
         maxConcurrency = 5)
       .collectSeq()
       .map(MailboxDeletionResults)
       .doOnSuccess(auditTrail(mailboxSession, _))
 
-  private def delete(mailboxSession: MailboxSession, id: UnparsedMailboxId, onDestroy: RemoveEmailsOnDestroy): SMono[MailboxDeletionResult] =
+  private def delete(mailboxSession: MailboxSession, id: UnparsedMailboxId, onDestroy: RemoveEmailsOnDestroy, supportSharedMailbox: Boolean): SMono[MailboxDeletionResult] =
     MailboxGet.parse(mailboxIdFactory)(id)
       .fold(e => SMono.error(e),
-        id => doDelete(mailboxSession, id, onDestroy)
+        id => doDelete(mailboxSession, id, onDestroy, supportSharedMailbox)
           .`then`(SMono.just[MailboxDeletionResult](MailboxDeletionSuccess(id))))
 
-  private def doDelete(mailboxSession: MailboxSession, id: MailboxId, onDestroy: RemoveEmailsOnDestroy): SMono[Unit] =
+  private def doDelete(mailboxSession: MailboxSession, id: MailboxId, onDestroy: RemoveEmailsOnDestroy, supportSharedMailbox: Boolean): SMono[Unit] =
     SMono(mailboxManager.getMailboxReactive(id, mailboxSession))
-      .flatMap((mailbox: MessageManager) =>
+      .filterWhen(assertCapabilityIfSharedMailbox(mailboxSession, id, supportSharedMailbox))
+      .flatMap((mailbox: MessageManager) => {
         SMono(mailboxManager.hasChildrenReactive(mailbox.getMailboxPath, mailboxSession))
           .flatMap(hasChildren => {
             if (isASystemMailbox(mailbox)) {
@@ -125,7 +130,8 @@ class MailboxSetDeletePerformer @Inject()(mailboxManager: MailboxManager,
                   .flatMap(deletedMailbox => SMono(subscriptionManager.unsubscribeReactive(deletedMailbox.generateAssociatedPath(), mailboxSession)))
                   .`then`())
             }
-          }))
+          })
+      })
 
   private def auditTrail(mailboxSession: MailboxSession, mailboxDeletionResults: MailboxDeletionResults): Unit = {
     if (mailboxDeletionResults.destroyed.nonEmpty) {

@@ -165,7 +165,8 @@ class MailboxesRoutesTest {
                 new OpenSearchSearcher(client, new QueryConverter(new CriterionConverter()), SEARCH_SIZE,
                     MailboxOpenSearchConstants.DEFAULT_MAILBOX_READ_ALIAS, routingKeyFactory),
                 new MessageToOpenSearchJson(new DefaultTextExtractor(), ZoneId.of("Europe/Paris"), IndexAttachments.YES, IndexHeaders.YES),
-                preInstanciationStage.getSessionProvider(), routingKeyFactory, messageIdFactory, OpenSearchMailboxConfiguration.builder().build(), new RecordingMetricFactory()))
+                preInstanciationStage.getSessionProvider(), routingKeyFactory, messageIdFactory, OpenSearchMailboxConfiguration.builder().build(), new RecordingMetricFactory(),
+                ImmutableSet.of()))
             .noPreDeletionHooks()
             .storeQuotaManager()
             .build();
@@ -704,6 +705,7 @@ class MailboxesRoutesTest {
 
                 verify(searchIndex).deleteAll(any(MailboxSession.class), mailboxIdCaptor.capture());
                 verify(searchIndex).add(any(MailboxSession.class), mailboxCaptor2.capture(), messageCaptor.capture());
+                verify(searchIndex).add(any(MailboxSession.class), mailboxCaptor2.capture(), messageCaptor.capture(), any());
                 verify(searchIndex).postReindexing();
                 verifyNoMoreInteractions(searchIndex);
 
@@ -1128,6 +1130,7 @@ class MailboxesRoutesTest {
 
                 verify(searchIndex).deleteAll(any(MailboxSession.class), mailboxIdCaptor.capture());
                 verify(searchIndex).add(any(MailboxSession.class), mailboxCaptor2.capture(), messageCaptor.capture());
+                verify(searchIndex).add(any(MailboxSession.class), mailboxCaptor2.capture(), messageCaptor.capture(), any());
                 verify(searchIndex).postReindexing();
                 verifyNoMoreInteractions(searchIndex);
 
@@ -1294,6 +1297,7 @@ class MailboxesRoutesTest {
                 ArgumentCaptor<Mailbox> mailboxCaptor = ArgumentCaptor.forClass(Mailbox.class);
 
                 verify(searchIndex).add(any(MailboxSession.class), mailboxCaptor.capture(), messageCaptor.capture());
+                verify(searchIndex).add(any(MailboxSession.class), mailboxCaptor.capture(), messageCaptor.capture(), any());
                 verifyNoMoreInteractions(searchIndex);
 
                 assertThat(mailboxCaptor.getValue()).matches(mailbox -> mailbox.getMailboxId().equals(mailboxId));
@@ -1625,6 +1629,7 @@ class MailboxesRoutesTest {
                 ArgumentCaptor<MailboxMessage> messageCaptor = ArgumentCaptor.forClass(MailboxMessage.class);
                 ArgumentCaptor<Mailbox> mailboxCaptor = ArgumentCaptor.forClass(Mailbox.class);
                 verify(searchIndex).add(any(MailboxSession.class), mailboxCaptor.capture(), messageCaptor.capture());
+                verify(searchIndex).add(any(MailboxSession.class), mailboxCaptor.capture(), messageCaptor.capture(), any());
                 verify(searchIndex).postReindexing();
                 verifyNoMoreInteractions(searchIndex);
 

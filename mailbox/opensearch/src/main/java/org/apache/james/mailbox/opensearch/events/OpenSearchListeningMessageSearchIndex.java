@@ -107,6 +107,17 @@ public class OpenSearchListeningMessageSearchIndex extends ListeningMessageSearc
         Mono<Void> handleAddedEvent(MailboxSession session, MailboxEvents.Added addedEvent, MailboxId mailboxId);
     }
 
+    public interface Indexer {
+        Mono<Void> added(MailboxSession session, Optional<MailboxEvents.Added> addedEvent, Mailbox mailbox, MailboxMessage message);
+
+        static Indexer merge(Indexer defaultIndexer, Set<Indexer> overrides) {
+            return (session, addedEvent, mailbox, message) -> defaultIndexer.added(session, addedEvent, mailbox, message)
+                .then(Flux.fromIterable(overrides)
+                    .concatMap(indexer -> indexer.added(session, addedEvent, mailbox, message))
+                    .then());
+        }
+    }
+
     class NaiveIndexingStrategy implements IndexingStrategy {
 
         @Override
@@ -117,6 +128,20 @@ public class OpenSearchListeningMessageSearchIndex extends ListeningMessageSearc
         @Override
         public Mono<Void> handleAddedEvent(MailboxSession session, MailboxEvents.Added addedEvent, MailboxId mailboxId) {
             return processAddedEvent(session, addedEvent, mailboxId);
+        }
+    }
+
+    class DefaultIndexer implements Indexer {
+        @Override
+        public Mono<Void> added(MailboxSession session, Optional<MailboxEvents.Added> addedEvent, Mailbox mailbox, MailboxMessage message) {
+            LOGGER.info("Indexing mailbox {}-{} of user {} on message {}",
+                mailbox.getName(),
+                mailbox.getMailboxId().serialize(),
+                session.getUser().asString(),
+                message.getUid().asLong());
+
+            return generateIndexedJson(mailbox, message, session)
+                .flatMap(jsonContent -> add(mailbox.getMailboxId(), message.getUid(), jsonContent));
         }
     }
 
@@ -213,6 +238,7 @@ public class OpenSearchListeningMessageSearchIndex extends ListeningMessageSearc
 
     }
 
+    private static final boolean FETCH_FULL_MESSAGE_CONTENT = Boolean.valueOf(System.getProperty("opensearch.index.listener.fetch.full.content", "true"));
     private static final Logger LOGGER = LoggerFactory.getLogger(OpenSearchListeningMessageSearchIndex.class);
     private static final String ID_SEPARATOR = ":";
     private static final Group GROUP = new OpenSearchListeningMessageSearchIndexGroup();
@@ -231,6 +257,7 @@ public class OpenSearchListeningMessageSearchIndex extends ListeningMessageSearc
     private final Metric reIndexNotFoundMetric;
     private final IndexingStrategy indexingStrategy;
     private final IndexBody indexBody;
+    private final Set<Indexer> indexerOverrides;
 
     @Inject
     public OpenSearchListeningMessageSearchIndex(MailboxSessionMapperFactory factory,
@@ -238,7 +265,7 @@ public class OpenSearchListeningMessageSearchIndex extends ListeningMessageSearc
                                                  @Named(MailboxOpenSearchConstants.InjectionNames.MAILBOX) OpenSearchIndexer indexer,
                                                  OpenSearchSearcher searcher, MessageToOpenSearchJson messageToOpenSearchJson,
                                                  SessionProvider sessionProvider, RoutingKey.Factory<MailboxId> routingKeyFactory, MessageId.Factory messageIdFactory,
-                                                 OpenSearchMailboxConfiguration configuration, MetricFactory metricFactory) {
+                                                 OpenSearchMailboxConfiguration configuration, MetricFactory metricFactory, Set<Indexer> indexersOverride) {
         super(factory, searchOverrides, sessionProvider);
         this.sessionProvider = sessionProvider;
         this.factory = factory;
@@ -247,6 +274,7 @@ public class OpenSearchListeningMessageSearchIndex extends ListeningMessageSearc
         this.searcher = searcher;
         this.routingKeyFactory = routingKeyFactory;
         this.messageIdFactory = messageIdFactory;
+        this.indexerOverrides = indexersOverride;
         if (configuration.isOptimiseMoves()) {
             this.indexingStrategy = new OptimizedIndexingStrategy();
         } else {
@@ -315,6 +343,9 @@ public class OpenSearchListeningMessageSearchIndex extends ListeningMessageSearc
     }
 
     private FetchType chooseFetchType() {
+        if (FETCH_FULL_MESSAGE_CONTENT) {
+            return FetchType.FULL;
+        }
         if (indexBody == IndexBody.YES) {
             return FetchType.FULL;
         }
@@ -346,14 +377,13 @@ public class OpenSearchListeningMessageSearchIndex extends ListeningMessageSearc
 
     @Override
     public Mono<Void> add(MailboxSession session, Mailbox mailbox, MailboxMessage message) {
-        LOGGER.info("Indexing mailbox {}-{} of user {} on message {}",
-            mailbox.getName(),
-            mailbox.getMailboxId().serialize(),
-            session.getUser().asString(),
-            message.getUid().asLong());
+        return add(session, mailbox, message, Optional.empty());
+    }
 
-        return generateIndexedJson(mailbox, message, session)
-            .flatMap(jsonContent -> add(mailbox.getMailboxId(), message.getUid(), jsonContent));
+    @Override
+    public Mono<Void> add(MailboxSession session, Mailbox mailbox, MailboxMessage message, Optional<MailboxEvents.Added> added) {
+        return Indexer.merge(new DefaultIndexer(), indexerOverrides)
+            .added(session, added, mailbox, message);
     }
 
     private Mono<Void> add(MailboxId mailboxId, MessageUid messageUid, String jsonContent) {

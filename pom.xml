@@ -632,7 +632,7 @@
         <jsieve.version>0.8</jsieve.version>
         <spring.version>6.1.4</spring.version>
         <activmq-artemis.version>2.32.0</activmq-artemis.version>
-        <apache-jspf-resolver.version>1.0.4</apache-jspf-resolver.version>
+        <apache-jspf-resolver.version>1.0.5</apache-jspf-resolver.version>
         <angus-mail.version>2.0.2</angus-mail.version>
         <angus-activation.version>2.0.1</angus-activation.version>
         <jakarta.activation-api.version>2.1.2</jakarta.activation-api.version>
@@ -726,6 +726,17 @@
             </dependency>
             <dependency>
                 <groupId>${james.groupId}</groupId>
+                <artifactId>apache-james-backends-postgres</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>${james.groupId}</groupId>
+                <artifactId>apache-james-backends-postgres</artifactId>
+                <version>${project.version}</version>
+                <type>test-jar</type>
+            </dependency>
+            <dependency>
+                <groupId>${james.groupId}</groupId>
                 <artifactId>apache-james-backends-pulsar</artifactId>
                 <version>${project.version}</version>
             </dependency>
@@ -797,6 +808,11 @@
             </dependency>
             <dependency>
                 <groupId>${james.groupId}</groupId>
+                <artifactId>apache-james-mailbox-deleted-messages-vault-postgres</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>${james.groupId}</groupId>
                 <artifactId>apache-james-mailbox-event-json</artifactId>
                 <version>${project.version}</version>
             </dependency>
@@ -841,6 +857,17 @@
             <dependency>
                 <groupId>${james.groupId}</groupId>
                 <artifactId>apache-james-mailbox-opensearch</artifactId>
+                <version>${project.version}</version>
+                <type>test-jar</type>
+            </dependency>
+            <dependency>
+                <groupId>${james.groupId}</groupId>
+                <artifactId>apache-james-mailbox-postgres</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>${james.groupId}</groupId>
+                <artifactId>apache-james-mailbox-postgres</artifactId>
                 <version>${project.version}</version>
                 <type>test-jar</type>
             </dependency>
@@ -1161,6 +1188,16 @@
             </dependency>
             <dependency>
                 <groupId>${james.groupId}</groupId>
+                <artifactId>blob-postgres</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>${james.groupId}</groupId>
+                <artifactId>blob-postgres-guice</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>${james.groupId}</groupId>
                 <artifactId>blob-s3</artifactId>
                 <version>${project.version}</version>
             </dependency>
@@ -1195,6 +1232,11 @@
             <dependency>
                 <groupId>${james.groupId}</groupId>
                 <artifactId>dead-letter-cassandra</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>${james.groupId}</groupId>
+                <artifactId>dead-letter-postgres</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
@@ -1431,6 +1473,17 @@
             </dependency>
             <dependency>
                 <groupId>${james.groupId}</groupId>
+                <artifactId>james-server-data-postgres</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>${james.groupId}</groupId>
+                <artifactId>james-server-data-postgres</artifactId>
+                <version>${project.version}</version>
+                <type>test-jar</type>
+            </dependency>
+            <dependency>
+                <groupId>${james.groupId}</groupId>
                 <artifactId>james-server-deleted-messages-vault</artifactId>
                 <version>${project.version}</version>
             </dependency>
@@ -1554,6 +1607,17 @@
             <dependency>
                 <groupId>${james.groupId}</groupId>
                 <artifactId>james-server-guice-sieve-jpa</artifactId>
+                <version>${project.version}</version>
+                <type>test-jar</type>
+            </dependency>
+            <dependency>
+                <groupId>${james.groupId}</groupId>
+                <artifactId>james-server-guice-sieve-postgres</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>${james.groupId}</groupId>
+                <artifactId>james-server-guice-sieve-postgres</artifactId>
                 <version>${project.version}</version>
                 <type>test-jar</type>
             </dependency>
@@ -1691,6 +1755,17 @@
                 <groupId>${james.groupId}</groupId>
                 <artifactId>james-server-onami</artifactId>
                 <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>${james.groupId}</groupId>
+                <artifactId>james-server-postgres-app</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>${james.groupId}</groupId>
+                <artifactId>james-server-postgres-app</artifactId>
+                <version>${project.version}</version>
+                <type>test-jar</type>
             </dependency>
             <dependency>
                 <groupId>${james.groupId}</groupId>
@@ -1861,6 +1936,17 @@
             <dependency>
                 <groupId>${james.groupId}</groupId>
                 <artifactId>james-server-task-memory</artifactId>
+                <version>${project.version}</version>
+                <type>test-jar</type>
+            </dependency>
+            <dependency>
+                <groupId>${james.groupId}</groupId>
+                <artifactId>james-server-task-postgres</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>${james.groupId}</groupId>
+                <artifactId>james-server-task-postgres</artifactId>
                 <version>${project.version}</version>
                 <type>test-jar</type>
             </dependency>
@@ -2231,11 +2317,6 @@
                 <groupId>com.rabbitmq</groupId>
                 <artifactId>amqp-client</artifactId>
                 <version>5.21.0</version>
-            </dependency>
-            <dependency>
-                <groupId>com.sparkjava</groupId>
-                <artifactId>spark-core</artifactId>
-                <version>2.9.4</version>
             </dependency>
             <dependency>
                 <groupId>com.sun.xml.bind</groupId>
@@ -2933,6 +3014,16 @@
             </dependency>
             <dependency>
                 <groupId>org.testcontainers</groupId>
+                <artifactId>mariadb</artifactId>
+                <version>${testcontainers.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.testcontainers</groupId>
+                <artifactId>postgresql</artifactId>
+                <version>${testcontainers.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.testcontainers</groupId>
                 <artifactId>pulsar</artifactId>
                 <version>${testcontainers.version}</version>
             </dependency>
@@ -2945,6 +3036,11 @@
                 <groupId>org.threeten</groupId>
                 <artifactId>threeten-extra</artifactId>
                 <version>1.8.0</version>
+            </dependency>
+            <dependency>
+                <groupId>org.zoomba-lang</groupId>
+                <artifactId>spark-core</artifactId>
+                <version>3.0.1</version>
             </dependency>
             <dependency>
                 <groupId>pl.pragmatists</groupId>
