@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance   *
  * with the License.  You may obtain a copy of the License at   *
  *                                                              *
- * http://www.apache.org/licenses/LICENSE-2.0                   *
+ *   http://www.apache.org/licenses/LICENSE-2.0                 *
  *                                                              *
  * Unless required by applicable law or agreed to in writing,   *
  * software distributed under the License is distributed on an  *
@@ -17,21 +17,28 @@
  * under the License.                                           *
  ****************************************************************/
 
-package org.apache.james.rate.limiter
+package org.apache.james.backends.redis;
 
-import org.apache.james.backends.redis.RedisTLSExtension.RedisContainer
-import org.apache.james.backends.redis.{RedisConfiguration, RedisTLSExtension}
-import org.junit.jupiter.api.BeforeEach
-import org.junit.jupiter.api.extension.ExtendWith
+import static org.assertj.core.api.Assertions.assertThat;
 
-@ExtendWith(Array(classOf[RedisTLSExtension]))
-class RedisRateLimiterWithTLSTest extends TopologyRedisRateLimiterTest {
-  var redisContainer: RedisContainer = _
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 
-  def getRedisConfiguration(): RedisConfiguration = redisContainer.getConfiguration
+import io.lettuce.core.api.sync.RedisCommands;
 
-  @BeforeEach
-  def beforeEach(redisContainer: RedisContainer): Unit = {
-    this.redisContainer = redisContainer
-  }
+class KvrocksExtensionTest {
+
+    @RegisterExtension
+    static KvrocksExtension kvrocksExtension = new KvrocksExtension();
+
+    @Test
+    void redisExtensionShouldWork(DockerKvrocks kvrocks) {
+        RedisCommands<String, String> client = kvrocks.createClient();
+        String key = "KEY1";
+        String keyValue = "Value1";
+        client.set(key, keyValue);
+
+        assertThat(client.get(key)).isEqualTo(keyValue);
+    }
+
 }

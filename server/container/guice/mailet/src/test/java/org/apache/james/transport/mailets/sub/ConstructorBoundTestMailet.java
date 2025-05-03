@@ -17,17 +17,30 @@
  * under the License.                                           *
  ****************************************************************/
 
-package org.apache.james.rate.limiter;
+package org.apache.james.transport.mailets.sub;
 
-import org.apache.james.backends.redis.RedisConfiguration;
-import org.apache.james.backends.redis.RedisMasterReplicaExtension;
-import org.junit.jupiter.api.extension.RegisterExtension;
+import jakarta.inject.Inject;
+import jakarta.mail.MessagingException;
 
-public class RedisRateLimiterWithTLSMasterReplicaTopologyTest implements TopologyRedisRateLimiterTest {
-    @RegisterExtension
-    private static final RedisMasterReplicaExtension redisMasterReplicaExtension = new RedisMasterReplicaExtension(true);
+import org.apache.mailet.Mail;
+import org.apache.mailet.Mailet;
+import org.apache.mailet.MailetConfig;
 
-    public RedisConfiguration getRedisConfiguration() {
-        return redisMasterReplicaExtension.getRedisMasterReplicaContainer().getRedisConfiguration();
+public class ConstructorBoundTestMailet implements Mailet {
+    private final MailetConfig config;
+
+    @Inject
+    public ConstructorBoundTestMailet(MailetConfig config) {
+        this.config = config;
+    }
+
+    @Override
+    public void service(Mail mail) throws MessagingException {
+
+    }
+
+    @Override
+    public String getName() {
+        return config.getMailetName();
     }
 }

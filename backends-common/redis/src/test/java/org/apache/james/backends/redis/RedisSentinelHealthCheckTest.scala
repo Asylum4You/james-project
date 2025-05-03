@@ -19,10 +19,15 @@
 
 package org.apache.james.backends.redis
 
+import java.util.concurrent.TimeUnit
+
 import org.apache.james.backends.redis.RedisSentinelExtension.RedisSentinelCluster
 import org.apache.james.server.core.filesystem.FileSystemImpl
+import org.assertj.core.api.Assertions.assertThat
+import org.awaitility.Awaitility
 import org.junit.jupiter.api.extension.ExtendWith
-import org.junit.jupiter.api.{AfterEach, BeforeEach}
+import org.junit.jupiter.api.{AfterEach, BeforeEach, Test}
+import reactor.core.publisher.Mono
 
 @ExtendWith(Array(classOf[RedisSentinelExtension]))
 class RedisSentinelHealthCheckTest extends RedisHealthCheckTest {
@@ -31,7 +36,7 @@ class RedisSentinelHealthCheckTest extends RedisHealthCheckTest {
 
   @BeforeEach
   def setup(redis: RedisSentinelCluster): Unit = {
-    redisHealthCheck = new RedisHealthCheck(redis.redisSentinelContainerList.getRedisConfiguration, new RedisClientFactory(FileSystemImpl.forTesting()))
+    redisHealthCheck = new RedisHealthCheck(new RedisClientFactory(FileSystemImpl.forTesting(), redis.redisSentinelContainerList.getRedisConfiguration), redis.redisSentinelContainerList.getRedisConfiguration)
     redisSentinelCluster = redis
   }
 
@@ -51,5 +56,20 @@ class RedisSentinelHealthCheckTest extends RedisHealthCheckTest {
   @Override
   def unpauseRedis(): Unit = {
     redisSentinelCluster.redisMasterReplicaContainerList.unPauseMasterNode()
+  }
+
+  @Test
+  def checkShouldReturnHealthyAfterRedisSentinelFailoverRecovery(): Unit = {
+    pauseRedis()
+
+    Awaitility.await
+      .pollInterval(2, TimeUnit.SECONDS)
+      .atMost(20, TimeUnit.SECONDS)
+      .untilAsserted(() => assertThat(Mono.from(getRedisHealthCheck.check).block.isDegraded).isTrue)
+
+    Awaitility.await
+      .pollInterval(2, TimeUnit.SECONDS)
+      .atMost(30, TimeUnit.SECONDS)
+      .untilAsserted(() => assertThat(Mono.from(getRedisHealthCheck.check).block.isHealthy).isTrue)
   }
 }

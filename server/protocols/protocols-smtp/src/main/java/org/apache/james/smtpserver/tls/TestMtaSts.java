@@ -17,18 +17,36 @@
  * under the License.                                           *
  ****************************************************************/
 
-package org.apache.james.rate.limiter;
+package org.apache.james.smtpserver.tls;
 
-import org.apache.james.backends.redis.RedisConfiguration;
-import org.apache.james.backends.redis.RedisSentinelExtension;
-import org.junit.jupiter.api.extension.RegisterExtension;
+import org.apache.james.core.MaybeSender;
+import org.apache.james.protocols.smtp.SMTPSession;
+import org.apache.james.protocols.smtp.hook.HookResult;
+import org.apache.james.protocols.smtp.hook.MailHook;
+import org.apache.james.util.MDCStructuredLogger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-public class RedisRateLimiterWithTLSSentinelTest implements TopologyRedisRateLimiterTest {
-    @RegisterExtension
-    private static final RedisSentinelExtension redisSentinelExtension = new RedisSentinelExtension(true);
+/**
+ * CF https://datatracker.ietf.org/doc/html/rfc8461
+ *
+ * SMTP MTA Strict Transport Security (MTA-STS)
+ *
+ * Aimed at enforcing mode testing. The goal of this SMTP hook is to
+ * allow administrator to evaluate the impact of enforcing MTA-STS
+ * by logging the taffic that would be blocked.
+ */
+public class TestMtaSts implements MailHook {
+    private static final Logger LOGGER = LoggerFactory.getLogger(TestMtaSts.class);
 
     @Override
-    public RedisConfiguration getRedisConfiguration() {
-        return redisSentinelExtension.getRedisSentinelCluster().redisSentinelContainerList().getRedisConfiguration();
+    public HookResult doMail(SMTPSession session, MaybeSender sender) {
+        if (!session.isTLSStarted()) {
+            MDCStructuredLogger.forLogger(LOGGER)
+                .field("sessionId", session.getSessionID())
+                .field("sender", sender.asPrettyString())
+                .log(logger -> logger.warn("Attempt to send to us a clear text message"));
+        }
+        return HookResult.DECLINED;
     }
 }

@@ -66,13 +66,11 @@ public abstract class GenericMailet implements Mailet, MailetConfig {
 
     private MailetConfig config = null;
 
-    /**
-     * Called by the mailer container to indicate to a mailet that the
-     * mailet is being taken out of service.
-     */
-    @Override
-    public void destroy() {
-        //Do nothing
+    public GenericMailet(MailetConfig config) {
+        this.config = config;
+    }
+
+    public GenericMailet() {
     }
 
     /**
@@ -179,7 +177,6 @@ public abstract class GenericMailet implements Mailet, MailetConfig {
      *
      * @return the MailetConfig object that initialized this mailet
      */
-    @Override
     public MailetConfig getMailetConfig() {
         return config;
     }
@@ -196,18 +193,6 @@ public abstract class GenericMailet implements Mailet, MailetConfig {
     }
 
     /**
-     * Returns information about the mailet, such as author, version, and
-     * copyright.  By default, this method returns an empty string. Override
-     * this method to have it return a meaningful value.
-     *
-     * @return information about this mailet, by default an empty string
-     */
-    @Override
-    public String getMailetInfo() {
-        return "";
-    }
-
-    /**
      * Returns the name of this mailet instance.
      *
      * @return the name of this mailet instance
@@ -218,6 +203,10 @@ public abstract class GenericMailet implements Mailet, MailetConfig {
         return config.getMailetName();
     }
 
+    @Override
+    public String getName() {
+        return getMailetName();
+    }
 
     /**
      * <p>Called by the mailet container to indicate to a mailet that the
