@@ -16,30 +16,37 @@
  * specific language governing permissions and limitations      *
  * under the License.                                           *
  ****************************************************************/
-package org.apache.james.modules.mailbox;
 
-import org.apache.james.mailbox.extension.PreDeletionHook;
-import org.apache.james.utils.ClassName;
-import org.apache.james.utils.GuiceLoader;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+package org.apache.james.transport.mailets;
 
-import com.google.inject.Inject;
+import jakarta.mail.MessagingException;
 
-public class PreDeletionHookLoaderImpl implements PreDeletionHookLoader {
-    private static final Logger LOGGER = LoggerFactory.getLogger(PreDeletionHookLoaderImpl.class);
+import org.apache.mailet.Mail;
+import org.apache.mailet.base.GenericMailet;
 
-    private final GuiceLoader guiceLoader;
+/**
+* The `SanitizeMimeMessageId` mailet is designed to address a specific issue where some email clients, such as Outlook for Android, do not add the MIME `Message-ID` header to the emails they send.
+* The absence of the `Message-ID` header can cause emails to be rejected by downstream mail servers,
+* as required by RFC 5322 specifications.
+*
+* Sample configuration:
+*
+* <pre><code>
+* &lt;mailet match="All" class="SanitizeMimeMessageId"&gt;
+* &lt;/mailet&gt;
+* </code></pre>
+*/
+public class SanitizeMimeMessageId extends GenericMailet {
 
-    @Inject
-    PreDeletionHookLoaderImpl(GuiceLoader guiceLoader) {
-        this.guiceLoader = guiceLoader;
+    @Override
+    public void service(Mail mail) throws MessagingException {
+        if (mail.getMessage().getMessageID() == null) {
+            mail.getMessage().saveChanges();
+        }
     }
 
     @Override
-    public PreDeletionHook createHook(PreDeletionHookConfiguration configuration) throws ClassNotFoundException {
-        ClassName hookClass = new ClassName(configuration.getClazz());
-        LOGGER.info("Loading user registered mailbox message deletionHook {}", hookClass);
-        return guiceLoader.instantiate(hookClass);
+    public String getMailetInfo() {
+        return "SanitizeMimeMessageId Mailet";
     }
 }

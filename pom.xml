@@ -621,7 +621,7 @@
 
         <james.groupId>org.apache.james</james.groupId>
         <james.protocols.groupId>${james.groupId}.protocols</james.protocols.groupId>
-        <activemq.version>6.1.0</activemq.version>
+        <activemq.version>6.1.6</activemq.version>
         <apache-mime4j.version>0.8.12</apache-mime4j.version>
         <apache.openjpa.version>4.0.0</apache.openjpa.version>
         <derby.version>10.14.2.0</derby.version>
@@ -3040,7 +3040,7 @@
             <dependency>
                 <groupId>org.zoomba-lang</groupId>
                 <artifactId>spark-core</artifactId>
-                <version>3.0.1</version>
+                <version>3.0.2</version>
             </dependency>
             <dependency>
                 <groupId>pl.pragmatists</groupId>

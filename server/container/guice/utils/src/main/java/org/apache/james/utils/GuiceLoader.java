@@ -16,30 +16,27 @@
  * specific language governing permissions and limitations      *
  * under the License.                                           *
  ****************************************************************/
-package org.apache.james.modules.mailbox;
 
-import org.apache.james.mailbox.extension.PreDeletionHook;
-import org.apache.james.utils.ClassName;
-import org.apache.james.utils.GuiceLoader;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+package org.apache.james.utils;
 
-import com.google.inject.Inject;
+import com.google.inject.Module;
 
-public class PreDeletionHookLoaderImpl implements PreDeletionHookLoader {
-    private static final Logger LOGGER = LoggerFactory.getLogger(PreDeletionHookLoaderImpl.class);
+public interface GuiceLoader {
 
-    private final GuiceLoader guiceLoader;
+    public interface InvocationPerformer<T> {
 
-    @Inject
-    PreDeletionHookLoaderImpl(GuiceLoader guiceLoader) {
-        this.guiceLoader = guiceLoader;
+        T instantiate(ClassName className) throws ClassNotFoundException;
+
+        Class<T> locateClass(ClassName className)throws ClassNotFoundException;
+
+        InvocationPerformer<T> withChildModule(Module childModule);
+
+        InvocationPerformer<T> withNamingSheme(NamingScheme namingSheme);
     }
 
-    @Override
-    public PreDeletionHook createHook(PreDeletionHookConfiguration configuration) throws ClassNotFoundException {
-        ClassName hookClass = new ClassName(configuration.getClazz());
-        LOGGER.info("Loading user registered mailbox message deletionHook {}", hookClass);
-        return guiceLoader.instantiate(hookClass);
-    }
+    <T> T instantiate(ClassName className) throws ClassNotFoundException;
+
+    <T> InvocationPerformer<T> withNamingSheme(NamingScheme namingSheme);
+
+    <T> InvocationPerformer<T> withChildModule(Module childModule);
 }
