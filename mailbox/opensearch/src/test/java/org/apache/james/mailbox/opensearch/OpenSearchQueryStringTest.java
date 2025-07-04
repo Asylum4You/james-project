@@ -45,7 +45,7 @@ import org.apache.james.mailbox.model.MailboxPath;
 import org.apache.james.mailbox.model.SearchQuery;
 import org.apache.james.mailbox.opensearch.events.OpenSearchListeningMessageSearchIndex;
 import org.apache.james.mailbox.opensearch.json.MessageToOpenSearchJson;
-import org.apache.james.mailbox.opensearch.query.CriterionConverter;
+import org.apache.james.mailbox.opensearch.query.DefaultCriterionConverter;
 import org.apache.james.mailbox.opensearch.query.QueryConverter;
 import org.apache.james.mailbox.opensearch.search.OpenSearchSearcher;
 import org.apache.james.mailbox.store.StoreMessageManager;
@@ -111,7 +111,7 @@ class OpenSearchQueryStringTest {
         WriteAliasName writeAliasName = new WriteAliasName(UUID.randomUUID().toString());
         indexName = new IndexName(UUID.randomUUID().toString());
         MailboxIndexCreationUtil.prepareClient(client, readAliasName, writeAliasName, indexName,
-            openSearch.getDockerOpenSearch().configuration());
+            openSearch.getDockerOpenSearch().configuration(), new DefaultMailboxMappingFactory());
 
         OpenSearchMailboxConfiguration openSearchMailboxConfiguration = OpenSearchMailboxConfiguration.builder()
             .indexBody(IndexBody.YES)
@@ -127,7 +127,7 @@ class OpenSearchQueryStringTest {
                 preInstanciationStage.getMapperFactory(),
                 ImmutableSet.of(),
                 new OpenSearchIndexer(client, writeAliasName),
-                new OpenSearchSearcher(client, new QueryConverter(new CriterionConverter(openSearchMailboxConfiguration)), SEARCH_SIZE, readAliasName, routingKeyFactory),
+                new OpenSearchSearcher(client, new QueryConverter(new DefaultCriterionConverter(openSearchMailboxConfiguration)), SEARCH_SIZE, readAliasName, routingKeyFactory),
                 new MessageToOpenSearchJson(textExtractor, ZoneId.of("Europe/Paris"), IndexAttachments.YES, IndexHeaders.YES, IndexBody.YES),
                 preInstanciationStage.getSessionProvider(), routingKeyFactory, messageIdFactory,
                 openSearchMailboxConfiguration, new RecordingMetricFactory(),

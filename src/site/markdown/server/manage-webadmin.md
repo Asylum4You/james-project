@@ -4,13 +4,13 @@ Web administration for JAMES
 The web administration supports for now the CRUD operations on the domains, the users, their mailboxes and their quotas,
  managing mail repositories, performing cassandra migrations, and much more, as described in the following sections.
 
-**WARNING**: This API allow authentication only via the use of JWT. If not configured with JWT, an administrator should ensure an attacker can not use this API.
+**WARNING**: This API supports authentication only via the use of JWT. If JWT is disabled (the default), an administrator should ensure an attacker cannot use this API.
 
-By the way, some endpoints are not filtered by authentication. Those endpoints are not related to data stored in James, for example: Swagger documentation & James health checks.
+By the way, some endpoints are not filtered by authentication. Those endpoints are not related to data stored in James, such as Swagger documentation and James health checks.
 
-Please also note **webadmin** is only enabled with **Guice**. You can not use it when using James with **Spring**, as the required injections are not implemented.
+Please also note **webadmin** is only enabled with **Guice**. You cannot use it when using James with **Spring**, as the required injections are not implemented.
 
-In case of any error, the system will return an error message which is json format like this:
+In case of any error, the response will contain a JSON error message in the following format:
 
 ```
 {
@@ -2832,6 +2832,7 @@ to be configured.
 Note that email addresses are restricted to ASCII character set. Mail addresses not matching this criteria will be rejected.
 
  - [Listing groups](#Listing_groups)
+ - [Deleting all groups](#Deleting_all_groups)
  - [Listing members of a group](#Listing_members_of_a_group)
  - [Adding a group member](#Adding_a_group_member)
  - [Removing a group member](#Removing_a_group_member)
@@ -2851,6 +2852,18 @@ Will return the groups as a list of JSON Strings representing mail addresses. Fo
 Response codes:
 
  - 200: Success
+
+### Deleting all groups
+
+```
+curl -XDELETE http://ip:port/address/groups
+```
+
+Will delete all groups.
+
+Response codes:
+
+- 204: Success
 
 ### Listing members of a group
 
@@ -3383,6 +3396,48 @@ Response codes:
 
 - 200: OK
 - 400: Invalid parameter value
+
+### Listing sources for a mapping
+
+This endpoint allows receiving all mappings pointing to a corresponding user.
+
+```
+curl -XGET http://ip:port/mappings/sources/{userAddress}?type={type}
+```
+
+Return all mappings of a user where:
+
+ - `userAddress`: is the selected user
+ - `type`: Type of the mapping. One of `group`, `forward`, `address`, `alias`. Compulsory.
+
+Response body:
+
+```
+["group1@domain.tld","group2@domain.tld"]
+```
+
+Response codes:
+
+ - 200: OK
+ - 400: Invalid parameter value
+
+### Deleting sources for a mapping
+
+This endpoint allows deleting all mappings pointing to a corresponding user.
+
+```
+curl -XDELETE http://ip:port/mappings/sources/{userAddress}?type={type}
+```
+
+Deletes all mappings of a user where:
+
+ - `userAddress`: is the selected user
+ - `type`: Type of the mapping. One of `group`, `forward`, `address`, `alias`. Compulsory.
+
+Response codes:
+
+ - 204: OK
+ - 400: Invalid parameter value
 
 ## Administrating mail repositories
 

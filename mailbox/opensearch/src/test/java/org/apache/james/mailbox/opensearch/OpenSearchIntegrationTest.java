@@ -50,7 +50,7 @@ import org.apache.james.mailbox.model.MultimailboxesSearchQuery;
 import org.apache.james.mailbox.model.SearchQuery;
 import org.apache.james.mailbox.opensearch.events.OpenSearchListeningMessageSearchIndex;
 import org.apache.james.mailbox.opensearch.json.MessageToOpenSearchJson;
-import org.apache.james.mailbox.opensearch.query.CriterionConverter;
+import org.apache.james.mailbox.opensearch.query.DefaultCriterionConverter;
 import org.apache.james.mailbox.opensearch.query.QueryConverter;
 import org.apache.james.mailbox.opensearch.search.OpenSearchSearcher;
 import org.apache.james.mailbox.store.search.AbstractMessageSearchIndexTest;
@@ -92,7 +92,7 @@ class OpenSearchIntegrationTest extends AbstractMessageSearchIndexTest {
             .and().pollDelay(ONE_HUNDRED_MILLISECONDS)
             .await();
     static final int SEARCH_SIZE = 1;
-    private final QueryConverter queryConverter = new QueryConverter(new CriterionConverter());
+    private final QueryConverter queryConverter = new QueryConverter(new DefaultCriterionConverter(openSearchMailboxConfiguration()));
 
     @RegisterExtension
     static TikaExtension tika = new TikaExtension();
@@ -145,7 +145,8 @@ class OpenSearchIntegrationTest extends AbstractMessageSearchIndexTest {
         indexName = new IndexName(UUID.randomUUID().toString());
         MailboxIndexCreationUtil.prepareClient(
             client, readAliasName, writeAliasName, indexName,
-            openSearch.getDockerOpenSearch().configuration());
+            openSearch.getDockerOpenSearch().configuration(),
+            new DefaultMailboxMappingFactory());
 
         InMemoryIntegrationResources resources = InMemoryIntegrationResources.builder()
             .preProvisionnedFakeAuthenticator()
@@ -158,7 +159,7 @@ class OpenSearchIntegrationTest extends AbstractMessageSearchIndexTest {
                 ImmutableSet.of(),
                 new OpenSearchIndexer(client,
                     writeAliasName),
-                new OpenSearchSearcher(client, new QueryConverter(new CriterionConverter(openSearchMailboxConfiguration())), SEARCH_SIZE,
+                new OpenSearchSearcher(client, queryConverter, SEARCH_SIZE,
                     readAliasName, routingKeyFactory),
                 new MessageToOpenSearchJson(textExtractor, ZoneId.of("Europe/Paris"), IndexAttachments.YES, IndexHeaders.YES),
                 preInstanciationStage.getSessionProvider(), routingKeyFactory, messageIdFactory,
@@ -505,6 +506,34 @@ class OpenSearchIntegrationTest extends AbstractMessageSearchIndexTest {
         MultimailboxesSearchQuery query = MultimailboxesSearchQuery.from(SearchQuery.of(SearchQuery.address(SearchQuery.AddressType.To, "other"))).build();
         assertThat(Flux.from(storeMailboxManager.search(query, session, 10)).collectList().block())
             .containsOnly(messageId2.getMessageId());
+    }
+
+    @Test
+    void shouldMatchFileExtension() throws Exception {
+        MailboxPath mailboxPath = MailboxPath.forUser(USERNAME, INBOX);
+        MailboxSession session = MailboxSessionUtil.create(USERNAME);
+        MessageManager messageManager = storeMailboxManager.getMailbox(mailboxPath, session);
+
+        messageManager.appendMessage(
+            MessageManager.AppendCommand.builder().build(
+                Message.Builder
+                    .of()
+                    .setSubject("test")
+                    .setBody("testmail", StandardCharsets.UTF_8)
+                    .addField(new RawField("To", "alice@domain.tld"))
+                    .build()),
+            session).getId();
+
+        ComposedMessageId messageId2 = messageManager.appendMessage(
+            MessageManager.AppendCommand.builder()
+                .build(ClassLoaderUtils.getSystemResourceAsSharedStream("eml/attachments-filename-in-content-type.eml")),
+            session).getId();
+
+        awaitForOpenSearch(QueryBuilders.matchAll().build().toQuery(), 15);
+        Thread.sleep(500);
+
+        assertThat(Flux.from(messageManager.search(SearchQuery.of(SearchQuery.mailContains("txt")), session)).toStream())
+            .containsOnly(messageId2.getUid());
     }
 
     @Disabled("MAILBOX-403 Relaxed the matching constraints for email addresses in text bodies to reduce OpenSearch disk space usage")

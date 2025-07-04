@@ -53,23 +53,23 @@ Firstly, create your own user network on Docker for the James environment:
 
 You need a running *cassandra* in docker which connects to *james* network. To achieve this run:
 
-    $ docker run -d --network james --name=cassandra cassandra:4.1.5
+    $ docker run -d --network james --name=cassandra cassandra:4.1.9
 
 You need a running *rabbitmq* in docker which connects to *james* network. To achieve this run:
 
-    $ docker run -d --network james --name=rabbitmq rabbitmq:3.13.3-management
+    $ docker run -d --network james --name=rabbitmq rabbitmq:4.1.1-management
 
 You need a running *Zenko Cloudserver* objectstorage in docker which connects to *james* network. To achieve this run:
 
-    $ docker run -d --network james --env 'REMOTE_MANAGEMENT_DISABLE=1' --env 'SCALITY_ACCESS_KEY_ID=accessKey1' --env 'SCALITY_SECRET_ACCESS_KEY=secretKey1' --name=s3 ghcr.io/scality/cloudserver:8cbe2c066b3505b26d339dc67315d1041b8c7f3a
+    $ docker run -d --network james --env 'REMOTE_MANAGEMENT_DISABLE=1' --env 'SCALITY_ACCESS_KEY_ID=accessKey1' --env 'SCALITY_SECRET_ACCESS_KEY=secretKey1' --name=s3 ghcr.io/scality/cloudserver:c1ba296859690c1cbbec609aaae430f6b04b4745
 
 You need a running *OpenSearch* in docker which connects to *james* network. To achieve this run:
 
-$ docker run -d --network james -p 9200:9200 --name=opensearch --env 'discovery.type=single-node' opensearchproject/opensearch:2.1.0
+$ docker run -d --network james -p 9200:9200 --name=opensearch --env 'discovery.type=single-node' opensearchproject/opensearch:2.19.2
 
 If you want to use all the JMAP search capabilities, you may also need to start Tika container which connects to *james* network:
 
-    $ docker run -d --network james --name=tika apache/tika:2.9.2.1
+    $ docker run -d --network james --name=tika apache/tika:3.2.0.0
 
 You can find more explanation on the need of Tika in this xref:distributed/configure/tika.adoc[page].
 
@@ -122,7 +122,7 @@ You can handle attachment text extraction before indexing in OpenSearch. This ma
 
 Run tika connect to *james* network:
 
-    $ docker run -d --network james --name tika apache/tika:2.9.2.1
+    $ docker run -d --network james --name tika apache/tika:3.2.0.0
 
 Run James:
 

@@ -30,13 +30,13 @@ services:
       - "8000:8000"
 
   redis:
-    image: redis:7.2.5
+    image: redis:8.0.2
     command:
       - "--loglevel"
       - "debug"
 
   clamav:
-    image: clamav/clamav:1.3
+    image: clamav/clamav:1.4
 
   rspamd:
     depends_on:
@@ -45,7 +45,7 @@ services:
       redis:
           condition: service_started
     container_name: rspamd
-    image: rspamd/rspamd:3.9.1
+    image: rspamd/rspamd:3.12.0
     environment:
       - RSPAMD_PASSWORD=admin
     volumes:

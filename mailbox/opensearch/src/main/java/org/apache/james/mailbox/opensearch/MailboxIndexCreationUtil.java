@@ -19,6 +19,8 @@
 
 package org.apache.james.mailbox.opensearch;
 
+import java.util.Optional;
+
 import org.apache.james.backends.opensearch.IndexCreationFactory;
 import org.apache.james.backends.opensearch.IndexName;
 import org.apache.james.backends.opensearch.OpenSearchConfiguration;
@@ -32,12 +34,13 @@ public class MailboxIndexCreationUtil {
                                                         ReadAliasName readAlias,
                                                         WriteAliasName writeAlias,
                                                         IndexName indexName,
-                                                        OpenSearchConfiguration configuration) {
+                                                        OpenSearchConfiguration configuration,
+                                                        MailboxMappingFactory mailboxMappingFactory) {
             return new IndexCreationFactory(configuration)
                 .useIndex(indexName)
                 .addAlias(readAlias)
                 .addAlias(writeAlias)
-                .createIndexAndAliases(client, MailboxMappingFactory.getMappingContent());
+                .createIndexAndAliases(client, mailboxMappingFactory.getIndexSettings(), Optional.of(mailboxMappingFactory.getMappingContent()));
     }
 
     public static ReactorOpenSearchClient prepareDefaultClient(ReactorOpenSearchClient client, OpenSearchConfiguration configuration) {
@@ -45,6 +48,7 @@ public class MailboxIndexCreationUtil {
             MailboxOpenSearchConstants.DEFAULT_MAILBOX_READ_ALIAS,
             MailboxOpenSearchConstants.DEFAULT_MAILBOX_WRITE_ALIAS,
             MailboxOpenSearchConstants.DEFAULT_MAILBOX_INDEX,
-            configuration);
+            configuration,
+            new DefaultMailboxMappingFactory());
     }
 }

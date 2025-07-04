@@ -30,7 +30,7 @@ services:
       - "8000:8000"
 
   kvrocks:
-    image: apache/kvrocks:2.11.1
+    image: apache/kvrocks:2.12.1
     healthcheck:
       test: [ "CMD", "redis-cli", "ping", "|", "grep", "PONG" ]
       interval: 10s
@@ -45,7 +45,7 @@ services:
           - redis
 
   clamav:
-    image: clamav/clamav:1.3
+    image: clamav/clamav:1.4
 
   rspamd:
     depends_on:
@@ -54,7 +54,7 @@ services:
       kvrocks:
           condition: service_started
     container_name: rspamd
-    image: rspamd/rspamd:3.9.1
+    image: rspamd/rspamd:3.12.0
     environment:
       - RSPAMD_PASSWORD=admin
     volumes:

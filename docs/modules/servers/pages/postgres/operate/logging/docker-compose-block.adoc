@@ -34,7 +34,7 @@ services:
       - discovery.type=single-node
 
   postgres:
-    image: postgres:16.3
+    image: postgres:16.9
     ports:
       - "5432:5432"
     environment:
@@ -43,7 +43,7 @@ services:
       - POSTGRES_PASSWORD=secret1
 
   rabbitmq:
-    image: rabbitmq:3.13.3-management
+    image: rabbitmq:4.1.1-management
     ports:
       - "5672:5672"
       - "15672:15672"

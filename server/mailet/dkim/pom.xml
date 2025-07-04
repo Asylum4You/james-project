@@ -33,7 +33,7 @@
     <description>Mailet adapter for the JDKIM library</description>
 
     <properties>
-        <jdkim.version>0.3</jdkim.version>
+        <jdkim.version>0.5</jdkim.version>
     </properties>
 
     <dependencies>
@@ -58,6 +58,10 @@
             <groupId>${james.groupId}</groupId>
             <artifactId>testing-base</artifactId>
             <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>it.unimi.dsi</groupId>
+            <artifactId>fastutil-core</artifactId>
         </dependency>
         <dependency>
             <groupId>org.apache.james.jdkim</groupId>
@@ -130,6 +134,18 @@
         <dependency>
             <groupId>org.bouncycastle</groupId>
             <artifactId>bcprov-jdk18on</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.openjdk.jmh</groupId>
+            <artifactId>jmh-core</artifactId>
+            <version>1.37</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.openjdk.jmh</groupId>
+            <artifactId>jmh-generator-annprocess</artifactId>
+            <version>1.37</version>
+            <scope>test</scope>
         </dependency>
     </dependencies>
 

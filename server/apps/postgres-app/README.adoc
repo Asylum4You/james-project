@@ -18,7 +18,7 @@ Third party compulsory dependencies:
 
 [source]
 ----
-$ docker run -d --network james -p 5432:5432 --name=postgres --env 'POSTGRES_DB=james' --env 'POSTGRES_USER=james' --env 'POSTGRES_PASSWORD=secret1' postgres:16.0
+$ docker run -d --network james -p 5432:5432 --name=postgres --env 'POSTGRES_DB=james' --env 'POSTGRES_USER=james' --env 'POSTGRES_PASSWORD=secret1' postgres:16.9
 ----
 
 === Distributed version
@@ -31,7 +31,7 @@ For now, dependencies supported are:
 
 [source]
 ----
-$ docker run -d --network james -p 9200:9200 --name=opensearch --env 'discovery.type=single-node' opensearchproject/opensearch:2.8.0
+$ docker run -d --network james -p 9200:9200 --name=opensearch --env 'discovery.type=single-node' opensearchproject/opensearch:2.19.2
 ----
 
 * Zenko Cloudserver or AWS S3
@@ -45,7 +45,7 @@ $ docker run -d --network james --env 'REMOTE_MANAGEMENT_DISABLE=1' --env 'SCALI
 
 [source]
 ----
-$ docker run -d --network james -p 5672:5672 -p 15672:15672 --name=rabbitmq rabbitmq:3.12.1-management
+$ docker run -d --network james -p 5672:5672 -p 15672:15672 --name=rabbitmq rabbitmq:4.1.1-management
 ----
 
 == Running manually

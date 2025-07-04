@@ -68,7 +68,7 @@ Firstly, create your own user network on Docker for the James environment:
 
 You need a running *Postgresql* in docker which connects to *james* network. To achieve this run:
 
-    $ docker run -d --network james --name=postgres --env 'POSTGRES_DB=james' --env 'POSTGRES_USER=james' --env 'POSTGRES_PASSWORD=secret1' postgres:16.0
+    $ docker run -d --network james --name=postgres --env 'POSTGRES_DB=james' --env 'POSTGRES_USER=james' --env 'POSTGRES_PASSWORD=secret1' postgres:16.9
 
 To run this container :
 
@@ -94,7 +94,7 @@ Same as above, except that you need to run before James instances of RabbitMQ, S
 
 You need a running *rabbitmq* in docker which connects to *james* network. To achieve this run:
 
-    $ docker run -d --network james --name=rabbitmq rabbitmq:3.13.3-management
+    $ docker run -d --network james --name=rabbitmq rabbitmq:4.1.1-management
 
 You need a running *Zenko Cloudserver* objectstorage in docker which connects to *james* network. To achieve this run:
 
@@ -102,7 +102,7 @@ You need a running *Zenko Cloudserver* objectstorage in docker which connects to
 
 You need a running *OpenSearch* in docker which connects to *james* network. To achieve this run:
 
-$ docker run -d --network james -p 9200:9200 --name=opensearch --env 'discovery.type=single-node' opensearchproject/opensearch:2.14.0
+$ docker run -d --network james -p 9200:9200 --name=opensearch --env 'discovery.type=single-node' opensearchproject/opensearch:2.19.2
 
 Then run James like in the section above.
 
@@ -135,7 +135,7 @@ You can handle attachment text extraction before indexing in OpenSearch. This ma
 
 Run tika connect to *james* network:
 
-    $ docker run -d --network james --name tika apache/tika:2.9.2.1
+    $ docker run -d --network james --name tika apache/tika:3.2.0.0
 
 Run James:
 

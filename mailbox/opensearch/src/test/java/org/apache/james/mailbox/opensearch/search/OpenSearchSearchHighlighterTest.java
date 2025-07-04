@@ -44,6 +44,7 @@ import org.apache.james.mailbox.model.MailboxId;
 import org.apache.james.mailbox.model.MailboxPath;
 import org.apache.james.mailbox.model.MessageId;
 import org.apache.james.mailbox.model.SearchQuery;
+import org.apache.james.mailbox.opensearch.DefaultMailboxMappingFactory;
 import org.apache.james.mailbox.opensearch.IndexAttachments;
 import org.apache.james.mailbox.opensearch.IndexHeaders;
 import org.apache.james.mailbox.opensearch.MailboxIdRoutingKeyFactory;
@@ -51,7 +52,7 @@ import org.apache.james.mailbox.opensearch.MailboxIndexCreationUtil;
 import org.apache.james.mailbox.opensearch.OpenSearchMailboxConfiguration;
 import org.apache.james.mailbox.opensearch.events.OpenSearchListeningMessageSearchIndex;
 import org.apache.james.mailbox.opensearch.json.MessageToOpenSearchJson;
-import org.apache.james.mailbox.opensearch.query.CriterionConverter;
+import org.apache.james.mailbox.opensearch.query.DefaultCriterionConverter;
 import org.apache.james.mailbox.opensearch.query.QueryConverter;
 import org.apache.james.mailbox.searchhighligt.SearchHighLighterContract;
 import org.apache.james.mailbox.searchhighligt.SearchHighlighter;
@@ -116,7 +117,7 @@ public class OpenSearchSearchHighlighterTest implements SearchHighLighterContrac
         IndexName indexName = new IndexName(UUID.randomUUID().toString());
         MailboxIndexCreationUtil.prepareClient(
             client, readAliasName, writeAliasName, indexName,
-            openSearch.getDockerOpenSearch().configuration());
+            openSearch.getDockerOpenSearch().configuration(), new DefaultMailboxMappingFactory());
 
         MailboxIdRoutingKeyFactory routingKeyFactory = new MailboxIdRoutingKeyFactory();
         OpenSearchMailboxConfiguration openSearchMailboxConfiguration = OpenSearchMailboxConfiguration.builder()
@@ -125,7 +126,7 @@ public class OpenSearchSearchHighlighterTest implements SearchHighLighterContrac
             .build();
         final MessageId.Factory messageIdFactory = new InMemoryMessageId.Factory();
 
-        OpenSearchSearcher openSearchSearcher = new OpenSearchSearcher(client, new QueryConverter(new CriterionConverter(openSearchMailboxConfiguration)), SEARCH_SIZE,
+        OpenSearchSearcher openSearchSearcher = new OpenSearchSearcher(client, new QueryConverter(new DefaultCriterionConverter(openSearchMailboxConfiguration)), SEARCH_SIZE,
             readAliasName, routingKeyFactory);
 
         InMemoryIntegrationResources resources = InMemoryIntegrationResources.builder()
