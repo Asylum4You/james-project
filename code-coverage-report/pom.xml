@@ -4,7 +4,7 @@
     <parent>
         <groupId>org.apache.james</groupId>
         <artifactId>james-project</artifactId>
-        <version>3.9.0-SNAPSHOT</version>
+        <version>3.10.0-SNAPSHOT</version>
     </parent>
 
     <artifactId>code-coverage-report</artifactId>
@@ -372,11 +372,6 @@
         </dependency>
 
         <!--        10. james-server-->
-        <dependency>
-            <groupId>${james.groupId}</groupId>
-            <artifactId>james-server-cassandra-app</artifactId>
-            <version>${project.version}</version>
-        </dependency>
         <dependency>
             <groupId>${james.groupId}</groupId>
             <artifactId>james-server-cli</artifactId>
@@ -1184,52 +1179,6 @@
             <version>${project.version}</version>
         </dependency>
 
-        <!--        16. examples-->
-        <dependency>
-            <groupId>org.apache.james.examples</groupId>
-            <artifactId>custom-james-assembly</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.james.examples</groupId>
-            <artifactId>custom-listeners</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.james.examples</groupId>
-            <artifactId>custom-mailets</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.james.examples</groupId>
-            <artifactId>custom-smtp-command</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.james.examples</groupId>
-            <artifactId>custom-smtp-hooks</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.james.examples</groupId>
-            <artifactId>custom-webadmin-route</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.james.examples</groupId>
-            <artifactId>metrics-graphite</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.james.examples</groupId>
-            <artifactId>custom-healthcheck</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.james.examples</groupId>
-            <artifactId>custom-imap</artifactId>
-            <version>${project.version}</version>
-        </dependency>
     </dependencies>
 
     <build>

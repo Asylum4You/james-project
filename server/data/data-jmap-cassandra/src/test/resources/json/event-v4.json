@@ -13,12 +13,25 @@
             "field": "cc",
             "comparator": "contains",
             "value": "something"
+          },
+          {
+            "field": "header:custom",
+            "comparator": "contains",
+            "value": "another thing"
+          },
+          {
+            "field": "header:anotherCustom",
+            "comparator": "any",
+            "value": "disregard me"
           }
         ]
       },
       "action": {
         "appendIn": {
           "mailboxIds":["id-01"]
+        },
+        "moveTo": {
+          "mailboxName": "Trash"
         },
         "important":true,
         "keyworkds":["abc"],

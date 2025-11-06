@@ -95,7 +95,9 @@ class MessageRoutesTest {
                     new MessageIdReIndexerImpl(reIndexerPerformer),
                     null,
                     jsonTransformer,
-                    ImmutableSet.of()))
+                    ImmutableSet.of(),
+                    ImmutableSet.of(),
+                    null))
             .start();
 
         RestAssured.requestSpecification = WebAdminUtils.buildRequestSpecification(webAdminServer).build();

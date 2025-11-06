@@ -19,6 +19,9 @@
 
 package org.apache.james.jmap.mailet.filter;
 
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Stream;
@@ -28,11 +31,19 @@ import jakarta.mail.internet.InternetAddress;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.james.jmap.api.filtering.Rule;
+import org.apache.james.jmap.mail.Keyword;
+import org.apache.james.mime4j.codec.DecodeMonitor;
+import org.apache.james.mime4j.field.DateTimeFieldLenientImpl;
+import org.apache.james.mime4j.stream.RawField;
+import org.apache.james.util.DurationParser;
 import org.apache.james.util.OptionalUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
+
+import scala.util.Either;
 
 public interface ContentMatcher {
 
@@ -87,25 +98,102 @@ public interface ContentMatcher {
             return contents.map(ContentMatcher::asAddressHeader)
                 .anyMatch(addressHeaderToMatch::matchesIgnoreCase);
         }
+    }
 
+    class ParsedFlag {
+        private final Optional<Keyword> keyword;
+
+        private ParsedFlag(String flag) {
+            this.keyword = parseFlag(flag);
+        }
+
+        private Optional<Keyword> parseFlag(String maybeFlag) {
+            if (maybeFlag == null) {
+                return Optional.empty();
+            }
+
+            String sanitizedFlag = sanitizeFlag(maybeFlag).trim().toUpperCase();
+
+            Either<String, Keyword> result = Keyword.parse(sanitizedFlag);
+
+            if (result.isRight()) {
+                return Optional.of(result.right().get());
+            } else {
+                return Optional.empty();
+            }
+        }
+
+        private String sanitizeFlag(String maybeFlag) {
+            if (maybeFlag.startsWith("\\") || maybeFlag.startsWith("$")) {
+                return maybeFlag.substring(1);
+            }
+            return maybeFlag;
+        }
+
+        boolean matches(ParsedFlag otherFlag) {
+            return OptionalUtils.matches(keyword, otherFlag.keyword,
+                (k1, k2) -> k1.getFlagName().equals(k2.getFlagName()));
+        }
     }
 
     ContentMatcher STRING_CONTAINS_MATCHER = (contents, valueToMatch) -> contents.anyMatch(content -> StringUtils.contains(content, valueToMatch));
+    ContentMatcher IS_OLDER_THAN_MATCHER = (contents, valueToMatch) -> {
+        Duration duration = DurationParser.parse(valueToMatch);
+        Instant horizon = Clock.systemUTC().instant().minus(duration);
+        return contents
+            .map(dateField -> DateTimeFieldLenientImpl.PARSER.parse(new RawField("Date", dateField), DecodeMonitor.SILENT).getDate().toInstant())
+            .anyMatch(date -> date.isBefore(horizon));
+    };
+    ContentMatcher IS_NEWER_THAN_MATCHER = (contents, valueToMatch) -> {
+        Duration duration = DurationParser.parse(valueToMatch);
+        Instant horizon = Clock.systemUTC().instant().minus(duration);
+        return contents
+            .map(dateField -> DateTimeFieldLenientImpl.PARSER.parse(new RawField("Date", dateField), DecodeMonitor.SILENT).getDate().toInstant())
+            .anyMatch(date -> date.isAfter(horizon));
+    };
+    ContentMatcher FLAG_IS_SET_MATCHER = (contents, valueToMatch) -> {
+        ParsedFlag flagToMatch = new ParsedFlag(valueToMatch);
+        return contents
+            .map(ParsedFlag::new)
+            .anyMatch(flag -> flag.matches(flagToMatch));
+    };
+    ContentMatcher FLAG_IS_UNSET_MATCHER = (contents, valueToMatch) -> {
+        ParsedFlag flagToMatch = new ParsedFlag(valueToMatch);
+        return contents
+            .map(ParsedFlag::new)
+            .noneMatch(flag -> flag.matches(flagToMatch));
+    };
     ContentMatcher STRING_NOT_CONTAINS_MATCHER = negate(STRING_CONTAINS_MATCHER);
     ContentMatcher STRING_EXACTLY_EQUALS_MATCHER = (contents, valueToMatch) -> contents.anyMatch(content -> StringUtils.equals(content, valueToMatch));
     ContentMatcher STRING_NOT_EXACTLY_EQUALS_MATCHER = negate(STRING_EXACTLY_EQUALS_MATCHER);
+    ContentMatcher STRING_START_WITH_MATCHER = (contents, valueToMatch) -> contents.anyMatch(content -> content.startsWith(valueToMatch));
+    ContentMatcher ANY_MATCHER = (contents, valueToMatch) -> contents.anyMatch(StringUtils::isNotBlank);
 
     ContentMatcher ADDRESS_CONTAINS_MATCHER = (contents, valueToMatch) -> contents
         .map(ContentMatcher::asAddressHeader)
         .anyMatch(addressHeader -> StringUtils.containsIgnoreCase(addressHeader.fullAddress, valueToMatch));
     ContentMatcher ADDRESS_NOT_CONTAINS_MATCHER = negate(ADDRESS_CONTAINS_MATCHER);
     ContentMatcher ADDRESS_NOT_EXACTLY_EQUALS_MATCHER = negate(new ExactAddressContentMatcher());
+    ContentMatcher ADDRESS_START_WITH_MATCHER = (contents, valueToMatch) -> contents
+        .map(ContentMatcher::asAddressHeader)
+        .anyMatch(addressHeader -> addressHeader.fullAddress.startsWith(valueToMatch));
+
+    Map<Rule.Condition.Comparator, ContentMatcher> DATE_MATCHER_REGISTRY = ImmutableMap.<Rule.Condition.Comparator, ContentMatcher>builder()
+        .put(Rule.Condition.Comparator.IS_NEWER_THAN, IS_NEWER_THAN_MATCHER)
+        .put(Rule.Condition.Comparator.IS_OLDER_THAN, IS_OLDER_THAN_MATCHER)
+        .build();
+
+    Map<Rule.Condition.Comparator, ContentMatcher> FLAG_MATCHER_REGISTRY = ImmutableMap.<Rule.Condition.Comparator, ContentMatcher>builder()
+        .put(Rule.Condition.Comparator.IS_SET, FLAG_IS_SET_MATCHER)
+        .put(Rule.Condition.Comparator.IS_UNSET, FLAG_IS_UNSET_MATCHER)
+        .build();
 
     Map<Rule.Condition.Comparator, ContentMatcher> HEADER_ADDRESS_MATCHER_REGISTRY = ImmutableMap.<Rule.Condition.Comparator, ContentMatcher>builder()
         .put(Rule.Condition.Comparator.CONTAINS, ADDRESS_CONTAINS_MATCHER)
         .put(Rule.Condition.Comparator.NOT_CONTAINS, ADDRESS_NOT_CONTAINS_MATCHER)
         .put(Rule.Condition.Comparator.EXACTLY_EQUALS, new ExactAddressContentMatcher())
         .put(Rule.Condition.Comparator.NOT_EXACTLY_EQUALS, ADDRESS_NOT_EXACTLY_EQUALS_MATCHER)
+        .put(Rule.Condition.Comparator.START_WITH, ADDRESS_START_WITH_MATCHER)
         .build();
 
     Map<Rule.Condition.Comparator, ContentMatcher> CONTENT_STRING_MATCHER_REGISTRY = ImmutableMap.<Rule.Condition.Comparator, ContentMatcher>builder()
@@ -113,14 +201,20 @@ public interface ContentMatcher {
         .put(Rule.Condition.Comparator.NOT_CONTAINS, STRING_NOT_CONTAINS_MATCHER)
         .put(Rule.Condition.Comparator.EXACTLY_EQUALS, STRING_EXACTLY_EQUALS_MATCHER)
         .put(Rule.Condition.Comparator.NOT_EXACTLY_EQUALS, STRING_NOT_EXACTLY_EQUALS_MATCHER)
+        .put(Rule.Condition.Comparator.START_WITH, STRING_START_WITH_MATCHER)
+        .put(Rule.Condition.Comparator.ANY, ANY_MATCHER)
         .build();
 
     Map<Rule.Condition.Field, Map<Rule.Condition.Comparator, ContentMatcher>> CONTENT_MATCHER_REGISTRY = ImmutableMap.<Rule.Condition.Field, Map<Rule.Condition.Comparator, ContentMatcher>>builder()
-        .put(Rule.Condition.Field.SUBJECT, CONTENT_STRING_MATCHER_REGISTRY)
-        .put(Rule.Condition.Field.TO, HEADER_ADDRESS_MATCHER_REGISTRY)
-        .put(Rule.Condition.Field.CC, HEADER_ADDRESS_MATCHER_REGISTRY)
-        .put(Rule.Condition.Field.RECIPIENT, HEADER_ADDRESS_MATCHER_REGISTRY)
-        .put(Rule.Condition.Field.FROM, HEADER_ADDRESS_MATCHER_REGISTRY)
+        .put(Rule.Condition.FixedField.SUBJECT, CONTENT_STRING_MATCHER_REGISTRY)
+        .put(Rule.Condition.FixedField.TO, HEADER_ADDRESS_MATCHER_REGISTRY)
+        .put(Rule.Condition.FixedField.CC, HEADER_ADDRESS_MATCHER_REGISTRY)
+        .put(Rule.Condition.FixedField.RECIPIENT, HEADER_ADDRESS_MATCHER_REGISTRY)
+        .put(Rule.Condition.FixedField.FROM, HEADER_ADDRESS_MATCHER_REGISTRY)
+        .put(Rule.Condition.FixedField.SENT_DATE, DATE_MATCHER_REGISTRY)
+        .put(Rule.Condition.FixedField.INTERNAL_DATE, DATE_MATCHER_REGISTRY)
+        .put(Rule.Condition.FixedField.SAVED_DATE, DATE_MATCHER_REGISTRY)
+        .put(Rule.Condition.FixedField.FLAG, FLAG_MATCHER_REGISTRY)
         .build();
 
     static ContentMatcher negate(ContentMatcher contentMatcher) {
@@ -129,9 +223,12 @@ public interface ContentMatcher {
     }
 
     static Optional<ContentMatcher> asContentMatcher(Rule.Condition.Field field, Rule.Condition.Comparator comparator) {
-        return Optional
-            .ofNullable(CONTENT_MATCHER_REGISTRY.get(field))
-            .map(matcherRegistry -> matcherRegistry.get(comparator));
+        return Optional.ofNullable(CONTENT_MATCHER_REGISTRY.get(field))
+            .map(matcherRegistry -> matcherRegistry.get(comparator))
+            .or(() -> {
+                Preconditions.checkArgument(field instanceof Rule.Condition.CustomHeaderField);
+                return Optional.of(CONTENT_STRING_MATCHER_REGISTRY.get(comparator));
+            });
     }
 
     static AddressHeader asAddressHeader(String addressAsString) {

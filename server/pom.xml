@@ -26,7 +26,7 @@
     <parent>
         <groupId>org.apache.james</groupId>
         <artifactId>james-project</artifactId>
-        <version>3.9.0-SNAPSHOT</version>
+        <version>3.10.0-SNAPSHOT</version>
     </parent>
 
     <artifactId>james-server</artifactId>
@@ -38,7 +38,6 @@
     <inceptionYear>2002</inceptionYear>
 
     <modules>
-        <module>apps/cassandra-app</module>
         <module>apps/cli</module>
         <module>apps/cli-integration-tests</module>
         <module>apps/distributed-app</module>

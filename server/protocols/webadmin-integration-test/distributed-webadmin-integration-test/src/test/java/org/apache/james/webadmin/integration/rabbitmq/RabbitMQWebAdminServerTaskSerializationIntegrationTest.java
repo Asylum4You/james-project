@@ -25,6 +25,8 @@ import static io.restassured.RestAssured.with;
 import static org.apache.james.webadmin.Constants.SEPARATOR;
 import static org.apache.james.webadmin.vault.routes.DeletedMessagesVaultRoutes.MESSAGE_PATH_PARAM;
 import static org.apache.james.webadmin.vault.routes.DeletedMessagesVaultRoutes.USERS;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.eclipse.jetty.http.HttpStatus.CREATED_201;
 import static org.hamcrest.CoreMatchers.notNullValue;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.nullValue;
@@ -32,6 +34,8 @@ import static org.hamcrest.collection.IsMapWithSize.anEmptyMap;
 
 import java.io.ByteArrayInputStream;
 import java.util.Date;
+import java.util.List;
+import java.util.Map;
 import java.util.stream.Stream;
 
 import jakarta.mail.Flags;
@@ -76,6 +80,7 @@ import org.apache.james.utils.MailRepositoryProbeImpl;
 import org.apache.james.utils.WebAdminGuiceProbe;
 import org.apache.james.vault.VaultConfiguration;
 import org.apache.james.webadmin.WebAdminUtils;
+import org.apache.james.webadmin.data.jmap.RunRulesOnMailboxTask;
 import org.apache.james.webadmin.routes.CassandraMailboxMergingRoutes;
 import org.apache.james.webadmin.routes.MailQueueRoutes;
 import org.apache.james.webadmin.routes.MailRepositoriesRoutes;
@@ -117,6 +122,7 @@ class RabbitMQWebAdminServerTaskSerializationIntegrationTest {
 
     private static final String DOMAIN = "domain";
     private static final String USERNAME = "username@" + DOMAIN;
+    private static final String USERNAME_2 = "username2@" + DOMAIN;
 
     private DataProbe dataProbe;
     private MailboxProbe mailboxProbe;
@@ -713,6 +719,132 @@ class RabbitMQWebAdminServerTaskSerializationIntegrationTest {
             .body("additionalInformation.messagesFailCount", is(0))
             .body("additionalInformation.username", is(USERNAME))
             .body("additionalInformation.mailboxName", is(MailboxConstants.INBOX));
+    }
+
+    @Test
+    void runRulesOnMailboxShouldComplete(GuiceJamesServer server) throws Exception {
+        server.getProbe(DataProbeImpl.class).addUser(USERNAME, "secret");
+        mailboxProbe.createMailbox(MailboxConstants.USER_NAMESPACE, USERNAME, MailboxConstants.INBOX);
+        MailboxId otherMailboxId = mailboxProbe.createMailbox(MailboxConstants.USER_NAMESPACE, USERNAME, "otherMailbox");
+
+        mailboxProbe.appendMessage(
+            USERNAME,
+            MailboxPath.inbox(Username.of(USERNAME)),
+            new ByteArrayInputStream("Subject: test\r\n\r\ntestmail".getBytes()),
+            new Date(),
+            false,
+            new Flags());
+
+        String taskId = given()
+            .queryParam("action", "triage")
+            .body("""
+            {
+              "id": "1",
+              "name": "rule 1",
+              "action": {
+                "appendIn": {
+                  "mailboxIds": ["%s"]
+                },
+                "important": false,
+                "keyworkds": [],
+                "reject": false,
+                "seen": false
+              },
+              "conditionGroup": {
+                "conditionCombiner": "AND",
+                "conditions": [
+                  {
+                    "comparator": "contains",
+                    "field": "subject",
+                    "value": "test"
+                  }
+                ]
+              }
+            }""".formatted(otherMailboxId.serialize()))
+            .post("users/" + USERNAME + "/mailboxes/" + MailboxConstants.INBOX + "/messages")
+            .jsonPath()
+            .getString("taskId");
+
+        with()
+            .basePath(TasksRoutes.BASE)
+        .when()
+            .get(taskId + "/await")
+        .then()
+            .body("status", is(TaskManager.Status.COMPLETED.getValue()))
+            .body("taskId", is(taskId))
+            .body("type", is(RunRulesOnMailboxTask.TASK_TYPE.asString()))
+            .body("additionalInformation.rulesOnMessagesApplySuccessfully", is(1))
+            .body("additionalInformation.rulesOnMessagesApplyFailed", is(0))
+            .body("additionalInformation.username", is(USERNAME))
+            .body("additionalInformation.mailboxPath", is(MailboxPath.forUser(Username.of(USERNAME), MailboxConstants.INBOX).asString()));
+    }
+
+    @Test
+    void runRulesOnAllUsersMailboxShouldComplete(GuiceJamesServer server) throws Exception {
+        server.getProbe(DataProbeImpl.class).addUser(USERNAME, "secret");
+        server.getProbe(DataProbeImpl.class).addUser(USERNAME_2, "secret");
+        mailboxProbe.createMailbox(MailboxConstants.USER_NAMESPACE, USERNAME, MailboxConstants.INBOX);
+        mailboxProbe.createMailbox(MailboxConstants.USER_NAMESPACE, USERNAME, "otherMailbox");
+        mailboxProbe.createMailbox(MailboxConstants.USER_NAMESPACE, USERNAME_2, MailboxConstants.INBOX);
+        mailboxProbe.createMailbox(MailboxConstants.USER_NAMESPACE, USERNAME_2, "otherMailbox");
+
+        mailboxProbe.appendMessage(
+            USERNAME,
+            MailboxPath.inbox(Username.of(USERNAME)),
+            new ByteArrayInputStream("Subject: test\r\n\r\ntestmail".getBytes()),
+            new Date(),
+            false,
+            new Flags());
+
+        mailboxProbe.appendMessage(
+            USERNAME_2,
+            MailboxPath.inbox(Username.of(USERNAME_2)),
+            new ByteArrayInputStream("Subject: test\r\n\r\ntestmail".getBytes()),
+            new Date(),
+            false,
+            new Flags());
+
+        List<Map<String, String>> list = given()
+            .queryParams("action", "triage", "mailboxName", MailboxConstants.INBOX)
+            .body("""
+            {
+              "id": "1",
+              "name": "rule 1",
+              "action": {
+                "appendIn": {
+                  "mailboxIds": []
+                },
+                "moveTo": {
+                  "mailboxName": "otherMailbox"
+                },
+                "important": false,
+                "keyworkds": [],
+                "reject": false,
+                "seen": false
+              },
+              "conditionGroup": {
+                "conditionCombiner": "AND",
+                "conditions": [
+                  {
+                    "comparator": "contains",
+                    "field": "subject",
+                    "value": "test"
+                  }
+                ]
+              }
+            }""")
+            .post("/messages")
+        .then()
+            .statusCode(CREATED_201)
+            .extract()
+            .jsonPath()
+            .getList(".");
+
+        assertThat(list)
+            .hasSize(2)
+            .first()
+            .satisfies(map -> assertThat(map).hasSize(2)
+                .containsKeys("taskId", "username"));
     }
 
     @Test

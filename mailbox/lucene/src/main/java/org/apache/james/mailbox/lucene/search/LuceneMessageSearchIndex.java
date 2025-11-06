@@ -238,7 +238,7 @@ public class LuceneMessageSearchIndex extends ListeningMessageSearchIndex {
         try {
             this.writer = new IndexWriter(this.directory, createConfig(LenientImapSearchAnalyzer.INSTANCE, dropIndexOnStart));
         } catch (IndexFormatTooOldException e) {
-            throw new RuntimeException("Old lucene index version detected, automatic migration is not supported. See https://github.com/james/james-project/blob/master/upgrade-instructions.md#james-4046-refactor-and-update-apache-james-mailbox-lucene for details", e);
+            throw new RuntimeException("Old lucene index version detected, automatic migration is not supported. See https://github.com/apache/james-project/blob/master/upgrade-instructions.md#james-4046-refactor-and-update-apache-james-mailbox-lucene for details", e);
         }
     }
 
@@ -749,11 +749,14 @@ public class LuceneMessageSearchIndex extends ListeningMessageSearchIndex {
 
     @Override
     public Mono<Void> add(MailboxSession session, Mailbox mailbox, MailboxMessage membership) {
-        return indexableDocument.createMessageDocument(membership, session)
-            .flatMap(document -> Mono.fromRunnable(Throwing.runnable(() -> {
-                writer.addDocument(document);
-                writer.addDocument(indexableDocument.createFlagsDocument(membership));
-            })))
+        return Mono.fromCallable(() -> retrieveFlags(mailbox, membership.getUid()))
+            .filter(flags -> !new Flags().equals(flags))
+            .flatMap(any -> Mono.fromRunnable(Throwing.runnable(() -> update(mailbox.getMailboxId(), membership.getUid(), membership.createFlags()))))
+            .switchIfEmpty(Mono.defer(() -> indexableDocument.createMessageDocument(membership, session)
+                .flatMap(document -> Mono.fromRunnable(Throwing.runnable(() -> {
+                    writer.addDocument(document);
+                    writer.addDocument(indexableDocument.createFlagsDocument(membership));
+                })))))
             .then();
     }
 

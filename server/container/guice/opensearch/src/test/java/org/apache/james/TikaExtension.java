@@ -25,10 +25,10 @@ import org.junit.jupiter.api.extension.ExtensionContext;
 
 import com.google.inject.Module;
 
-class TikaExtension implements GuiceModuleTestExtension {
+public class TikaExtension implements GuiceModuleTestExtension {
     private final TikaContainer tika;
 
-    TikaExtension() {
+    public TikaExtension() {
         this.tika = new TikaContainer();
     }
 

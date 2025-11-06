@@ -27,12 +27,12 @@
         <groupId>org.apache</groupId>
         <artifactId>apache</artifactId>
         <version>21</version>
-        <relativePath />
+        <relativePath/>
     </parent>
 
     <groupId>org.apache.james</groupId>
     <artifactId>james-project</artifactId>
-    <version>3.9.0-SNAPSHOT</version>
+    <version>3.10.0-SNAPSHOT</version>
     <packaging>pom</packaging>
 
     <name>Apache James Project</name>
@@ -82,7 +82,7 @@
             <roles>
                 <role>Developer</role>
             </roles>
-            <timezone />
+            <timezone/>
             <properties>
                 <Donator>Serge was the original donator of the James code, which has since been massively
                     improved by people smarter than him. He tries to answer questions on the listserv and make
@@ -97,7 +97,7 @@
             <roles>
                 <role>Developer</role>
             </roles>
-            <timezone />
+            <timezone/>
         </developer>
         <developer>
             <id>sbrewin</id>
@@ -107,7 +107,7 @@
                 <role>Developer</role>
                 <role>PMC Member</role>
             </roles>
-            <timezone />
+            <timezone/>
         </developer>
         <developer>
             <id>hilmer</id>
@@ -117,7 +117,7 @@
                 <role>Developer</role>
                 <role>PMC Member</role>
             </roles>
-            <timezone />
+            <timezone/>
         </developer>
         <developer>
             <id>noel</id>
@@ -127,7 +127,7 @@
                 <role>Developer</role>
                 <role>PMC Member</role>
             </roles>
-            <timezone />
+            <timezone/>
         </developer>
         <developer>
             <id>danny</id>
@@ -139,7 +139,7 @@
                 <role>Developer</role>
                 <role>PMC Member</role>
             </roles>
-            <timezone />
+            <timezone/>
             <properties>
                 <Description>Danny is a member of the Apache Software Foundation and married father
                     of two by night, and by day works as lead technical consultant for the Student Loans
@@ -179,7 +179,7 @@
                 <role>Developer</role>
                 <role>PMC Member</role>
             </roles>
-            <timezone />
+            <timezone/>
         </developer>
         <developer>
             <id>rdonkin</id>
@@ -189,7 +189,7 @@
                 <role>Developer</role>
                 <role>PMC Member</role>
             </roles>
-            <timezone />
+            <timezone/>
         </developer>
         <developer>
             <id>niklas</id>
@@ -216,7 +216,7 @@
             <roles>
                 <role>Developer</role>
             </roles>
-            <timezone />
+            <timezone/>
         </developer>
         <developer>
             <id>olegk</id>
@@ -226,7 +226,7 @@
                 <role>Developer</role>
                 <role>PMC Member</role>
             </roles>
-            <timezone />
+            <timezone/>
         </developer>
         <developer>
             <id>manolo</id>
@@ -236,7 +236,7 @@
                 <role>Developer</role>
                 <role>PMC Member</role>
             </roles>
-            <timezone />
+            <timezone/>
         </developer>
         <developer>
             <id>eric</id>
@@ -246,7 +246,7 @@
                 <role>Developer</role>
                 <role>PMC Member</role>
             </roles>
-            <timezone />
+            <timezone/>
         </developer>
         <developer>
             <id>felixk</id>
@@ -265,7 +265,7 @@
                 <role>PMC Member</role>
                 <role>Developer</role>
             </roles>
-            <timezone />
+            <timezone/>
         </developer>
         <developer>
             <id>matthieu</id>
@@ -275,7 +275,7 @@
                 <role>PMC Member</role>
                 <role>Developer</role>
             </roles>
-            <timezone />
+            <timezone/>
         </developer>
         <developer>
             <id>btellier</id>
@@ -288,7 +288,7 @@
                 <role>PMC Member</role>
                 <role>Developer</role>
             </roles>
-            <timezone />
+            <timezone/>
         </developer>
         <developer>
             <id>aduprat</id>
@@ -300,7 +300,7 @@
                 <role>PMC Member</role>
                 <role>Developer</role>
             </roles>
-            <timezone />
+            <timezone/>
         </developer>
         <developer>
             <id>rouazana</id>
@@ -311,7 +311,7 @@
             <roles>
                 <role>Developer</role>
             </roles>
-            <timezone />
+            <timezone/>
         </developer>
         <developer>
             <id>jhelou</id>
@@ -321,7 +321,7 @@
                 <role>PMC Member</role>
                 <role>Developer</role>
             </roles>
-            <timezone />
+            <timezone/>
         </developer>
         <developer>
             <id>rcordier</id>
@@ -331,7 +331,7 @@
                 <role>PMC Member</role>
                 <role>Developer</role>
             </roles>
-            <timezone />
+            <timezone/>
         </developer>
         <developer>
             <id>hqtran</id>
@@ -340,7 +340,7 @@
             <roles>
                 <role>Developer</role>
             </roles>
-            <timezone />
+            <timezone/>
         </developer>
     </developers>
 
@@ -617,7 +617,7 @@
             This property contains the directory where to deploy when running using "-Psite-reports" profile
             to avoid accidently overriding the common modules website. Empty by default.
         -->
-        <deployTechnicalSiteDirectory />
+        <deployTechnicalSiteDirectory/>
 
         <james.groupId>org.apache.james</james.groupId>
         <james.protocols.groupId>${james.groupId}.protocols</james.protocols.groupId>
@@ -644,7 +644,7 @@
         <junit.platform.version>1.13.1</junit.platform.version>
         <junit.vintage.version>5.13.1</junit.vintage.version>
         <concurrent.version>1.3.4</concurrent.version>
-        <netty.version>4.1.118.Final</netty.version>
+        <netty.version>4.1.126.Final</netty.version>
         <cucumber.version>7.23.0</cucumber.version>
 
         <jackson.version>2.19.1</jackson.version>
@@ -672,13 +672,13 @@
         <lucene.version>10.2.1</lucene.version>
         <jasypt.version>1.9.3</jasypt.version>
         <guice.version>7.0.0</guice.version>
-        <logback.version>1.5.18</logback.version>
+        <logback.version>1.5.19</logback.version>
         <tink.version>1.17.0</tink.version>
         <lettuce.core.version>6.7.1.RELEASE</lettuce.core.version>
         <io.micrometer.core.version>1.15.1</io.micrometer.core.version>
         <io.micrometer.tracing.version>1.5.1</io.micrometer.tracing.version>
 
-        <bouncycastle.version>1.81</bouncycastle.version>
+        <bouncycastle.version>1.82</bouncycastle.version>
 
         <scala.base>2.13</scala.base>
         <scala.version>${scala.base}.16</scala.version>
@@ -1361,28 +1361,6 @@
             </dependency>
             <dependency>
                 <groupId>${james.groupId}</groupId>
-                <artifactId>james-server-cassandra-app</artifactId>
-                <version>${project.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>${james.groupId}</groupId>
-                <artifactId>james-server-cassandra-app</artifactId>
-                <version>${project.version}</version>
-                <type>test-jar</type>
-            </dependency>
-            <dependency>
-                <groupId>${james.groupId}</groupId>
-                <artifactId>james-server-cassandra-app-ldap-tests</artifactId>
-                <version>${project.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>${james.groupId}</groupId>
-                <artifactId>james-server-cassandra-app-ldap-tests</artifactId>
-                <version>${project.version}</version>
-                <type>test-jar</type>
-            </dependency>
-            <dependency>
-                <groupId>${james.groupId}</groupId>
                 <artifactId>james-server-cli</artifactId>
                 <version>${project.version}</version>
             </dependency>
@@ -1549,6 +1527,12 @@
             <dependency>
                 <groupId>${james.groupId}</groupId>
                 <artifactId>james-server-filesystem-api</artifactId>
+                <version>${project.version}</version>
+                <type>test-jar</type>
+            </dependency>
+            <dependency>
+                <groupId>${james.groupId}</groupId>
+                <artifactId>james-server-guice-cassandra</artifactId>
                 <version>${project.version}</version>
                 <type>test-jar</type>
             </dependency>
@@ -2570,7 +2554,7 @@
             <dependency>
                 <groupId>io.projectreactor</groupId>
                 <artifactId>reactor-bom</artifactId>
-                <version>2024.0.7</version>
+                <version>2024.0.10</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
@@ -3179,7 +3163,336 @@
                                         </execution>
                                     </executions>
                                 </plugin>
+                                <plugin>
+                                    <groupId>net.alchim31.maven</groupId>
+                                    <artifactId>scala-maven-plugin</artifactId>
+                                    <executions>
+                                        <execution>
+                                            <id>scala-compile-first</id>
+                                            <inputs>
+                                                <fileSets>
+                                                    <fileSet>
+                                                        <name>sourceDir</name>
+                                                        <includesProperty>includes</includesProperty>
+                                                        <excludesProperty>excludes</excludesProperty>
+                                                        <normalization>
+                                                            <ignoreLineEndings>true</ignoreLineEndings>
+                                                            <ignoreEmptyDirectories>true</ignoreEmptyDirectories>
+                                                        </normalization>
+                                                    </fileSet>
+                                                    <fileSet>
+                                                        <name>classpathElements</name>
+                                                        <normalization>COMPILE_CLASSPATH</normalization>
+                                                    </fileSet>
+                                                </fileSets>
+                                                <properties>
+                                                    <property>
+                                                        <name>addJavacArgs</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>addScalacArgs</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>additionalDependencies</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>args</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>checkMultipleScalaVersions</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>compileOrder</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>displayCmd</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>encoding</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>failOnMultipleScalaVersions</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>forceUseArgFile</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>fork</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>javacArgs</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>jvmArgs</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>recompileMode</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>release</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>scalaClassName</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>scalaCompatVersion</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>scalaHome</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>scalaOrganization</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>scalaVersion</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>sendJavaToScalac</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>skipMain</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>source</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>target</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>useCanonicalPath</name>
+                                                    </property>
+                                                </properties>
+                                                <ignoredProperties>
+                                                    <ignore>project</ignore>
+                                                    <ignore>session</ignore>
+                                                    <ignore>notifyCompilation</ignore>
+                                                    <ignore>javacGenerateDebugSymbols</ignore>
+                                                    <!-- ignoring these feels wrong but I couldn't find a way to track them -->
+                                                    <ignore>pluginArtifacts</ignore>
+                                                    <ignore>dependencies</ignore>
+                                                    <ignore>compilerPlugins</ignore>
+                                                    <ignore>classpath</ignore>
+                                                </ignoredProperties>
+                                            </inputs>
+                                            <outputs>
+                                                <cacheableBecause>compilation is CPU-bound</cacheableBecause>
+                                                <directories>
+                                                    <directory>
+                                                        <name>outputDir</name>
+                                                    </directory>
+                                                </directories>
+                                            </outputs>
+                                            <localState>
+                                                <fileSets>
+                                                    <fileSet>
+                                                        <name>secondaryCacheDir</name>
+                                                    </fileSet>
+                                                    <fileSet>
+                                                        <name>analysisCacheFile</name>
+                                                    </fileSet>
+                                                </fileSets>
+                                            </localState>
+                                        </execution>
+                                        <execution>
+                                            <id>scala-test-compile</id>
+                                            <skipIfTrue>
+                                                <property>skip</property>
+                                            </skipIfTrue>
+                                            <inputs>
+                                                <fileSets>
+                                                    <fileSet>
+                                                        <name>testSourceDir</name>
+                                                        <includesProperty>includes</includesProperty>
+                                                        <excludesProperty>excludes</excludesProperty>
+                                                        <normalization>
+                                                            <ignoreLineEndings>true</ignoreLineEndings>
+                                                            <ignoreEmptyDirectories>true</ignoreEmptyDirectories>
+                                                        </normalization>
+                                                    </fileSet>
+                                                    <fileSet>
+                                                        <name>classpathElements</name>
+                                                        <normalization>COMPILE_CLASSPATH</normalization>
+                                                    </fileSet>
+                                                </fileSets>
+                                                <properties>
+                                                    <property>
+                                                        <name>addJavacArgs</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>addScalacArgs</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>additionalDependencies</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>args</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>checkMultipleScalaVersions</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>compileOrder</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>displayCmd</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>encoding</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>failOnMultipleScalaVersions</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>forceUseArgFile</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>fork</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>javacArgs</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>jvmArgs</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>recompileMode</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>release</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>scalaClassName</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>scalaCompatVersion</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>scalaHome</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>scalaOrganization</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>scalaVersion</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>sendJavaToScalac</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>source</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>target</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>useCanonicalPath</name>
+                                                    </property>
+                                                </properties>
+                                                <ignoredProperties>
+                                                    <ignore>project</ignore>
+                                                    <ignore>session</ignore>
+                                                    <ignore>notifyCompilation</ignore>
+                                                    <ignore>javacGenerateDebugSymbols</ignore>
+                                                    <!-- ignoring these feels wrong but I couldn't find a way to track them -->
+                                                    <ignore>pluginArtifacts</ignore>
+                                                    <ignore>dependencies</ignore>
+                                                    <ignore>compilerPlugins</ignore>
+                                                </ignoredProperties>
+                                            </inputs>
+                                            <outputs>
+                                                <cacheableBecause>compilation is CPU-bound with well-defined inputs and outputs</cacheableBecause>
+                                                <directories>
+                                                    <directory>
+                                                        <name>testOutputDir</name>
+                                                    </directory>
+                                                </directories>
+                                            </outputs>
+                                            <localState>
+                                                <fileSets>
+                                                    <fileSet>
+                                                        <name>secondaryCacheDir</name>
+                                                    </fileSet>
+                                                    <fileSet>
+                                                        <name>testAnalysisCacheFile</name>
+                                                    </fileSet>
+                                                </fileSets>
+                                            </localState>
+                                        </execution>
+                                    </executions>
+                                </plugin>
+                                <plugin>
+                                    <groupId>org.jacoco</groupId>
+                                    <artifactId>jacoco-maven-plugin</artifactId>
+                                    <skipIfTrue>
+                                        <property>skip</property>
+                                    </skipIfTrue>
+                                    <executions>
+                                        <execution>
+                                            <id>jacoco-report</id>
+                                            <inputs>
+                                                <properties>
+                                                    <property>
+                                                        <name>dataFileExcludes</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>dataFileExcludes</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>dataFileIncludes</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>excludes</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>footer</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>includeCurrentProject</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>includes</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>outputEncoding</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>sourceEncoding</name>
+                                                    </property>
+                                                    <property>
+                                                        <name>title</name>
+                                                    </property>
+                                                </properties>
+                                                <ignoredProperties>
+                                                    <ignore>project</ignore>
+                                                    <ignore>reactorProjects</ignore>
+                                                    <!--
+                                                     we should not be ignoring this since formats changes the content of the output
+                                                      but it contains a list of enum see https://github.com/jacoco/jacoco/blob/562a7299399b8321dfcf8eeb21ea4bfc27556fdc/jacoco-maven-plugin/src/org/jacoco/maven/AbstractReportMojo.java
+                                                     and that's not storable in the cache key
+                                                     no sure how this should be handled ?
+                                                     -->
+                                                    <ignore>formats</ignore>
+                                                </ignoredProperties>
+                                            </inputs>
+                                            <outputs>
+                                                <cacheableBecause>Test coverage reports depend on test execution and don't affect final build product.</cacheableBecause>
+                                                <directories>
+                                                    <directory>
+                                                        <name>outputDirectory</name>
+                                                    </directory>
+                                                </directories>
+                                            </outputs>
+                                        </execution>
+                                    </executions>
+                                </plugin>
                             </plugins>
+                            <normalization>
+                                <runtimeClassPath>
+                                    <ignoredFiles>
+                                        <ignoredFile>git.properties</ignoredFile>
+                                    </ignoredFiles>
+                                </runtimeClassPath>
+                            </normalization>
                         </develocity>
                     </configuration>
                 </plugin>
@@ -3204,7 +3517,7 @@
                 <plugin>
                     <groupId>net.alchim31.maven</groupId>
                     <artifactId>scala-maven-plugin</artifactId>
-                    <version>4.9.5</version>
+                    <version>4.9.6</version>
                     <configuration>
                         <recompileMode>all</recompileMode>
                         <source>${target.jdk}</source>
@@ -3233,9 +3546,15 @@
                     </configuration>
                     <executions>
                         <execution>
-                            <id>scala-compile-first</id>
+                            <id>scala-add-source</id>
                             <goals>
                                 <goal>add-source</goal>
+                            </goals>
+                            <phase>process-resources</phase>
+                        </execution>
+                        <execution>
+                            <id>scala-compile-first</id>
+                            <goals>
                                 <goal>compile</goal>
                             </goals>
                             <phase>process-resources</phase>
@@ -3415,8 +3734,10 @@
                     <artifactId>maven-release-plugin</artifactId>
                     <version>3.1.1</version>
                     <configuration>
-                        <!-- avoid double buildscan during forked builds -->
-                        <arguments>-Dgradle.scan.disabled=true</arguments>
+                        <useReleaseProfile>false</useReleaseProfile>
+                        <goals>deploy</goals>
+                        <arguments>-Papache-release -Dgradle.scan.disabled=true -DskipTests ${arguments}</arguments>
+                        <waitBeforeTagging>10</waitBeforeTagging>
                     </configuration>
                 </plugin>
                 <plugin>
@@ -3580,7 +3901,7 @@
                                         <execute>
                                             <runOnIncremental>false</runOnIncremental>
                                         </execute>
-                                        <ignore />
+                                        <ignore/>
                                     </action>
                                 </pluginExecution>
                                 <pluginExecution>
@@ -3596,7 +3917,7 @@
                                         <execute>
                                             <runOnIncremental>false</runOnIncremental>
                                         </execute>
-                                        <ignore />
+                                        <ignore/>
                                     </action>
                                 </pluginExecution>
                                 <pluginExecution>
@@ -3612,7 +3933,7 @@
                                         <execute>
                                             <runOnIncremental>false</runOnIncremental>
                                         </execute>
-                                        <ignore />
+                                        <ignore/>
                                     </action>
                                 </pluginExecution>
                                 <pluginExecution>
@@ -3626,7 +3947,7 @@
                                         </goals>
                                     </pluginExecutionFilter>
                                     <action>
-                                        <ignore />
+                                        <ignore/>
                                     </action>
                                 </pluginExecution>
                             </pluginExecutions>
@@ -3701,19 +4022,6 @@
                             <goal>test-jar</goal>
                         </goals>
                         <phase>package</phase>
-                    </execution>
-                </executions>
-            </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-source-plugin</artifactId>
-                <executions>
-                    <execution>
-                        <id>attach-sources</id>
-                        <goals>
-                            <goal>jar</goal>
-                            <goal>test-jar</goal>
-                        </goals>
                     </execution>
                 </executions>
             </plugin>
@@ -3934,7 +4242,7 @@
                             <artifactId>maven-surefire-plugin</artifactId>
                             <version>${maven-surefire-plugin.version}</version>
                             <configuration>
-                                <excludedGroups />
+                                <excludedGroups/>
                                 <groups>unstable</groups>
                             </configuration>
                         </plugin>
@@ -3944,6 +4252,12 @@
         </profile>
         <profile>
             <id>sortPom</id>
+            <activation>
+                <property>
+                    <name>!env.CI</name>
+                    <value/>
+                </property>
+            </activation>
             <build>
                 <plugins>
                     <plugin>

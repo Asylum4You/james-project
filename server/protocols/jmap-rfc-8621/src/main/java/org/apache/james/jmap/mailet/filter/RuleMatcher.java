@@ -23,21 +23,32 @@ import java.util.List;
 import java.util.stream.Stream;
 
 import org.apache.james.jmap.api.filtering.Rule;
+import org.apache.james.mailbox.exception.MailboxException;
+import org.apache.james.mailbox.model.MessageResult;
 import org.apache.mailet.Mail;
 
 import com.google.common.base.Preconditions;
 
-class RuleMatcher {
+public class RuleMatcher {
     private final List<Rule> filteringRules;
 
-    RuleMatcher(List<Rule> filteringRules) {
+    public RuleMatcher(List<Rule> filteringRules) {
         Preconditions.checkNotNull(filteringRules);
 
         this.filteringRules = filteringRules;
     }
 
     Stream<Rule> findApplicableRules(Mail mail) {
+        FilteringHeaders filteringHeaders = new FilteringHeaders.MailFilteringHeaders(mail);
+
         return filteringRules.stream()
-            .filter(rule -> MailMatcher.from(rule).match(mail));
+            .filter(rule -> MailMatcher.from(rule).match(filteringHeaders));
+    }
+
+    public Stream<Rule> findApplicableRules(MessageResult messageResult) throws MailboxException {
+        FilteringHeaders filteringHeaders = new FilteringHeaders.MessageResultFilteringHeaders(messageResult);
+
+        return filteringRules.stream()
+            .filter(rule -> MailMatcher.from(rule).match(filteringHeaders));
     }
 }

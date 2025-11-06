@@ -24,7 +24,7 @@
     <parent>
         <groupId>org.apache.james</groupId>
         <artifactId>james-server</artifactId>
-        <version>3.9.0-SNAPSHOT</version>
+        <version>3.10.0-SNAPSHOT</version>
         <relativePath>../../pom.xml</relativePath>
     </parent>
 
@@ -33,7 +33,6 @@
     <name>Apache James :: Server :: Distributed :: POP3 :: APP</name>
     <description>An advanced email server - Cassandra backend and RabbitMQ messaging with guice injection.
         The use of messageId as an identifier enables to use safely Cassandra multi-datacenters set up.</description>
-
 
     <dependencyManagement>
         <dependencies>
@@ -126,12 +125,6 @@
         </dependency>
         <dependency>
             <groupId>${james.groupId}</groupId>
-            <artifactId>james-server-cassandra-app</artifactId>
-            <type>test-jar</type>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>${james.groupId}</groupId>
             <artifactId>james-server-cli</artifactId>
             <scope>runtime</scope>
         </dependency>
@@ -150,6 +143,13 @@
         <dependency>
             <groupId>${james.groupId}</groupId>
             <artifactId>james-server-guice-cassandra</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>${james.groupId}</groupId>
+            <artifactId>james-server-guice-cassandra</artifactId>
+            <version>${project.version}</version>
+            <type>test-jar</type>
+            <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>${james.groupId}</groupId>
@@ -400,12 +400,17 @@
                     <container>
                         <mainClass>org.apache.james.DistributedPOP3JamesServerMain</mainClass>
                         <ports>
-                            <port>25</port> <!-- SMTP -->
-                            <port>110</port> <!-- POP3 -->
-                            <port>465</port> <!-- SMTP + STARTTLS -->
-                            <port>587</port> <!-- SMTPS -->
+                            <port>25</port>
+                            <!-- SMTP -->
+                            <port>110</port>
+                            <!-- POP3 -->
+                            <port>465</port>
+                            <!-- SMTP + STARTTLS -->
+                            <port>587</port>
+                            <!-- SMTPS -->
 
-                            <port>8000</port> <!-- WEBADMIN -->
+                            <port>8000</port>
+                            <!-- WEBADMIN -->
                         </ports>
                         <appRoot>/root</appRoot>
                         <jvmFlags>
@@ -448,7 +453,8 @@
                         <permissions>
                             <permission>
                                 <file>/usr/bin/james-cli</file>
-                                <mode>755</mode> <!-- Read/write/execute for owner, read/execute for group/other -->
+                                <mode>755</mode>
+                                <!-- Read/write/execute for owner, read/execute for group/other -->
                             </permission>
                         </permissions>
                     </extraDirectories>

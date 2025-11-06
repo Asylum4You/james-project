@@ -27,10 +27,12 @@ import java.util.Set;
 import jakarta.inject.Inject;
 import jakarta.inject.Named;
 
+import org.apache.james.core.Username;
 import org.apache.james.mailbox.indexer.MessageIdReIndexer;
 import org.apache.james.mailbox.model.MessageId;
 import org.apache.james.task.Task;
 import org.apache.james.task.TaskManager;
+import org.apache.james.user.api.UsersRepository;
 import org.apache.james.webadmin.Routes;
 import org.apache.james.webadmin.service.ExpireMailboxService;
 import org.apache.james.webadmin.service.ExpireMailboxTask;
@@ -39,6 +41,9 @@ import org.apache.james.webadmin.tasks.TaskFromRequestRegistry;
 import org.apache.james.webadmin.utils.ErrorResponder;
 import org.apache.james.webadmin.utils.JsonTransformer;
 import org.eclipse.jetty.http.HttpStatus;
+
+import com.github.fge.lambdas.Throwing;
+import com.google.common.base.Preconditions;
 
 import spark.Request;
 import spark.Route;
@@ -55,19 +60,25 @@ public class MessagesRoutes implements Routes {
     private final ExpireMailboxService expireMailboxService;
     private final JsonTransformer jsonTransformer;
     private final Set<TaskFromRequestRegistry.TaskRegistration> allMessagesTaskRegistration;
+    private final Set<ConditionalRoute> postOverrides;
+    private final UsersRepository usersRepository;
 
     public static final String ALL_MESSAGES_TASKS = "allMessagesTasks";
 
     @Inject
     MessagesRoutes(TaskManager taskManager, MessageId.Factory messageIdFactory, MessageIdReIndexer reIndexer,
                    ExpireMailboxService expireMailboxService, JsonTransformer jsonTransformer,
-                   @Named(ALL_MESSAGES_TASKS) Set<TaskFromRequestRegistry.TaskRegistration> allMessagesTaskRegistration) {
+                   @Named(ALL_MESSAGES_TASKS) Set<TaskFromRequestRegistry.TaskRegistration> allMessagesTaskRegistration,
+                   @Named(ALL_MESSAGES_TASKS) Set<ConditionalRoute> postOverrides,
+                   UsersRepository usersRepository) {
         this.taskManager = taskManager;
         this.messageIdFactory = messageIdFactory;
         this.reIndexer = reIndexer;
         this.expireMailboxService = expireMailboxService;
         this.jsonTransformer = jsonTransformer;
         this.allMessagesTaskRegistration = allMessagesTaskRegistration;
+        this.postOverrides = postOverrides;
+        this.usersRepository = usersRepository;
     }
 
     @Override
@@ -80,8 +91,10 @@ public class MessagesRoutes implements Routes {
         TaskFromRequest expireMailboxTaskRequest = this::expireMailbox;
         service.delete(BASE_PATH, expireMailboxTaskRequest.asRoute(taskManager), jsonTransformer);
         service.post(MESSAGE_PATH, reIndexMessage(), jsonTransformer);
-        allMessagesOperations()
-            .ifPresent(route -> service.post(BASE_PATH, route, jsonTransformer));
+
+        if (!postOverrides.isEmpty() && !allMessagesTaskRegistration.isEmpty()) {
+            service.post(BASE_PATH, allMessagesOperations(), jsonTransformer);
+        }
     }
 
     private Task expireMailbox(Request request) {
@@ -90,7 +103,13 @@ public class MessagesRoutes implements Routes {
                 Optional.ofNullable(request.queryParams("byExpiresHeader")),
                 Optional.ofNullable(request.queryParams("olderThan")),
                 Optional.ofNullable(request.queryParams("usersPerSecond")),
-                Optional.ofNullable(request.queryParams("mailbox")));
+                Optional.ofNullable(request.queryParams("mailbox")),
+                request.queryParams().contains("useSavedDate"),
+                Optional.ofNullable(request.queryParams("user")));
+
+            runningOptions.getUser()
+                .ifPresent(Throwing.consumer(user -> Preconditions.checkArgument(usersRepository.contains(Username.of(user)), "user does not exist")));
+
             return new ExpireMailboxTask(expireMailboxService, runningOptions);
         } catch (IllegalArgumentException e) {
             throw ErrorResponder.builder()
@@ -122,10 +141,19 @@ public class MessagesRoutes implements Routes {
         }
     }
 
-    private Optional<Route> allMessagesOperations() {
-        return TaskFromRequestRegistry.builder()
-            .parameterName(TASK_PARAMETER)
-            .registrations(allMessagesTaskRegistration)
-            .buildAsRouteOptional(taskManager);
+    private Route allMessagesOperations() {
+        return (request, response) -> {
+            Optional<Route> override = postOverrides.stream()
+                .filter(postOverride -> postOverride.test(request))
+                .map(r -> (Route) r)
+                .findAny();
+
+            return override.or(() -> TaskFromRequestRegistry.builder()
+                    .parameterName(TASK_PARAMETER)
+                    .registrations(allMessagesTaskRegistration)
+                    .buildAsRouteOptional(taskManager))
+                .get()
+                .handle(request, response);
+        };
     }
 }
