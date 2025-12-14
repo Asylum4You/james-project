@@ -25,7 +25,7 @@ import eu.timepit.refined.auto._
 import jakarta.inject.Inject
 import jakarta.mail.Flags.Flag.DELETED
 import org.apache.james.jmap.JMAPConfiguration
-import org.apache.james.jmap.api.projections.{EmailQueryView, EmailQueryViewManager}
+import org.apache.james.jmap.api.projections.EmailQueryViewManager
 import org.apache.james.jmap.core.CapabilityIdentifier.{CapabilityIdentifier, JMAP_CORE, JMAP_MAIL}
 import org.apache.james.jmap.core.Invocation.{Arguments, MethodName}
 import org.apache.james.jmap.core.Limit.Limit
@@ -95,8 +95,6 @@ class EmailQueryMethod @Inject() (serializer: EmailQuerySerializer,
     val ids: SMono[Seq[MessageId]] = request match {
       case request: EmailQueryRequest if matchesInMailboxSortedBySentAt(request) =>
         queryViewForListingSortedBySentAt(session, position, limit, request, searchQuery.getNamespace)
-      case request: EmailQueryRequest if matchesInMailboxAfterSortedBySentAt(request) =>
-        queryViewForContentAfterSortedBySentAt(session, position, limit, request, searchQuery.getNamespace)
       case request: EmailQueryRequest if matchesInMailboxSortedByReceivedAt(request) =>
         queryViewForListingSortedByReceivedAt(session, position, limit, request, searchQuery.getNamespace)
       case request: EmailQueryRequest if matchesInMailboxAfterSortedByReceivedAt(request) =>
@@ -109,23 +107,15 @@ class EmailQueryMethod @Inject() (serializer: EmailQuerySerializer,
     ids.map(ids => toResponse(request, position, limit, ids))
   }
 
-  private def queryViewForContentAfterSortedBySentAt(mailboxSession: MailboxSession, position: Position, limitToUse: Limit, request: EmailQueryRequest, namespace: Namespace): SMono[Seq[MessageId]] = {
-    val condition: FilterCondition = request.filter.get.asInstanceOf[FilterCondition]
-    val mailboxId: MailboxId = condition.inMailbox.get
-    val after: ZonedDateTime = condition.after.get.asUTC
-
-    val queryViewEntries: SFlux[MessageId] = SFlux.fromPublisher(emailQueryViewManager.getEmailQueryView(mailboxSession.getUser)
-      .listMailboxContentSinceAfterSortedBySentAt(mailboxId, after, JavaLimit.from(limitToUse.value + position.value)))
-
-    fromQueryViewEntries(mailboxId, queryViewEntries, mailboxSession, position, limitToUse, namespace)
-  }
 
   private def queryViewForContentAfterSortedByReceivedAt(mailboxSession: MailboxSession, position: Position, limitToUse: Limit, request: EmailQueryRequest, namespace: Namespace): SMono[Seq[MessageId]] = {
     val condition: FilterCondition = request.filter.get.asInstanceOf[FilterCondition]
     val mailboxId: MailboxId = condition.inMailbox.get
     val after: ZonedDateTime = condition.after.get.asUTC
+    val collapseThreads: Boolean = getCollapseThreads(request)
+
     val queryViewEntries: SFlux[MessageId] = SFlux.fromPublisher(emailQueryViewManager.getEmailQueryView(mailboxSession.getUser)
-      .listMailboxContentSinceAfterSortedByReceivedAt(mailboxId, after, JavaLimit.from(limitToUse.value + position.value)))
+      .listMailboxContentSinceAfterSortedByReceivedAt(mailboxId, after, JavaLimit.from(limitToUse.value + position.value), collapseThreads))
 
     fromQueryViewEntries(mailboxId, queryViewEntries, mailboxSession, position, limitToUse, namespace)
   }
@@ -134,24 +124,30 @@ class EmailQueryMethod @Inject() (serializer: EmailQuerySerializer,
     val condition: FilterCondition = request.filter.get.asInstanceOf[FilterCondition]
     val mailboxId: MailboxId = condition.inMailbox.get
     val before: ZonedDateTime = condition.before.get.asUTC
+    val collapseThreads: Boolean = getCollapseThreads(request)
+
     val queryViewEntries: SFlux[MessageId] = SFlux.fromPublisher(emailQueryViewManager.getEmailQueryView(mailboxSession.getUser)
-      .listMailboxContentBeforeSortedByReceivedAt(mailboxId, before, JavaLimit.from(limitToUse.value + position.value)))
+      .listMailboxContentBeforeSortedByReceivedAt(mailboxId, before, JavaLimit.from(limitToUse.value + position.value), collapseThreads))
 
     fromQueryViewEntries(mailboxId, queryViewEntries, mailboxSession, position, limitToUse, namespace)
   }
 
   private def queryViewForListingSortedBySentAt(mailboxSession: MailboxSession, position: Position, limitToUse: Limit, request: EmailQueryRequest, namespace: Namespace): SMono[Seq[MessageId]] = {
     val mailboxId: MailboxId = request.filter.get.asInstanceOf[FilterCondition].inMailbox.get
+    val collapseThreads: Boolean = getCollapseThreads(request)
+
     val queryViewEntries: SFlux[MessageId] = SFlux.fromPublisher(emailQueryViewManager.getEmailQueryView(mailboxSession.getUser)
-      .listMailboxContentSortedBySentAt(mailboxId, JavaLimit.from(limitToUse.value + position.value)))
+      .listMailboxContentSortedBySentAt(mailboxId, JavaLimit.from(limitToUse.value + position.value), collapseThreads))
 
     fromQueryViewEntries(mailboxId, queryViewEntries, mailboxSession, position, limitToUse, namespace)
   }
 
   private def queryViewForListingSortedByReceivedAt(mailboxSession: MailboxSession, position: Position, limitToUse: Limit, request: EmailQueryRequest, namespace: Namespace): SMono[Seq[MessageId]] = {
     val mailboxId: MailboxId = request.filter.get.asInstanceOf[FilterCondition].inMailbox.get
+    val collapseThreads: Boolean = getCollapseThreads(request)
+
     val queryViewEntries: SFlux[MessageId] = SFlux.fromPublisher(emailQueryViewManager
-      .getEmailQueryView(mailboxSession.getUser).listMailboxContentSortedByReceivedAt(mailboxId, JavaLimit.from(limitToUse.value + position.value)))
+      .getEmailQueryView(mailboxSession.getUser).listMailboxContentSortedByReceivedAt(mailboxId, JavaLimit.from(limitToUse.value + position.value), collapseThreads))
 
     fromQueryViewEntries(mailboxId, queryViewEntries, mailboxSession, position, limitToUse, namespace)
   }
@@ -179,11 +175,6 @@ class EmailQueryMethod @Inject() (serializer: EmailQuerySerializer,
       request.filter.exists(_.inMailboxFilterOnly) &&
       request.sort.contains(Set(Comparator.RECEIVED_AT_DESC))
 
-  private def matchesInMailboxAfterSortedBySentAt(request: EmailQueryRequest): Boolean =
-    configuration.isEmailQueryViewEnabled &&
-      request.filter.exists(_.inMailboxAndAfterFilterOnly) &&
-      request.sort.contains(Set(Comparator.SENT_AT_DESC))
-
   private def matchesInMailboxAfterSortedByReceivedAt(request: EmailQueryRequest): Boolean =
     configuration.isEmailQueryViewEnabled &&
       request.filter.exists(_.inMailboxAndAfterFilterOnly) &&
@@ -193,6 +184,12 @@ class EmailQueryMethod @Inject() (serializer: EmailQuerySerializer,
     configuration.isEmailQueryViewEnabled &&
       request.filter.exists(_.inMailboxAndBeforeFilterOnly) &&
       request.sort.contains(Set(Comparator.RECEIVED_AT_DESC))
+
+  private def getCollapseThreads(request: EmailQueryRequest): Boolean =
+    request.collapseThreads match {
+      case Some(collapseThreads) => collapseThreads.value
+      case None => false
+    }
 
   private def toResponse(request: EmailQueryRequest, position: Position, limitToUse: Limit, ids: Seq[MessageId]): EmailQueryResponse =
     EmailQueryResponse(accountId = request.accountId,
