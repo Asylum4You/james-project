@@ -27,6 +27,7 @@ import org.apache.james.backends.postgres.RowLevelSecurity;
 import org.apache.james.backends.postgres.utils.PostgresExecutor;
 import org.apache.james.blob.api.BlobId;
 import org.apache.james.blob.api.BlobStore;
+import org.apache.james.events.EventBus;
 import org.apache.james.mailbox.MailboxSession;
 import org.apache.james.mailbox.postgres.mail.PostgresAnnotationMapper;
 import org.apache.james.mailbox.postgres.mail.PostgresAttachmentMapper;
@@ -54,7 +55,7 @@ import org.apache.james.mailbox.store.mail.MessageIdMapper;
 import org.apache.james.mailbox.store.mail.MessageMapper;
 import org.apache.james.mailbox.store.user.SubscriptionMapper;
 
-import com.google.common.collect.ImmutableSet;
+import com.google.common.annotations.VisibleForTesting;
 
 public class PostgresMailboxSessionMapperFactory extends MailboxSessionMapperFactory implements AttachmentMapperFactory {
 
@@ -64,6 +65,8 @@ public class PostgresMailboxSessionMapperFactory extends MailboxSessionMapperFac
     private final Clock clock;
     private final RowLevelSecurity rowLevelSecurity;
     private final AttachmentIdAssignationStrategy attachmentIdAssignationStrategy;
+    private final boolean attachmentStorageEnabled;
+    private final PostgresConfiguration postgresConfiguration;
 
     @Inject
     public PostgresMailboxSessionMapperFactory(PostgresExecutor.Factory executorFactory,
@@ -77,7 +80,9 @@ public class PostgresMailboxSessionMapperFactory extends MailboxSessionMapperFac
         this.blobIdFactory = blobIdFactory;
         this.clock = clock;
         this.rowLevelSecurity = postgresConfiguration.getRowLevelSecurity();
+        this.attachmentStorageEnabled = postgresConfiguration.isAttachmentStorageEnabled();
         this.attachmentIdAssignationStrategy = attachmentIdAssignationStrategy;
+        this.postgresConfiguration = postgresConfiguration;
     }
 
     @Override
@@ -145,13 +150,17 @@ public class PostgresMailboxSessionMapperFactory extends MailboxSessionMapperFac
         return createAttachmentMapper(session);
     }
 
-    protected DeleteMessageListener deleteMessageListener() {
+    public boolean isAttachmentStorageEnabled() {
+        return attachmentStorageEnabled;
+    }
+
+    @VisibleForTesting
+    protected DeleteMessageListener deleteMessageListener(EventBus contentDeletionEventBus) {
         PostgresMessageDAO.Factory postgresMessageDAOFactory = new PostgresMessageDAO.Factory(blobIdFactory, executorFactory);
         PostgresMailboxMessageDAO.Factory postgresMailboxMessageDAOFactory = new PostgresMailboxMessageDAO.Factory(executorFactory);
         PostgresAttachmentDAO.Factory attachmentDAOFactory = new PostgresAttachmentDAO.Factory(executorFactory, blobIdFactory);
         PostgresThreadDAO.Factory threadDAOFactory = new PostgresThreadDAO.Factory(executorFactory);
-
         return new DeleteMessageListener(blobStore, postgresMailboxMessageDAOFactory, postgresMessageDAOFactory,
-            attachmentDAOFactory, threadDAOFactory, ImmutableSet.of());
+            attachmentDAOFactory, threadDAOFactory, contentDeletionEventBus, postgresConfiguration);
     }
 }

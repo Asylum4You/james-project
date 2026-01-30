@@ -36,7 +36,7 @@ import scala.jdk.javaapi.CollectionConverters;
 class PostgresPushSubscriptionRepositoryTest implements PushSubscriptionRepositoryContract {
 
     @RegisterExtension
-    static PostgresExtension postgresExtension = PostgresExtension.withRowLevelSecurity(
+    static PostgresExtension postgresExtension = PostgresExtension.withoutRowLevelSecurity(
         PostgresDataDefinition.aggregateModules(PostgresPushSubscriptionDataDefinition.MODULE));
 
     UpdatableTickingClock clock;

@@ -27,6 +27,7 @@ import java.io.InputStream;
 import java.time.Clock;
 import java.time.Instant;
 
+import org.apache.james.backends.postgres.PostgresConfiguration;
 import org.apache.james.backends.postgres.PostgresExtension;
 import org.apache.james.blob.api.BlobId;
 import org.apache.james.blob.api.BucketName;
@@ -70,8 +71,6 @@ import org.apache.james.utils.UpdatableTickingClock;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.extension.RegisterExtension;
 
-import com.google.common.collect.ImmutableSet;
-
 public class PostgresMailboxManagerAttachmentTest extends AbstractMailboxManagerAttachmentTest {
 
     @RegisterExtension
@@ -84,6 +83,7 @@ public class PostgresMailboxManagerAttachmentTest extends AbstractMailboxManager
     void beforeAll() throws Exception {
         BlobId.Factory blobIdFactory = new PlainBlobId.Factory();
         DeDuplicationBlobStore blobStore = new DeDuplicationBlobStore(new MemoryBlobStoreDAO(), BucketName.DEFAULT, blobIdFactory);
+        PostgresConfiguration postgresConfiguration = PostgresConfiguration.builder().username("a").password("a").build();
         mapperFactory = new PostgresMailboxSessionMapperFactory(postgresExtension.getExecutorFactory(), Clock.systemUTC(), blobStore, blobIdFactory,
             postgresExtension.getPostgresConfiguration(),
             new AttachmentIdAssignationStrategy.Default(new StringBackedAttachmentIdFactory()));
@@ -110,7 +110,7 @@ public class PostgresMailboxManagerAttachmentTest extends AbstractMailboxManager
         PostgresThreadDAO.Factory threadDAOFactory = new PostgresThreadDAO.Factory(postgresExtension.getExecutorFactory());
 
         eventBus.register(new DeleteMessageListener(blobStore, postgresMailboxMessageDAOFactory, postgresMessageDAOFactory,
-            attachmentDAOFactory, threadDAOFactory, ImmutableSet.of()));
+            attachmentDAOFactory, threadDAOFactory,eventBus, postgresConfiguration));
 
         mailboxManager = new PostgresMailboxManager(mapperFactory, sessionProvider,
             messageParser, new PostgresMessageId.Factory(),

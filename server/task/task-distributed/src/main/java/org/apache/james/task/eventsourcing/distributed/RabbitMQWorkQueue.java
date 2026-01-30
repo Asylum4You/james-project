@@ -25,7 +25,6 @@ import static org.apache.james.backends.rabbitmq.Constants.DURABLE;
 import static org.apache.james.backends.rabbitmq.Constants.REQUEUE;
 import static org.apache.james.backends.rabbitmq.Constants.evaluateAutoDelete;
 import static org.apache.james.backends.rabbitmq.Constants.evaluateDurable;
-import static reactor.core.publisher.Sinks.EmitFailureHandler.FAIL_FAST;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -53,7 +52,6 @@ import com.rabbitmq.client.Delivery;
 import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import reactor.core.publisher.Sinks;
 import reactor.core.scheduler.Schedulers;
 import reactor.rabbitmq.AcknowledgableDelivery;
 import reactor.rabbitmq.BindingSpecification;
@@ -93,8 +91,6 @@ public class RabbitMQWorkQueue implements WorkQueue {
     private final Sender sender;
     private final ReceiverProvider receiverProvider;
     private final CancelRequestQueueName cancelRequestQueueName;
-    private Sinks.Many<TaskId> sendCancelRequestsQueue;
-    private Disposable sendCancelRequestsQueueHandle;
     private Disposable receiverHandle;
     private Disposable cancelRequestListenerHandle;
 
@@ -189,7 +185,8 @@ public class RabbitMQWorkQueue implements WorkQueue {
             .flatMap(taskId -> Mono.fromCallable(() -> new String(delivery.getBody(), StandardCharsets.UTF_8))
                 .flatMap(bodyValue -> deserialize(bodyValue, taskId))
                 .doOnNext(task -> delivery.ack())
-                .flatMap(task -> executeOnWorker(taskId, task)))
+                .flatMap(task -> executeOnWorker(taskId, task))
+                .doOnSuccess(result -> LOGGER.info("Executed task {} yield {}", taskId, result)))
             .onErrorResume(error -> {
                 Optional<Object> taskId = Optional.ofNullable(delivery.getProperties())
                     .flatMap(props -> Optional.ofNullable(props.getHeaders()))
@@ -211,6 +208,7 @@ public class RabbitMQWorkQueue implements WorkQueue {
     }
 
     private Mono<Task.Result> executeOnWorker(TaskId taskId, Task task) {
+        LOGGER.info("Executing task {} ({}) ", taskId, task.getClass());
         return worker.executeTask(new TaskWithId(taskId, task))
             .timeout(rabbitMQConfiguration.getTaskQueueConsumerTimeout())
             .onErrorResume(error -> {
@@ -232,12 +230,6 @@ public class RabbitMQWorkQueue implements WorkQueue {
         sender.declare(specification).block();
         sender.bind(BindingSpecification.binding(CANCEL_REQUESTS_EXCHANGE_NAME, CANCEL_REQUESTS_ROUTING_KEY, cancelRequestQueueName.asString())).block();
         registerCancelRequestsListener(cancelRequestQueueName.asString());
-
-        sendCancelRequestsQueue = Sinks.many().multicast().onBackpressureBuffer();
-        sendCancelRequestsQueueHandle = sender
-            .send(sendCancelRequestsQueue.asFlux().map(this::makeCancelRequestMessage))
-            .subscribeOn(Schedulers.boundedElastic())
-            .subscribe();
     }
 
     private void registerCancelRequestsListener(String queueName) {
@@ -274,7 +266,14 @@ public class RabbitMQWorkQueue implements WorkQueue {
                 .build();
 
             OutboundMessage outboundMessage = new OutboundMessage(EXCHANGE_NAME, ROUTING_KEY, basicProperties, payload);
-            sender.send(Mono.just(outboundMessage)).block();
+            sender.send(Mono.just(outboundMessage))
+                .onErrorResume(e -> {
+                    LOGGER.error("Publishing task {} failed", taskWithId.getId(), e);
+                    return Mono.from(worker.fail(taskWithId.getId(), Mono.just(Optional.empty()), "Publishing task failed", e))
+                        .then(Mono.error(e));
+                })
+                .block();
+            LOGGER.info("Submitted task {} ({})", taskWithId.getId(), taskWithId.getTask().getClass());
         } catch (JsonProcessingException e) {
             throw new RuntimeException(e);
         }
@@ -282,7 +281,8 @@ public class RabbitMQWorkQueue implements WorkQueue {
 
     @Override
     public void cancel(TaskId taskId) {
-        sendCancelRequestsQueue.emitNext(taskId, FAIL_FAST);
+        LOGGER.info("Requesting cancel for task {}", taskId);
+        sender.send(Mono.just(makeCancelRequestMessage(taskId))).block();
     }
 
     @Override
@@ -301,7 +301,6 @@ public class RabbitMQWorkQueue implements WorkQueue {
 
     private void closeRabbitResources() {
         Optional.ofNullable(receiverHandle).ifPresent(Disposable::dispose);
-        Optional.ofNullable(sendCancelRequestsQueueHandle).ifPresent(Disposable::dispose);
         Optional.ofNullable(cancelRequestListenerHandle).ifPresent(Disposable::dispose);
     }
 }

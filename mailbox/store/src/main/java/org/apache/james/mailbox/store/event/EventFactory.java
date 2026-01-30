@@ -52,6 +52,7 @@ import org.apache.james.mailbox.model.Mailbox;
 import org.apache.james.mailbox.model.MailboxACL;
 import org.apache.james.mailbox.model.MailboxId;
 import org.apache.james.mailbox.model.MailboxPath;
+import org.apache.james.mailbox.model.MessageId;
 import org.apache.james.mailbox.model.MessageMetaData;
 import org.apache.james.mailbox.model.Quota;
 import org.apache.james.mailbox.model.QuotaRoot;
@@ -93,6 +94,11 @@ public class EventFactory {
     @FunctionalInterface
     public interface RequireMailboxId<T> {
         T mailboxId(MailboxId mailboxId);
+    }
+
+    @FunctionalInterface
+    public interface RequireMessageId<T> {
+        T messageId(MessageId messageId);
     }
 
     @FunctionalInterface
@@ -195,6 +201,21 @@ public class EventFactory {
     @FunctionalInterface
     public interface RequireInstant<T> {
         T instant(Instant instant);
+    }
+
+    @FunctionalInterface
+    public interface RequireSize<T> {
+        T size(long size);
+    }
+
+    @FunctionalInterface
+    public interface RequireHasAttachments<T> {
+        T hasAttachments(boolean hasAttachments);
+    }
+
+    @FunctionalInterface
+    public interface RequireBodyBlobId<T> {
+        T bodyBlobId(String bodyBlobId);
     }
 
     @FunctionalInterface
@@ -520,6 +541,71 @@ public class EventFactory {
         }
     }
 
+    public static final class MessageContentDeletionFinalStage {
+        private final Event.EventId eventId;
+        private final Username username;
+        private final MailboxId mailboxId;
+        private final MessageId messageId;
+        private final long size;
+        private final Instant internalDate;
+        private final boolean hasAttachments;
+        private final String bodyBlobId;
+        private Optional<String> headerBlobId;
+        private Optional<String> headerContent;
+
+        MessageContentDeletionFinalStage(Event.EventId eventId,
+                                         Username username,
+                                         MailboxId mailboxId,
+                                         MessageId messageId,
+                                         long size,
+                                         Instant internalDate,
+                                         boolean hasAttachments,
+                                         String bodyBlobId) {
+            this.eventId = eventId;
+            this.username = username;
+            this.mailboxId = mailboxId;
+            this.messageId = messageId;
+            this.size = size;
+            this.internalDate = internalDate;
+            this.hasAttachments = hasAttachments;
+            this.bodyBlobId = bodyBlobId;
+            this.headerBlobId = Optional.empty();
+            this.headerContent = Optional.empty();
+        }
+
+        public MessageContentDeletionFinalStage headerBlobId(String headerBlobId) {
+            this.headerBlobId = Optional.ofNullable(headerBlobId);
+            return this;
+        }
+
+        public MessageContentDeletionFinalStage headerContent(String headerContent) {
+            this.headerContent = Optional.ofNullable(headerContent);
+            return this;
+        }
+
+        public MailboxEvents.MessageContentDeletionEvent build() {
+            Preconditions.checkNotNull(eventId);
+            Preconditions.checkNotNull(username);
+            Preconditions.checkNotNull(mailboxId);
+            Preconditions.checkNotNull(messageId);
+            Preconditions.checkNotNull(internalDate);
+            Preconditions.checkNotNull(bodyBlobId);
+            Preconditions.checkArgument(headerBlobId.isPresent() || headerContent.isPresent(), "Either headerBlobId or headerContent must be present");
+
+            return new MailboxEvents.MessageContentDeletionEvent(
+                eventId,
+                username,
+                mailboxId,
+                messageId,
+                size,
+                internalDate,
+                hasAttachments,
+                headerBlobId,
+                headerContent,
+                bodyBlobId);
+        }
+    }
+
     public static class MailboxSubscribedFinalStage {
         private final Event.EventId eventId;
         private final MailboxPath path;
@@ -604,6 +690,11 @@ public class EventFactory {
 
     public static RequireEventId<RequireUser<RequireQuotaRoot<RequireQuotaCount<RequireQuotaSize<RequireInstant<QuotaUsageUpdatedFinalStage>>>>>> quotaUpdated() {
         return eventId -> user -> quotaRoot -> quotaCount -> quotaSize -> instant -> new QuotaUsageUpdatedFinalStage(eventId, user, quotaRoot, quotaCount, quotaSize, instant);
+    }
+
+    public static RequireEventId<RequireUser<RequireMailboxId<RequireMessageId<RequireSize<RequireInstant<RequireHasAttachments<RequireBodyBlobId<MessageContentDeletionFinalStage>>>>>>>> messageContentDeleted() {
+        return eventId -> user -> mailboxId -> messageId -> size -> instant -> hasAttachments -> bodyBlobId ->
+            new MessageContentDeletionFinalStage(eventId, user, mailboxId, messageId, size, instant, hasAttachments, bodyBlobId);
     }
 
     public static RequireMailboxEvent<MailboxSubscribedFinalStage> mailboxSubscribed() {

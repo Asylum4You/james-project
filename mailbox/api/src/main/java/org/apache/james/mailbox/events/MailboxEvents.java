@@ -536,6 +536,26 @@ public interface MailboxEvents {
         }
     }
 
+    record MessageContentDeletionEvent(EventId eventId, Username username, MailboxId mailboxId, MessageId messageId, long size,
+                                       Instant internalDate, boolean hasAttachments, Optional<String> headerBlobId, Optional<String> headerContent,
+                                       String bodyBlobId) implements Event {
+
+        @Override
+        public EventId getEventId() {
+            return eventId;
+        }
+
+        @Override
+        public Username getUsername() {
+            return username;
+        }
+
+        @Override
+        public boolean isNoop() {
+            return false;
+        }
+    }
+
     /**
      * A mailbox event related to added message
      */
