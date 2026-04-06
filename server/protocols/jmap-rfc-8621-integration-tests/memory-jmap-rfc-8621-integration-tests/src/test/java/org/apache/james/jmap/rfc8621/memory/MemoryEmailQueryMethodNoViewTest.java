@@ -101,4 +101,5 @@ public class MemoryEmailQueryMethodNoViewTest implements EmailQueryMethodContrac
     @Disabled("JAMES-3340 Not supported for no email query view")
     public void inMailboxBeforeSortedByReceivedAtShouldCollapseThreads(GuiceJamesServer server) {
     }
+
 }

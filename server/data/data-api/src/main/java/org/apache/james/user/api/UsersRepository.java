@@ -142,7 +142,7 @@ public interface UsersRepository {
      * 
      * @return true or false
      */
-    boolean supportVirtualHosting() throws UsersRepositoryException;
+    boolean supportVirtualHosting();
 
     /**
      * Returns username to be used for a given MailAddress
@@ -191,6 +191,6 @@ public interface UsersRepository {
         return Flux.from(listReactive())
             .filter(username -> username.getDomainPart()
                 .map(domain::equals)
-                .orElse(false));
+                .orElse(!supportVirtualHosting()));
     }
 }

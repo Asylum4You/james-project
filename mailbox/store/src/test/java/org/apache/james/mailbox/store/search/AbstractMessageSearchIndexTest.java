@@ -56,6 +56,7 @@ import org.apache.james.mailbox.model.MailboxPath;
 import org.apache.james.mailbox.model.MessageId;
 import org.apache.james.mailbox.model.MessageMetaData;
 import org.apache.james.mailbox.model.MessageRange;
+import org.apache.james.mailbox.model.SearchOptions;
 import org.apache.james.mailbox.model.SearchQuery;
 import org.apache.james.mailbox.model.SearchQuery.AddressType;
 import org.apache.james.mailbox.model.SearchQuery.DateResolution;
@@ -76,6 +77,8 @@ import org.apache.james.mime4j.message.BodyPartBuilder;
 import org.apache.james.mime4j.message.MultipartBuilder;
 import org.apache.james.mime4j.message.SingleBodyBuilder;
 import org.apache.james.util.ClassLoaderUtils;
+import org.apache.james.util.streams.Limit;
+import org.apache.james.util.streams.Offset;
 import org.apache.james.utils.UpdatableTickingClock;
 import org.awaitility.Awaitility;
 import org.awaitility.core.ConditionFactory;
@@ -92,7 +95,7 @@ public abstract class AbstractMessageSearchIndexTest {
             .with().pollInterval(ONE_HUNDRED_MILLISECONDS)
             .and().pollDelay(ONE_HUNDRED_MILLISECONDS)
             .await();
-    private static final long LIMIT = 100L;
+    private static final SearchOptions LIMIT = SearchOptions.limit(Limit.limit(100));
     private static final boolean RECENT = true;
     private static final boolean NOT_RECENT = false;
 
@@ -289,6 +292,10 @@ public abstract class AbstractMessageSearchIndexTest {
 
     protected abstract MessageId initOtherBasedMessageId();
 
+    protected boolean supportsCollapseThreads() {
+        return false;
+    }
+
     @Test
     void searchingMessageInMultipleMailboxShouldNotReturnTwiceTheSameMessage() throws MailboxException {
         assumeTrue(messageIdManager != null);
@@ -372,7 +379,7 @@ public abstract class AbstractMessageSearchIndexTest {
         List<MessageId> result = messageSearchIndex.search(session,
             ImmutableList.of(mailbox2.getMailboxId(), mailbox.getMailboxId()),
             searchQuery,
-            limit)
+            SearchOptions.limit(Limit.limit(limit)))
             .collectList().block();
 
         assertThat(result)
@@ -410,7 +417,7 @@ public abstract class AbstractMessageSearchIndexTest {
         List<MessageId> result = messageSearchIndex.search(session,
             ImmutableList.of(mailbox2.getMailboxId(), mailbox.getMailboxId()),
             searchQuery,
-            limit)
+            SearchOptions.limit(Limit.limit(limit)))
             .collectList().block();
 
         assertThat(result)
@@ -771,7 +778,7 @@ public abstract class AbstractMessageSearchIndexTest {
             session,
             ImmutableList.of(mailbox.getMailboxId(), mailbox2.getMailboxId()),
             searchQuery,
-            limit)
+            SearchOptions.limit(Limit.limit(Math.toIntExact(limit))))
             .collectList().block();
         // Two messages matches this query : mOther and m6
 
@@ -788,7 +795,7 @@ public abstract class AbstractMessageSearchIndexTest {
             session,
             ImmutableList.of(otherMailbox.getMailboxId()),
             searchQuery,
-            limit)
+            SearchOptions.limit(Limit.limit(Math.toIntExact(limit))))
             .collectList().block();
 
         assertThat(actual).contains(m10.getMessageId());
@@ -1704,6 +1711,76 @@ public abstract class AbstractMessageSearchIndexTest {
         assertThat(actual).isEmpty();
     }
 
+    @Test
+    void collapseThreadsShouldReturnOneMessagePerThread() throws MailboxException {
+        assumeTrue(supportsCollapseThreads(), "This test is only relevant when collapseThread is supported");
+
+        ThreadId threadId1 = ThreadId.fromBaseMessageId(newBasedMessageId);
+        ThreadId threadId2 = ThreadId.fromBaseMessageId(otherBasedMessageId);
+        MailboxMessage message1 = createMessage(quanMailbox, threadId1);
+        MailboxMessage message2 = createMessage(quanMailbox, threadId1);
+        MailboxMessage message3 = createMessage(quanMailbox, threadId2);
+
+        // Thread 1: message1 and message2
+        // Thread 2: message3
+        appendMessageThenDispatchAddedEvent(quanMailbox, message1);
+        appendMessageThenDispatchAddedEvent(quanMailbox, message2);
+        appendMessageThenDispatchAddedEvent(quanMailbox, message3);
+
+        awaitMessageCount(ImmutableList.of(), SearchQuery.matchAll(), 16);
+
+        SearchQuery collapseThreadsQuery = SearchQuery.builder()
+            .andCriteria(SearchQuery.all())
+            .collapseThreads(true)
+            .build();
+
+        List<MessageId> actual = messageSearchIndex.search(quanSession, ImmutableList.of(quanMailbox.getMailboxId()), collapseThreadsQuery, LIMIT)
+            .collectList().block();
+
+        assertThat(actual).isEqualTo(ImmutableList.of(message1.getMessageId(), message3.getMessageId()));
+    }
+
+    @Test
+    void collapseThreadsShouldSupportPagination() throws MailboxException {
+        assumeTrue(supportsCollapseThreads(), "This test is only relevant when collapseThread is supported");
+
+        ThreadId threadId1 = ThreadId.fromBaseMessageId(newBasedMessageId);
+        ThreadId threadId2 = ThreadId.fromBaseMessageId(otherBasedMessageId);
+        ThreadId threadId3 = ThreadId.fromBaseMessageId(messageIdFactory.generate());
+
+        // Thread1 has two messages; thread2 and thread3 have one each.
+        MailboxMessage thread1Older = createMessage(quanMailbox, threadId1, new Date(1000));
+        MailboxMessage thread1Newer = createMessage(quanMailbox, threadId1, new Date(3000));
+        MailboxMessage thread2Message = createMessage(quanMailbox, threadId2, new Date(2000));
+        MailboxMessage thread3Message = createMessage(quanMailbox, threadId3, new Date(500));
+
+        appendMessageThenDispatchAddedEvent(quanMailbox, thread1Older);
+        appendMessageThenDispatchAddedEvent(quanMailbox, thread1Newer);
+        appendMessageThenDispatchAddedEvent(quanMailbox, thread2Message);
+        appendMessageThenDispatchAddedEvent(quanMailbox, thread3Message);
+
+        awaitMessageCount(ImmutableList.of(quanMailbox.getMailboxId()), SearchQuery.matchAll(), 4);
+
+        SearchQuery collapseThreadsQuery = SearchQuery.builder()
+            .andCriteria(SearchQuery.all())
+            .sorts(new Sort(SortClause.Arrival, Order.REVERSE))
+            .collapseThreads(true)
+            .build();
+        List<MessageId> allCollapsedMessages = messageSearchIndex.search(quanSession,
+                ImmutableList.of(quanMailbox.getMailboxId()), collapseThreadsQuery, SearchOptions.of(Offset.none(), Limit.limit(10)))
+            .collectList().block();
+        List<MessageId> paginatedCollapsedMessages = messageSearchIndex.search(quanSession,
+                ImmutableList.of(quanMailbox.getMailboxId()), collapseThreadsQuery, SearchOptions.of(Offset.from(1), Limit.limit(2)))
+            .collectList().block();
+
+        // With Arrival sort descending, the collapsed list should be ordered by:
+        // 1) thread1 (newest at date=3000), 2) thread2 (date=2000), 3) thread3 (date=500).
+        assertThat(allCollapsedMessages).containsExactly(thread1Newer.getMessageId(), thread2Message.getMessageId(), thread3Message.getMessageId());
+
+        // Request offset=1, limit=2 to fetch from the second message (thread2, thread3).
+        assertThat(paginatedCollapsedMessages).containsExactly(thread2Message.getMessageId(), thread3Message.getMessageId());
+    }
+
     private void appendMessageThenDispatchAddedEvent(Mailbox mailbox, MailboxMessage mailboxMessage) throws MailboxException {
         MessageMetaData messageMetaData = messageMapper.add(mailbox, mailboxMessage);
         eventBus.dispatch(EventFactory.added()
@@ -1718,12 +1795,16 @@ public abstract class AbstractMessageSearchIndexTest {
     }
 
     private SimpleMailboxMessage createMessage(Mailbox mailbox, ThreadId threadId) {
+        return createMessage(mailbox, threadId, new Date());
+    }
+
+    private SimpleMailboxMessage createMessage(Mailbox mailbox, ThreadId threadId, Date date) {
         MessageId messageId = messageIdFactory.generate();
         String content = "Some content";
         int bodyStart = 16;
         return new SimpleMailboxMessage(messageId,
             threadId,
-            new Date(),
+            date,
             content.length(),
             bodyStart,
             new ByteContent(content.getBytes()),

@@ -146,6 +146,13 @@ public abstract class MessageIdMapperTest {
     }
 
     @Test
+    void findMailboxesReactiveShouldReturnOneMailboxWhenMessageExistsInOneMailbox() throws MailboxException {
+        saveMessages();
+        List<MailboxId> mailboxes = sut.findMailboxesReactive(message1.getMessageId()).collectList().block();
+        assertThat(mailboxes).containsOnly(benwaInboxMailbox.getMailboxId());
+    }
+
+    @Test
     void findMailboxesShouldReturnTwoMailboxesWhenMessageExistsInTwoMailboxes() throws MailboxException {
         saveMessages();
 
@@ -364,6 +371,7 @@ public abstract class MessageIdMapperTest {
         UpdatedFlags expectedUpdatedFlags = UpdatedFlags.builder()
             .uid(message1.getUid())
             .messageId(messageId)
+            .internalDate(message1.getInternalDate())
             .modSeq(modSeq)
             .oldFlags(new Flags())
             .newFlags(newFlags)
@@ -392,6 +400,7 @@ public abstract class MessageIdMapperTest {
         UpdatedFlags expectedUpdatedFlags = UpdatedFlags.builder()
             .uid(message1.getUid())
             .messageId(messageId)
+            .internalDate(message1.getInternalDate())
             .modSeq(modSeq)
             .oldFlags(messageFlags)
             .newFlags(newFlags)
@@ -422,6 +431,7 @@ public abstract class MessageIdMapperTest {
         UpdatedFlags expectedUpdatedFlags = UpdatedFlags.builder()
             .uid(message1.getUid())
             .messageId(messageId)
+            .internalDate(message1.getInternalDate())
             .modSeq(modSeq)
             .oldFlags(messageFlags)
             .newFlags(new Flags(Flags.Flag.RECENT))
@@ -495,6 +505,7 @@ public abstract class MessageIdMapperTest {
         UpdatedFlags expectedUpdatedFlags = UpdatedFlags.builder()
             .uid(message1.getUid())
             .messageId(messageId)
+            .internalDate(message1.getInternalDate())
             .modSeq(modSeq)
             .oldFlags(initialFlags)
             .newFlags(newFlags)
@@ -523,6 +534,7 @@ public abstract class MessageIdMapperTest {
         UpdatedFlags expectedUpdatedFlags = UpdatedFlags.builder()
             .uid(message1.getUid())
             .messageId(messageId)
+            .internalDate(message1.getInternalDate())
             .modSeq(modSeqBenwaInboxMailbox)
             .oldFlags(new Flags())
             .newFlags(newFlags)
@@ -530,6 +542,7 @@ public abstract class MessageIdMapperTest {
         UpdatedFlags expectedUpdatedFlags2 = UpdatedFlags.builder()
             .uid(message1InOtherMailbox.getUid())
             .messageId(messageId)
+            .internalDate(message1InOtherMailbox.getInternalDate())
             .modSeq(modSeqBenwaWorkMailbox)
             .oldFlags(new Flags())
             .newFlags(newFlags)
@@ -874,6 +887,7 @@ public abstract class MessageIdMapperTest {
                     .modSeq(modSeq)
                     .uid(message1.getUid())
                     .messageId(message1.getMessageId())
+                    .internalDate(message1.getInternalDate())
                     .newFlags(flags)
                     .oldFlags(flags)
                     .build())));

@@ -114,6 +114,7 @@ object DTOs {
   case class Flags(systemFlags: Seq[SystemFlag], userFlags: Seq[UserFlag])
 
   object Flags {
+    val empty: Flags = Flags(Seq.empty, Seq.empty)
 
     def toJavaFlags(scalaFlags: Flags): JavaMailFlags = {
       new FlagsBuilder { builder =>
@@ -153,16 +154,18 @@ object DTOs {
       javaUpdatedFlags.getMessageId.toScala,
       javaUpdatedFlags.getModSeq,
       Flags.fromJavaFlags(javaUpdatedFlags.getOldFlags),
-      Flags.fromJavaFlags(javaUpdatedFlags.getNewFlags))
+      Flags.fromJavaFlags(javaUpdatedFlags.getNewFlags),
+      javaUpdatedFlags.getInternalDate.map(_.toInstant).toScala)
   }
 
-  case class UpdatedFlags(uid: MessageUid, messageId: Option[MessageId], modSeq: ModSeq, oldFlags: Flags, newFlags: Flags) {
+  case class UpdatedFlags(uid: MessageUid, messageId: Option[MessageId], modSeq: ModSeq, oldFlags: Flags, newFlags: Flags, internalDate: Option[Instant]) {
     def toJava: JavaUpdatedFlags = JavaUpdatedFlags.builder()
       .uid(uid)
       .messageId(messageId.toJava)
       .modSeq(modSeq)
       .oldFlags(Flags.toJavaFlags(oldFlags))
       .newFlags(Flags.toJavaFlags(newFlags))
+      .internalDate(internalDate.map(Date.from).toJava)
       .build()
   }
 }

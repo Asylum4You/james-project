@@ -86,12 +86,14 @@ import org.apache.james.mailbox.model.MultimailboxesSearchQuery.AccessibleNamesp
 import org.apache.james.mailbox.model.MultimailboxesSearchQuery.PersonalNamespace;
 import org.apache.james.mailbox.model.Quota;
 import org.apache.james.mailbox.model.QuotaRoot;
+import org.apache.james.mailbox.model.SearchOptions;
 import org.apache.james.mailbox.model.SearchQuery;
 import org.apache.james.mailbox.model.search.MailboxQuery;
 import org.apache.james.mailbox.util.EventCollector;
 import org.apache.james.mime4j.dom.Message;
 import org.apache.james.util.ClassLoaderUtils;
 import org.apache.james.util.concurrency.ConcurrentTestRunner;
+import org.apache.james.util.streams.Limit;
 import org.assertj.core.api.SoftAssertions;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -118,7 +120,7 @@ import reactor.core.publisher.Mono;
 public abstract class MailboxManagerTest<T extends MailboxManager> {
     public static final Username USER_1 = Username.of("USER_1");
     public static final Username USER_2 = Username.of("USER_2");
-    private static final int DEFAULT_MAXIMUM_LIMIT = 256;
+    private static final SearchOptions DEFAULT_MAXIMUM_LIMIT = SearchOptions.limit(Limit.limit(256));
 
     protected T mailboxManager;
     private  SubscriptionManager subscriptionManager;
@@ -359,6 +361,58 @@ public abstract class MailboxManagerTest<T extends MailboxManager> {
 
             assertThatThrownBy(() -> mailboxManager.getMailbox(mailboxPath, session))
                 .isInstanceOf(MailboxNotFoundException.class);
+        }
+
+        @Test
+        void createMailboxShouldNotPropagateParentLookupOnlyRightsToSibling() throws Exception {
+            assumeTrue(mailboxManager.hasCapability(MailboxCapabilities.ACL));
+            session = mailboxManager.createSystemSession(USER_1);
+            // Create a.b - this also creates intermediate "a"
+            MailboxPath childPath1 = MailboxPath.forUser(USER_1, "a.b");
+            mailboxManager.createMailbox(childPath1, session);
+
+            // Give USER_2 only Lookup right on "a" (simulating the right derived from PropagateLookupRightListener)
+            MailboxPath parentPath = MailboxPath.forUser(USER_1, "a");
+            mailboxManager.applyRightsCommand(parentPath,
+                MailboxACL.command()
+                    .key(MailboxACL.EntryKey.createUserEntryKey(USER_2))
+                    .rights(MailboxACL.Right.Lookup)
+                    .asAddition(), session);
+
+            // Create a.c (sibling of a.b)
+            MailboxPath childPath2 = MailboxPath.forUser(USER_1, "a.c");
+            mailboxManager.createMailbox(childPath2, session);
+
+            // USER_2 should NOT have rights on a.c - Lookup-only from parent should not propagate to siblings
+            assertThat(mailboxManager.getMailbox(childPath2, session)
+                .getMailboxEntity().getACL().getEntries().get(MailboxACL.EntryKey.createUserEntryKey(USER_2)))
+                .isNull();
+        }
+
+        @Test
+        void createMailboxShouldPropagateParentNonLookupOnlyRightsToSibling() throws Exception {
+            assumeTrue(mailboxManager.hasCapability(MailboxCapabilities.ACL));
+            session = mailboxManager.createSystemSession(USER_1);
+            // Create a.b - this also creates intermediate "a"
+            MailboxPath childPath1 = MailboxPath.forUser(USER_1, "a.b");
+            mailboxManager.createMailbox(childPath1, session);
+
+            // Give USER_2 Read+Lookup rights on "a" (substantive rights, not just derived lookup)
+            MailboxPath parentPath = MailboxPath.forUser(USER_1, "a");
+            mailboxManager.applyRightsCommand(parentPath,
+                MailboxACL.command()
+                    .key(MailboxACL.EntryKey.createUserEntryKey(USER_2))
+                    .rights(MailboxACL.Right.Lookup, MailboxACL.Right.Read)
+                    .asAddition(), session);
+
+            // Create a.c (sibling of a.b)
+            MailboxPath childPath2 = MailboxPath.forUser(USER_1, "a.c");
+            mailboxManager.createMailbox(childPath2, session);
+
+            // USER_2 SHOULD have rights on a.c (non-lookup-only rights from parent should still propagate)
+            assertThat(mailboxManager.getMailbox(childPath2, session)
+                .getMailboxEntity().getACL().getEntries().get(MailboxACL.EntryKey.createUserEntryKey(USER_2)))
+                .isEqualTo(MailboxACL.Rfc4314Rights.fromSerializedRfc4314Rights("lr"));
         }
 
         @Test

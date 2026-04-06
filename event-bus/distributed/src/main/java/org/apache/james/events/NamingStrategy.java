@@ -21,45 +21,25 @@ package org.apache.james.events;
 
 import reactor.rabbitmq.QueueSpecification;
 
-public class NamingStrategy {
-    public static final EventBusName JMAP_EVENT_BUS_NAME = new EventBusName("jmapEvent");
-    public static final EventBusName MAILBOX_EVENT_BUS_NAME = new EventBusName("mailboxEvent");
-    public static final EventBusName CONTENT_DELETION_EVENT_BUS_NAME = new EventBusName("contentDeletionEvent");
-    public static final NamingStrategy JMAP_NAMING_STRATEGY = new NamingStrategy(JMAP_EVENT_BUS_NAME);
-    public static final NamingStrategy MAILBOX_EVENT_NAMING_STRATEGY = new NamingStrategy(MAILBOX_EVENT_BUS_NAME);
-    public static final NamingStrategy CONTENT_DELETION_NAMING_STRATEGY = new NamingStrategy(CONTENT_DELETION_EVENT_BUS_NAME);
+public interface NamingStrategy {
+    EventBusName JMAP_EVENT_BUS_NAME = new EventBusName("jmapEvent");
+    EventBusName MAILBOX_EVENT_BUS_NAME = new EventBusName("mailboxEvent");
+    EventBusName CONTENT_DELETION_EVENT_BUS_NAME = new EventBusName("contentDeletionEvent");
+    NamingStrategy JMAP_NAMING_STRATEGY = new DefaultNamingStrategy(JMAP_EVENT_BUS_NAME);
+    NamingStrategy MAILBOX_EVENT_NAMING_STRATEGY = new DefaultNamingStrategy(MAILBOX_EVENT_BUS_NAME);
+    NamingStrategy CONTENT_DELETION_NAMING_STRATEGY = new DefaultNamingStrategy(CONTENT_DELETION_EVENT_BUS_NAME);
 
-    private final EventBusName eventBusName;
+    RegistrationQueueName queueName(EventBusId eventBusId);
 
-    public NamingStrategy(EventBusName eventBusName) {
-        this.eventBusName = eventBusName;
-    }
+    QueueSpecification deadLetterQueue();
 
-    public RegistrationQueueName queueName(EventBusId eventBusId) {
-        return new RegistrationQueueName(eventBusName.value() + "-eventbus-" + eventBusId.asString());
-    }
+    String exchange();
 
-    public QueueSpecification deadLetterQueue() {
-        return QueueSpecification.queue(eventBusName.value() + "-dead-letter-queue");
-    }
+    String deadLetterExchange();
 
-    public String exchange() {
-        return eventBusName.value() + "-exchange";
-    }
+    GroupConsumerRetry.RetryExchangeName retryExchange(Group group);
 
-    public String deadLetterExchange() {
-        return eventBusName.value() + "-dead-letter-exchange";
-    }
+    GroupRegistration.WorkQueueName workQueue(Group group);
 
-    public GroupConsumerRetry.RetryExchangeName retryExchange(Group group) {
-        return new GroupConsumerRetry.RetryExchangeName(eventBusName.value(), group);
-    }
-
-    public GroupRegistration.WorkQueueName workQueue(Group group) {
-        return new GroupRegistration.WorkQueueName(eventBusName.value(), group);
-    }
-
-    public EventBusName getEventBusName() {
-        return eventBusName;
-    }
+    EventBusName getEventBusName();
 }

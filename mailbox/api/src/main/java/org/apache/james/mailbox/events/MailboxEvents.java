@@ -27,6 +27,8 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.SortedMap;
 
+import jakarta.mail.Flags;
+
 import org.apache.james.core.Username;
 import org.apache.james.core.quota.QuotaCountLimit;
 import org.apache.james.core.quota.QuotaCountUsage;
@@ -536,9 +538,9 @@ public interface MailboxEvents {
         }
     }
 
-    record MessageContentDeletionEvent(EventId eventId, Username username, MailboxId mailboxId, MessageId messageId, long size,
-                                       Instant internalDate, boolean hasAttachments, Optional<String> headerBlobId, Optional<String> headerContent,
-                                       String bodyBlobId) implements Event {
+    record MessageContentDeletionEvent(EventId eventId, Username username, MailboxId mailboxId, MailboxACL mailboxACL, MessageId messageId, long size,
+                                       Instant internalDate, Flags flags, boolean hasAttachments, Optional<String> headerBlobId, Optional<String> headerContent,
+                                       String bodyBlobId, Optional<String> mailboxPath) implements Event {
 
         @Override
         public EventId getEventId() {

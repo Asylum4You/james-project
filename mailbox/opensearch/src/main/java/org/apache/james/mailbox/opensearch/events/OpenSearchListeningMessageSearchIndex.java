@@ -58,6 +58,7 @@ import org.apache.james.mailbox.model.Mailbox;
 import org.apache.james.mailbox.model.MailboxId;
 import org.apache.james.mailbox.model.MessageId;
 import org.apache.james.mailbox.model.MessageMetaData;
+import org.apache.james.mailbox.model.SearchOptions;
 import org.apache.james.mailbox.model.SearchQuery;
 import org.apache.james.mailbox.model.UpdatedFlags;
 import org.apache.james.mailbox.opensearch.IndexBody;
@@ -362,17 +363,15 @@ public class OpenSearchListeningMessageSearchIndex extends ListeningMessageSearc
     }
     
     @Override
-    public Flux<MessageId> search(MailboxSession session, Collection<MailboxId> mailboxIds, SearchQuery searchQuery, long limit) {
+    public Flux<MessageId> search(MailboxSession session, Collection<MailboxId> mailboxIds, SearchQuery searchQuery, SearchOptions searchOptions) {
         Preconditions.checkArgument(session != null, "'session' is mandatory");
 
         if (mailboxIds.isEmpty()) {
             return Flux.empty();
         }
 
-        return searcher.search(mailboxIds, searchQuery, Optional.empty(), MESSAGE_ID_FIELD, !SEARCH_HIGHLIGHT)
-            .handle(this::extractMessageIdFromHit)
-            .distinct()
-            .take(limit);
+        return searcher.search(mailboxIds, searchQuery, searchOptions, MESSAGE_ID_FIELD, !SEARCH_HIGHLIGHT)
+            .handle(this::extractMessageIdFromHit);
     }
 
     @Override

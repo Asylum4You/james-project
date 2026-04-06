@@ -24,6 +24,7 @@ import java.security.cert.CertPathBuilder;
 import java.security.cert.PKIXBuilderParameters;
 import java.security.cert.PKIXRevocationChecker;
 import java.security.cert.X509CertSelector;
+import java.time.Duration;
 import java.util.EnumSet;
 import java.util.Optional;
 
@@ -31,9 +32,11 @@ import javax.net.ssl.CertPathTrustManagerParameters;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.X509ExtendedKeyManager;
 
+import jakarta.inject.Inject;
+
 import org.apache.james.filesystem.api.FileSystem;
-import org.apache.james.protocols.lib.netty.AbstractConfigurableAsyncServer;
 import org.apache.james.protocols.netty.Encryption;
+import org.apache.james.protocols.netty.SslConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -44,18 +47,17 @@ import nl.altindag.ssl.pem.util.PemUtils;
 import nl.altindag.ssl.trustmanager.trustoptions.TrustStoreTrustOptions;
 
 public class LegacyJavaEncryptionFactory implements Encryption.Factory {
-    private static final Logger LOGGER = LoggerFactory.getLogger(AbstractConfigurableAsyncServer.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger(LegacyJavaEncryptionFactory.class);
 
     private final FileSystem fileSystem;
-    private final SslConfig sslConfig;
 
-    public LegacyJavaEncryptionFactory(FileSystem fileSystem, SslConfig sslConfig) {
+    @Inject
+    public LegacyJavaEncryptionFactory(FileSystem fileSystem) {
         this.fileSystem = fileSystem;
-        this.sslConfig = sslConfig;
     }
 
     @Override
-    public Encryption create() throws Exception {
+    public Encryption create(SslConfig sslConfig) throws Exception {
         SSLFactory.Builder sslFactoryBuilder = SSLFactory.builder()
                 .withSslContextAlgorithm("TLS");
         if (sslConfig.getKeystore() != null) {
@@ -95,6 +97,9 @@ public class LegacyJavaEncryptionFactory implements Encryption.Factory {
         }
 
         SSLContext context = sslFactoryBuilder.build().getSslContext();
+
+        sslConfig.getSessionCacheSize().ifPresent(size -> context.getServerSessionContext().setSessionCacheSize(size));
+        sslConfig.getSessionCacheTimeout().map(Duration::toSeconds).map(Math::toIntExact).ifPresent(timeout -> context.getServerSessionContext().setSessionTimeout(timeout));
 
         if (sslConfig.useStartTLS()) {
             return Encryption.createStartTls(context, sslConfig.getEnabledCipherSuites(), sslConfig.getEnabledProtocols(), sslConfig.getClientAuth());

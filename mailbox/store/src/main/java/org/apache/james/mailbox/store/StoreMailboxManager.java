@@ -72,6 +72,7 @@ import org.apache.james.mailbox.model.MessageId.Factory;
 import org.apache.james.mailbox.model.MessageRange;
 import org.apache.james.mailbox.model.MultimailboxesSearchQuery;
 import org.apache.james.mailbox.model.QuotaRoot;
+import org.apache.james.mailbox.model.SearchOptions;
 import org.apache.james.mailbox.model.ThreadId;
 import org.apache.james.mailbox.model.UidValidity;
 import org.apache.james.mailbox.model.search.MailboxQuery;
@@ -476,12 +477,23 @@ public class StoreMailboxManager implements MailboxManager {
     private Mono<Void> inheritRightsReactive(MailboxSession mailboxSession, MailboxPath path) {
         return nearestExistingParent(mailboxSession, path)
             .flatMap(parent -> Mono.from(listRightsReactive(parent, mailboxSession)))
+            .map(this::filterLookupOnlyEntries)
             .flatMap(acl -> {
                 if (acl.getEntries().isEmpty()) {
                     return Mono.empty();
                 }
                 return storeRightManager.setRightsReactiveWithoutAccessControl(path, acl, mailboxSession);
             });
+    }
+
+    private MailboxACL filterLookupOnlyEntries(MailboxACL acl) {
+        return new MailboxACL(acl.getEntries().entrySet().stream()
+            .filter(entry -> !isLookupOnly(entry.getValue()))
+            .collect(ImmutableMap.toImmutableMap(Map.Entry::getKey, Map.Entry::getValue)));
+    }
+
+    private boolean isLookupOnly(Rfc4314Rights rights) {
+        return rights.equals(new Rfc4314Rights(Right.Lookup));
     }
 
     @Override
@@ -818,6 +830,28 @@ public class StoreMailboxManager implements MailboxManager {
     }
 
     @Override
+    public Flux<MessageRange> moveMessagesReactive(List<MessageRange> sets, MailboxId from, MailboxId to, MailboxSession session) {
+        return Mono.zip(Mono.from(getMailboxReactive(from, session)), Mono.from(getMailboxReactive(to, session)))
+            .flatMapMany(fromTo -> {
+                StoreMessageManager fromMessageManager = (StoreMessageManager) fromTo.getT1();
+                StoreMessageManager toMessageManager = (StoreMessageManager) fromTo.getT2();
+
+                return fromMessageManager.moveTo(sets, toMessageManager, session);
+            });
+    }
+
+    @Override
+    public Flux<MessageRange> copyMessagesReactive(List<MessageRange> sets, MailboxId from, MailboxId to, MailboxSession session) {
+        return Mono.zip(Mono.from(getMailboxReactive(from, session)), Mono.from(getMailboxReactive(to, session)))
+            .flatMapMany(fromTo -> {
+                StoreMessageManager fromMessageManager = (StoreMessageManager) fromTo.getT1();
+                StoreMessageManager toMessageManager = (StoreMessageManager) fromTo.getT2();
+
+                return fromMessageManager.copyTo(sets, toMessageManager, session);
+            });
+    }
+
+    @Override
     public Flux<MailboxMetaData> search(MailboxQuery expression, MailboxSearchFetchType fetchType, MailboxSession session) {
         Mono<List<Mailbox>> mailboxesMono = searchMailboxes(expression, session, Right.Lookup).collectList();
 
@@ -946,11 +980,11 @@ public class StoreMailboxManager implements MailboxManager {
     }
 
     @Override
-    public Flux<MessageId> search(MultimailboxesSearchQuery expression, MailboxSession session, long limit) {
+    public Flux<MessageId> search(MultimailboxesSearchQuery expression, MailboxSession session, SearchOptions searchOptions) {
         return getInMailboxIds(expression, session)
             .filter(id -> !expression.getNotInMailboxes().contains(id))
             .collect(ImmutableSet.toImmutableSet())
-            .flatMapMany(Throwing.function(ids -> index.search(session, ids, expression.getSearchQuery(), limit)));
+            .flatMapMany(Throwing.function(ids -> index.search(session, ids, expression.getSearchQuery(), searchOptions)));
     }
 
     @Override

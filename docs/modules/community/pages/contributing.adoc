@@ -189,3 +189,17 @@ will solve the problem. Note any bug numbers your patch addresses.
 The reason for these rules is so that committers can easily see what you are trying to achieve, it is their
 responsibility to manage the code and review submissions, if you make it easy for them to see what you are doing your
 patch is more likely to be committed quickly.
+
+=== Experimental nix support
+
+There is work in progress to support a more reproductible dev environment so you don't have to figure out what to install or how.
+
+This work is based on nix flakes if you are not familiar with nix or flakes you can find more information in the https://nix.dev/manual/nix/2.28/command-ref/new-cli/nix3-flake.html[official documentation], https://wiki.nixos.org/wiki/Flakes[official wiki] or in https://zero-to-nix.com/concepts/flakes/[dedicated] community https://nix.dev/concepts/flakes[resources].
+
+If you already have the nix package manager installed you should be able to use the following command to enter the predefined build env (experimental nix flag `flakes` is required, `nix-command` is recommended as it is used in many examples) with  :
+
+```
+nix develop --no-update-lock-file
+```
+
+If you encounter an issue, leave a comment on the corresponding jira issue https://issues.apache.org/jira/browse/JAMES-4175[JAMES-4175] or create a bug and link it as related to https://issues.apache.org/jira/browse/JAMES-4175[JAMES-4175]

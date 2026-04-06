@@ -583,6 +583,28 @@ public interface UsersRepositoryContract {
         }
 
         @Test
+        default void listUsersOfADomainShouldReturnEmptyWhenNoneInDomain(TestSystem testSystem) throws Exception {
+            testSystem.domainList.addDomain(Domain.of("empty.tld"));
+
+            assertThat(Flux.from(testee().listUsersOfADomainReactive(Domain.of("empty.tld")))
+                .collectList()
+                .block())
+                .isEmpty();
+        }
+
+        @Test
+        default void listUsersOfADomainShouldReturnAllUsersOfDomain(TestSystem testSystem) throws Exception {
+            testSystem.domainList.addDomain(Domain.of("domain.tld"));
+            testee().addUser(Username.of("alice@domain.tld"), "password");
+            testee().addUser(Username.of("bob@domain.tld"), "password");
+
+            assertThat(Flux.from(testee().listUsersOfADomainReactive(Domain.of("domain.tld")))
+                .collectList()
+                .block())
+                .containsExactlyInAnyOrder(Username.of("alice@domain.tld"), Username.of("bob@domain.tld"));
+        }
+
+        @Test
         default void addUserShouldThrowWhenUserDoesNotBelongToDomainList(TestSystem testSystem) {
             assertThatThrownBy(() -> testee().addUser(testSystem.userWithUnknownDomain, "password"))
                 .isInstanceOf(InvalidUsernameException.class)
@@ -766,5 +788,16 @@ public interface UsersRepositoryContract {
     }
 
     interface WithOutVirtualHostingContract extends WithOutVirtualHostingReadOnlyContract, ReadWriteContract {
+        @Test
+        default void listUsersOfADomainShouldReturnAllUsers(TestSystem testSystem) throws Exception {
+            testSystem.domainList.addDomain(Domain.of("domain1.tld"));
+            testee().addUser(Username.of("user1"), "password");
+            testee().addUser(Username.of("user2"), "password");
+
+            assertThat(Flux.from(testee().listUsersOfADomainReactive(Domain.of("domain1.tld")))
+                .collectList()
+                .block())
+                .containsOnly(Username.of("user1"), Username.of("user2"));
+        }
     }
 }

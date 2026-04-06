@@ -74,10 +74,10 @@ public class SenderAuthIdentifyVerificationHook extends AbstractSenderAuthIdenti
     @Override
     public HookResult doCheck(SMTPSession session, MaybeSender sender) {
         ExtendedSMTPSession nSession = (ExtendedSMTPSession) session;
-        if (nSession.verifyIdentity() == SMTPConfiguration.SenderVerificationMode.STRICT) {
+        if (nSession.senderVerificationConfiguration().mode() == SMTPConfiguration.SenderVerificationMode.STRICT) {
             return super.doCheck(session, sender);
-        } else if (nSession.verifyIdentity() == SMTPConfiguration.SenderVerificationMode.RELAXED) {
-            return doCheckRelaxed(session, sender);
+        } else if (nSession.senderVerificationConfiguration().mode() == SMTPConfiguration.SenderVerificationMode.RELAXED) {
+            return doCheckRelaxed(nSession, sender);
         } else {
             return HookResult.DECLINED;
         }
@@ -140,8 +140,8 @@ public class SenderAuthIdentifyVerificationHook extends AbstractSenderAuthIdenti
     @Override
     public HookResult onMessage(SMTPSession session, Mail mail) {
         ExtendedSMTPSession nSession = (ExtendedSMTPSession) session;
-        boolean shouldCheck = nSession.verifyIdentity() == SMTPConfiguration.SenderVerificationMode.STRICT ||
-            (nSession.verifyIdentity() == SMTPConfiguration.SenderVerificationMode.RELAXED && session.getUsername() != null);
+        boolean shouldCheck = nSession.senderVerificationConfiguration().mode() == SMTPConfiguration.SenderVerificationMode.STRICT ||
+            (nSession.senderVerificationConfiguration().mode() == SMTPConfiguration.SenderVerificationMode.RELAXED && session.getUsername() != null);
         if (shouldCheck) {
             try {
                 Address[] fromAddresses = mail.getMessage().getFrom();
