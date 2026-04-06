@@ -18,7 +18,6 @@
  ****************************************************************/
 package org.apache.james.jmap.cassandra.upload;
 
-import static org.apache.james.blob.api.BlobStore.StoragePolicy.LOW_COST;
 import static org.apache.james.util.ReactorUtils.DEFAULT_CONCURRENCY;
 
 import java.io.InputStream;
@@ -29,7 +28,8 @@ import java.time.temporal.ChronoUnit;
 
 import jakarta.inject.Inject;
 
-import org.apache.james.blob.api.BlobStore;
+import org.apache.james.blob.api.BlobId;
+import org.apache.james.blob.api.BlobStoreDAO;
 import org.apache.james.blob.api.BucketName;
 import org.apache.james.core.Username;
 import org.apache.james.jmap.api.model.Upload;
@@ -46,36 +46,38 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 public class CassandraUploadRepository implements UploadRepository {
-
     public static final BucketName UPLOAD_BUCKET = BucketName.of("jmap-uploads");
-    public static final Duration EXPIRE_DURATION = Duration.ofDays(7);
     private final UploadDAO uploadDAO;
-    private final BlobStore blobStore;
+    private final BlobId.Factory blobIdFactory;
+    private final BlobStoreDAO blobStoreDAO;
     private final Clock clock;
 
     @Inject
-    public CassandraUploadRepository(UploadDAO uploadDAO, BlobStore blobStore, Clock clock) {
+    public CassandraUploadRepository(UploadDAO uploadDAO, BlobId.Factory blobIdFactory, BlobStoreDAO blobStoreDAO, Clock clock) {
         this.uploadDAO = uploadDAO;
-        this.blobStore = blobStore;
+        this.blobIdFactory = blobIdFactory;
+        this.blobStoreDAO = blobStoreDAO;
         this.clock = clock;
     }
 
     @Override
     public Mono<UploadMetaData> upload(InputStream data, ContentType contentType, Username user) {
         UploadId uploadId = generateId();
+        BlobId blobId = blobIdFactory.of(uploadId.asString());
 
         return Mono.fromCallable(() -> new CountingInputStream(data))
-            .flatMap(countingInputStream -> Mono.from(blobStore.save(UPLOAD_BUCKET, countingInputStream, LOW_COST))
-                .map(blobId -> new UploadDAO.UploadRepresentation(uploadId, blobId, contentType, countingInputStream.getCount(), user,
+            .flatMap(countingInputStream -> Mono.from(blobStoreDAO.save(UPLOAD_BUCKET, blobId, countingInputStream))
+                    .thenReturn(countingInputStream))
+                .map(countingInputStream -> new UploadDAO.UploadRepresentation(uploadId, blobId, contentType, countingInputStream.getCount(), user,
                     clock.instant().truncatedTo(ChronoUnit.MILLIS)))
                 .flatMap(upload -> uploadDAO.save(upload)
-                    .thenReturn(upload.toUploadMetaData())));
+                    .thenReturn(upload.toUploadMetaData()));
     }
 
     @Override
     public Mono<Upload> retrieve(UploadId id, Username user) {
         return uploadDAO.retrieve(user, id)
-            .flatMap(upload -> Mono.from(blobStore.readReactive(UPLOAD_BUCKET, upload.getBlobId(), LOW_COST))
+            .flatMap(upload -> Mono.from(blobStoreDAO.readReactive(UPLOAD_BUCKET, upload.getBlobId()))
                 .map(inputStream -> Upload.from(upload.toUploadMetaData(), () -> inputStream)))
             .switchIfEmpty(Mono.error(() -> new UploadNotFoundException(id)));
     }
@@ -91,11 +93,12 @@ public class CassandraUploadRepository implements UploadRepository {
             .map(UploadDAO.UploadRepresentation::toUploadMetaData);
     }
 
-    public Mono<Void> purge() {
-        Instant sevenDaysAgo = clock.instant().minus(EXPIRE_DURATION);
+    @Override
+    public Mono<Void> deleteByUploadDateBefore(Duration expireDuration) {
+        Instant expirationTime = clock.instant().minus(expireDuration);
         return Flux.from(uploadDAO.all())
-            .filter(upload -> upload.getUploadDate().isBefore(sevenDaysAgo))
-            .flatMap(upload -> Mono.from(blobStore.delete(UPLOAD_BUCKET, upload.getBlobId()))
+            .filter(upload -> upload.getUploadDate().isBefore(expirationTime))
+            .flatMap(upload -> Mono.from(blobStoreDAO.delete(UPLOAD_BUCKET, upload.getBlobId()))
                 .then(uploadDAO.delete(upload.getUser(), upload.getId())), DEFAULT_CONCURRENCY)
             .then();
     }

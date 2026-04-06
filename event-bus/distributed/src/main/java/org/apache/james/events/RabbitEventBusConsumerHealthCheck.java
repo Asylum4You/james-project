@@ -36,15 +36,18 @@ import reactor.core.publisher.Mono;
 public class RabbitEventBusConsumerHealthCheck implements HealthCheck {
     public static final String COMPONENT = "EventbusConsumers";
 
-    private final RabbitMQEventBus eventBus;
+    private final EventBus eventBus;
     private final NamingStrategy namingStrategy;
     private final SimpleConnectionPool connectionPool;
+    private final Group groupRegistrationHandlerGroup;
 
-    public RabbitEventBusConsumerHealthCheck(RabbitMQEventBus eventBus, NamingStrategy namingStrategy,
-                                             SimpleConnectionPool connectionPool) {
+    public RabbitEventBusConsumerHealthCheck(EventBus eventBus, NamingStrategy namingStrategy,
+                                             SimpleConnectionPool connectionPool,
+                                             Group groupRegistrationHandlerGroup) {
         this.eventBus = eventBus;
         this.namingStrategy = namingStrategy;
         this.connectionPool = connectionPool;
+        this.groupRegistrationHandlerGroup = groupRegistrationHandlerGroup;
     }
 
     @Override
@@ -65,7 +68,7 @@ public class RabbitEventBusConsumerHealthCheck implements HealthCheck {
     private Result check(Channel channel) {
         Stream<Group> groups = Stream.concat(
             eventBus.listRegisteredGroups().stream(),
-            Stream.of(new GroupRegistrationHandler.GroupRegistrationHandlerGroup()));
+            Stream.of(groupRegistrationHandlerGroup));
 
         Optional<String> queueWithoutConsumers = groups
             .map(namingStrategy::workQueue)

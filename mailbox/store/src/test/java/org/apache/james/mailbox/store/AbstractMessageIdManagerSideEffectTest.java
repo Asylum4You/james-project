@@ -42,6 +42,7 @@ import org.apache.james.core.quota.QuotaSizeUsage;
 import org.apache.james.events.EventBus;
 import org.apache.james.events.InVMEventBus;
 import org.apache.james.events.MemoryEventDeadLetters;
+import org.apache.james.events.RetryBackoffConfiguration;
 import org.apache.james.events.delivery.InVmEventDelivery;
 import org.apache.james.mailbox.MailboxSession;
 import org.apache.james.mailbox.MailboxSessionUtil;
@@ -110,7 +111,7 @@ public abstract class AbstractMessageIdManagerSideEffectTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        eventBus = new InVMEventBus(new InVmEventDelivery(new RecordingMetricFactory()), StoreMailboxManagerTest.RETRY_BACKOFF_CONFIGURATION, new MemoryEventDeadLetters());
+        eventBus = new InVMEventBus(new InVmEventDelivery(new RecordingMetricFactory()), RetryBackoffConfiguration.FAST, new MemoryEventDeadLetters());
         eventCollector = new EventCollector();
         quotaManager = mock(QuotaManager.class);
 
@@ -181,12 +182,13 @@ public abstract class AbstractMessageIdManagerSideEffectTest {
         AbstractListAssert<?, List<? extends Expunged>, Expunged, ObjectAssert<Expunged>> events =
             assertThat(eventCollector.getEvents())
                 .filteredOn(event -> event instanceof Expunged)
-                .hasSize(2)
-                .extracting(event -> (Expunged) event);
+                .hasSize(1)
+                .extracting(event -> (Expunged) event)
+                .allMatch(event -> event.getExpunged().size() == 2);
         events.extracting(MailboxEvent::getMailboxId).containsOnly(mailbox1.getMailboxId(), mailbox1.getMailboxId());
         events.extracting(Expunged::getExpunged)
-            .containsOnly(ImmutableSortedMap.of(simpleMessageMetaData1.getUid(), simpleMessageMetaData1),
-                ImmutableSortedMap.of(simpleMessageMetaData2.getUid(), simpleMessageMetaData2));
+            .containsOnly(ImmutableSortedMap.of(simpleMessageMetaData1.getUid(), simpleMessageMetaData1,
+                simpleMessageMetaData2.getUid(), simpleMessageMetaData2));
     }
 
     @Test
@@ -498,6 +500,7 @@ public abstract class AbstractMessageIdManagerSideEffectTest {
         UpdatedFlags updatedFlags = UpdatedFlags.builder()
             .uid(messageUid)
             .messageId(messageId)
+            .internalDate(messageResult.getInternalDate())
             .modSeq(modSeq)
             .oldFlags(FLAGS)
             .newFlags(newFlags)

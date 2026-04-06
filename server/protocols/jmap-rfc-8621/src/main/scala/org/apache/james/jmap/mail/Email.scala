@@ -32,12 +32,13 @@ import eu.timepit.refined.auto._
 import eu.timepit.refined.types.string.NonEmptyString
 import jakarta.inject.Inject
 import org.apache.commons.lang3.StringUtils
+import org.apache.james.jmap.api.model.Preview
 import org.apache.james.jmap.api.model.Size.{Size, sanitizeSize}
-import org.apache.james.jmap.api.model.{EmailAddress, Preview}
 import org.apache.james.jmap.api.projections.{MessageFastViewPrecomputedProperties, MessageFastViewProjection}
 import org.apache.james.jmap.core.Id.{Id, IdConstraint}
-import org.apache.james.jmap.core.{JmapRfc8621Configuration, Properties, UTCDate}
+import org.apache.james.jmap.core.{Properties, UTCDate}
 import org.apache.james.jmap.mail.BracketHeader.sanitize
+import org.apache.james.jmap.mail.Disposition.ATTACHMENT
 import org.apache.james.jmap.mail.EmailFullViewFactory.extractBodyValues
 import org.apache.james.jmap.mail.EmailGetRequest.MaxBodyValueBytes
 import org.apache.james.jmap.mail.EmailHeaderName.{ADDRESSES_NAMES, DATE, MESSAGE_ID_NAMES}
@@ -55,8 +56,8 @@ import org.apache.james.mime4j.field.{AddressListFieldLenientImpl, LenientFieldP
 import org.apache.james.mime4j.message.DefaultMessageBuilder
 import org.apache.james.mime4j.stream.{Field, MimeConfig, RawFieldParser}
 import org.apache.james.mime4j.util.MimeUtil
-import org.apache.james.util.AuditTrail
 import org.apache.james.util.html.HtmlTextExtractor
+import org.apache.james.util.{AuditTrail, ReactorUtils}
 import org.slf4j.{Logger, LoggerFactory}
 import reactor.core.scala.publisher.{SFlux, SMono}
 import reactor.core.scheduler.Schedulers
@@ -162,7 +163,7 @@ case class UnparsedEmailId(id: Id)
 
 object ReadLevel {
   private val metadataProperty: Seq[NonEmptyString] = Seq("id", "size", "mailboxIds",
-    "mailboxIds", "blobId", "threadId", "receivedAt")
+    "mailboxIds", "blobId", "threadId", "receivedAt", "keywords")
   private val fastViewProperty: Seq[NonEmptyString] = Seq("preview", "hasAttachment")
   private val attachmentsMetadataViewProperty: Seq[NonEmptyString] = Seq("attachments")
   private val fullProperty: Seq[NonEmptyString] = Seq("bodyStructure", "textBody", "htmlBody", "bodyValues")
@@ -202,13 +203,14 @@ case object MetadataReadLevel extends ReadLevel
 case object HeaderReadLevel extends ReadLevel
 case object FastViewReadLevel extends ReadLevel
 case object FastViewWithAttachmentsMetadataReadLevel extends ReadLevel {
-  private val availableFetchingBodyPropertiesForFastViewWithAttachments = Seq("partId", "blobId", "size", "name", "type", "charset", "disposition", "cid", "headers")
+  private val availableFetchingBodyPropertiesForFastViewWithAttachments = Seq("blobId", "size", "name", "type", "charset", "disposition", "cid")
 
   def supportedByFastViewWithAttachments(bodyProperties: Option[Properties]): Boolean =
     bodyProperties.exists(supportedByFastViewWithAttachments)
 
   private def supportedByFastViewWithAttachments(properties: Properties): Boolean =
     properties.value
+      .map(s => s.value)
       .map(availableFetchingBodyPropertiesForFastViewWithAttachments.contains)
       .reduce(_&&_)
 }
@@ -625,7 +627,8 @@ private class EmailFullViewFactory @Inject()(zoneIdProvider: ZoneIdProvider, pre
           size = sanitizeSize(firstMessage.getSize)),
         header = EmailHeaders.from(zoneIdProvider.get())(mime4JMessage),
         bodyMetadata = EmailBodyMetadata(
-          hasAttachment = HasAttachment(!firstMessage.getLoadedAttachments.isEmpty),
+          hasAttachment = HasAttachment(bodyStructure.attachments.exists(attachment =>
+            attachment.disposition.contains(ATTACHMENT) && attachment.cid.isEmpty)),
           preview = preview),
         body = EmailBody(
           bodyStructure = bodyStructure,
@@ -662,8 +665,8 @@ private class EmailFullViewReader @Inject()(messageIdManager: MessageIdManager,
   private val reader: GenericEmailViewReader[EmailFullView] = new GenericEmailViewReader[EmailFullView](messageIdManager, FULL_CONTENT, htmlTextExtractor, fullViewFactory)
 
 
-  override def read[T >: EmailFullView](ids: Seq[MessageId], request: EmailGetRequest, mailboxSession: MailboxSession): SFlux[T] = {
-    AuditTrail.entry
+  override def read[T >: EmailFullView](ids: Seq[MessageId], request: EmailGetRequest, mailboxSession: MailboxSession): SFlux[T] =
+    SMono(ReactorUtils.logAsMono(() => AuditTrail.entry
       .username(() => mailboxSession.getUser.asString())
       .protocol("JMAP")
       .action("Email full view read")
@@ -671,10 +674,8 @@ private class EmailFullViewReader @Inject()(messageIdManager: MessageIdManager,
         "loggedInUser", mailboxSession.getLoggedInUser.toScala
           .map(_.asString())
           .getOrElse("")))
-      .log("JMAP Email full view read.")
-
-    reader.read(ids, request, mailboxSession)
-  }
+      .log("JMAP Email full view read.")))
+      .thenMany(reader.read(ids, request, mailboxSession))
 }
 
 object EmailFastViewReader {
@@ -867,7 +868,7 @@ private class EmailFastViewWithAttachmentsMetadataReader @Inject()(messageIdMana
           preview = fastView.getPreview),
         header = EmailHeaders.from(zoneIdProvider.get())(mime4JMessage),
         specificHeaders = EmailHeaders.extractSpecificHeaders(request.properties)(zoneIdProvider.get(), mime4JMessage.getHeader),
-        attachments = AttachmentsMetadata(firstMessage.getLoadedAttachments.asScala.toList.map(EmailBodyPart.fromAttachment(request.bodyProperties, zoneIdProvider.get(), _, mime4JMessage))))
+        attachments = AttachmentsMetadata(firstMessage.getLoadedAttachments.asScala.toList.map(EmailBodyPart.fromAttachment(_, mime4JMessage))))
     }
   }
 }

@@ -19,15 +19,14 @@
 
 package org.apache.james.managesieveserver.netty;
 
-
-import static org.apache.james.protocols.netty.HandlerConstants.CONNECTION_LIMIT_HANDLER;
-import static org.apache.james.protocols.netty.HandlerConstants.CONNECTION_LIMIT_PER_IP_HANDLER;
-
+import java.net.MalformedURLException;
+import java.net.URISyntaxException;
 import java.util.Optional;
 
 import org.apache.commons.configuration2.HierarchicalConfiguration;
 import org.apache.commons.configuration2.ex.ConfigurationException;
 import org.apache.commons.configuration2.tree.ImmutableNode;
+import org.apache.james.jwt.OidcSASLConfiguration;
 import org.apache.james.managesieve.transcode.ManageSieveProcessor;
 import org.apache.james.protocols.lib.netty.AbstractConfigurableAsyncServer;
 import org.apache.james.protocols.netty.AbstractChannelPipelineFactory;
@@ -36,12 +35,14 @@ import org.apache.james.protocols.netty.ChannelHandlerFactory;
 import org.apache.james.protocols.netty.ConnectionLimitUpstreamHandler;
 import org.apache.james.protocols.netty.ConnectionPerIpLimitUpstreamHandler;
 import org.apache.james.protocols.netty.Encryption;
+import org.apache.james.protocols.netty.HandlerConstants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelPipeline;
+import io.netty.handler.codec.haproxy.HAProxyMessageDecoder;
 import io.netty.handler.codec.string.StringDecoder;
 import io.netty.handler.codec.string.StringEncoder;
 import io.netty.handler.stream.ChunkedWriteHandler;
@@ -50,16 +51,13 @@ import io.netty.util.CharsetUtil;
 public class ManageSieveServer extends AbstractConfigurableAsyncServer implements ManageSieveServerMBean {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(ManageSieveServer.class);
-
-    static final String SSL_HANDLER = "sslHandler";
-    static final String FRAMER = "framer";
-    static final String CORE_HANDLER = "coreHandler";
-    static final String CHUNK_WRITE_HANDLER = "chunkWriteHandler";
+    static final String OIDC_PATH = "oidc";
 
     private final int maxLineLength;
     private final ManageSieveProcessor manageSieveProcessor;
     private Optional<ConnectionLimitUpstreamHandler> connectionLimitUpstreamHandler = Optional.empty();
     private Optional<ConnectionPerIpLimitUpstreamHandler> connectionPerIpLimitUpstreamHandler = Optional.empty();
+    private Optional<OidcSASLConfiguration> oidcConfiguration;
 
     public ManageSieveServer(int maxLineLength, ManageSieveProcessor manageSieveProcessor) {
         this.maxLineLength = maxLineLength;
@@ -77,6 +75,16 @@ public class ManageSieveServer extends AbstractConfigurableAsyncServer implement
 
         connectionLimitUpstreamHandler = ConnectionLimitUpstreamHandler.forCount(connectionLimit);
         connectionPerIpLimitUpstreamHandler = ConnectionPerIpLimitUpstreamHandler.forCount(connPerIP);
+
+        if (config.immutableChildConfigurationsAt(OIDC_PATH).isEmpty()) {
+            this.oidcConfiguration = Optional.empty();
+        } else {
+            try {
+                this.oidcConfiguration = Optional.of(OidcSASLConfiguration.parse(config.configurationAt(OIDC_PATH)));
+            } catch (MalformedURLException | NullPointerException | URISyntaxException exception) {
+                throw new ConfigurationException("Failed to parse OIDC configuration", exception);
+            }
+        }
     }
 
     @Override
@@ -86,7 +94,7 @@ public class ManageSieveServer extends AbstractConfigurableAsyncServer implement
 
     @Override
     protected ChannelInboundHandlerAdapter createCoreHandler() {
-        return new ManageSieveChannelUpstreamHandler(manageSieveProcessor, getEncryption(), maxLineLength);
+        return new ManageSieveChannelUpstreamHandler(manageSieveProcessor, getEncryption(), maxLineLength, this.oidcConfiguration);
     }
 
     @Override
@@ -102,25 +110,34 @@ public class ManageSieveServer extends AbstractConfigurableAsyncServer implement
             @Override
             public void initChannel(Channel channel) {
                 ChannelPipeline pipeline = channel.pipeline();
-                Encryption secure = getEncryption();
-                if (secure != null && !secure.isStartTLS()) {
-                    pipeline.addFirst(SSL_HANDLER, secure.sslHandler());
+
+                if (proxyRequired) {
+                    pipeline.addLast(HandlerConstants.PROXY_HANDLER, new HAProxyMessageDecoder());
                 }
 
-                connectionLimitUpstreamHandler.ifPresent(handler -> pipeline.addLast(CONNECTION_LIMIT_HANDLER, handler));
-                connectionPerIpLimitUpstreamHandler.ifPresent(handler -> pipeline.addLast(CONNECTION_LIMIT_PER_IP_HANDLER, handler));
+                // See also AbstractSSLAwareChannelPipelineFactory.
+                Encryption secure = getEncryption();
+                if (secure != null && secure.supportsEncryption() && !secure.isStartTLS()) {
+                    if (proxyRequired && proxyFirst) {
+                        pipeline.addAfter(HandlerConstants.PROXY_HANDLER, HandlerConstants.SSL_HANDLER, secure.sslHandler());
+                    } else {
+                        pipeline.addFirst(HandlerConstants.SSL_HANDLER, secure.sslHandler());
+                    }
+                }
+
+                connectionLimitUpstreamHandler.ifPresent(handler -> pipeline.addLast(HandlerConstants.CONNECTION_LIMIT_HANDLER, handler));
+                connectionPerIpLimitUpstreamHandler.ifPresent(handler -> pipeline.addLast(HandlerConstants.CONNECTION_LIMIT_PER_IP_HANDLER, handler));
 
                 // Add the text line decoder which limit the max line length,
                 // don't strip the delimiter and use CRLF as delimiter
                 // Use a SwitchableDelimiterBasedFrameDecoder, see JAMES-1436
-                pipeline.addLast(getExecutorGroup(), FRAMER, getFrameHandlerFactory().create(pipeline));
-                pipeline.addLast(getExecutorGroup(), CHUNK_WRITE_HANDLER, new ChunkedWriteHandler());
+                pipeline.addLast(getExecutorGroup(), HandlerConstants.FRAMER, getFrameHandlerFactory().create(pipeline));
+                pipeline.addLast(getExecutorGroup(), HandlerConstants.CHUNK_HANDLER, new ChunkedWriteHandler());
 
                 pipeline.addLast(getExecutorGroup(), "stringDecoder", new StringDecoder(CharsetUtil.UTF_8));
-                pipeline.addLast(getExecutorGroup(), CORE_HANDLER, createHandler());
+                pipeline.addLast(getExecutorGroup(), HandlerConstants.CORE_HANDLER, createHandler());
                 pipeline.addLast(getExecutorGroup(), "stringEncoder", new StringEncoder(CharsetUtil.UTF_8));
             }
-
         };
     }
 

@@ -23,7 +23,7 @@
     <parent>
         <groupId>org.apache.james</groupId>
         <artifactId>james-server</artifactId>
-        <version>3.9.0-SNAPSHOT</version>
+        <version>3.10.0-SNAPSHOT</version>
         <relativePath>../../pom.xml</relativePath>
     </parent>
 
@@ -31,10 +31,6 @@
     <packaging>jar</packaging>
 
     <name>Apache James :: Server :: Data :: JPA Persistence</name>
-
-    <properties>
-        <target.jdk>11</target.jdk>
-    </properties>
 
     <dependencies>
         <dependency>
@@ -109,6 +105,11 @@
             <artifactId>guava</artifactId>
         </dependency>
         <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
             <groupId>io.cucumber</groupId>
             <artifactId>cucumber-java</artifactId>
             <scope>test</scope>
@@ -129,13 +130,13 @@
             <scope>test</scope>
         </dependency>
         <dependency>
-            <groupId>org.apache.commons</groupId>
-            <artifactId>commons-configuration2</artifactId>
+            <groupId>jakarta.transaction</groupId>
+            <artifactId>jakarta.transaction-api</artifactId>
+            <scope>test</scope>
         </dependency>
         <dependency>
-            <groupId>org.apache.derby</groupId>
-            <artifactId>derby</artifactId>
-            <scope>test</scope>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-configuration2</artifactId>
         </dependency>
         <dependency>
             <groupId>org.junit.platform</groupId>
@@ -174,6 +175,7 @@
                         org/apache/james/user/jpa/model/JPAUser.class,
                         org/apache/james/rrt/jpa/model/JPARecipientRewrite.class,
                         org/apache/james/domainlist/jpa/model/JPADomain.class,
+                        org/apache/james/droplists/jpa/model/JPADropListEntry.class,
                         org/apache/james/mailrepository/jpa/model/JPAUrl.class,
                         org/apache/james/mailrepository/jpa/model/JPAMail.class</includes>
                     <addDefaultConstructor>true</addDefaultConstructor>
@@ -190,6 +192,7 @@
                                 org.apache.james.user.jpa.model.JPAUser;
                                 org.apache.james.rrt.jpa.model.JPARecipientRewrite;
                                 org.apache.james.domainlist.jpa.model.JPADomain;
+                                org.apache.james.droplists.jpa.model.JPADropListEntry
                                 org.apache.james.mailrepository.jpa.model.JPAUrl;
                                 org.apache.james.mailrepository.jpa.model.JPAMail)</value>
                         </property>

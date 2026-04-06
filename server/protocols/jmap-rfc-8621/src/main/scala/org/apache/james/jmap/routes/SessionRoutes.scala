@@ -23,18 +23,20 @@ import java.nio.charset.StandardCharsets
 import java.util.stream.Stream
 
 import io.netty.handler.codec.http.HttpHeaderNames.{CONTENT_LENGTH, CONTENT_TYPE}
-import io.netty.handler.codec.http.HttpResponseStatus.{BAD_REQUEST, INTERNAL_SERVER_ERROR, OK, UNAUTHORIZED}
-import io.netty.handler.codec.http.{HttpMethod, HttpResponseStatus}
+import io.netty.handler.codec.http.HttpMethod
+import io.netty.handler.codec.http.HttpResponseStatus.{INTERNAL_SERVER_ERROR, OK, UNAUTHORIZED}
 import jakarta.inject.{Inject, Named}
 import org.apache.commons.lang3.tuple.Pair
 import org.apache.james.core.Username
 import org.apache.james.jmap.HttpConstants.{JSON_CONTENT_TYPE, JSON_CONTENT_TYPE_UTF8}
 import org.apache.james.jmap.JMAPRoutes.CORS_CONTROL
+import org.apache.james.jmap.JMAPServer.REACTOR_NETTY_METRICS_ENABLE
 import org.apache.james.jmap.core.{JmapRfc8621Configuration, ProblemDetails, Session, UrlPrefixes}
 import org.apache.james.jmap.exceptions.UnauthorizedException
 import org.apache.james.jmap.http.Authenticator
 import org.apache.james.jmap.http.rfc8621.InjectionKeys
 import org.apache.james.jmap.json.ResponseSerializer
+import org.apache.james.jmap.metrics.HttpClientMetrics
 import org.apache.james.jmap.routes.SessionRoutes.{JMAP_SESSION, LOGGER, WELL_KNOWN_JMAP}
 import org.apache.james.jmap.{Endpoint, JMAPRoute, JMAPRoutes}
 import org.apache.james.mailbox.MailboxSession
@@ -56,23 +58,29 @@ object SessionRoutes {
 class SessionRoutes @Inject()(@Named(InjectionKeys.RFC_8621) val authenticator: Authenticator,
                               val sessionSupplier: SessionSupplier,
                               val delegationStore: DelegationStore,
-                              val jmapRfc8621Configuration: JmapRfc8621Configuration) extends JMAPRoutes {
+                              val jmapRfc8621Configuration: JmapRfc8621Configuration,
+                              val httpClientMetrics: HttpClientMetrics) extends JMAPRoutes {
 
   private val generateSession: JMAPRoute.Action =
     (request, response) => SMono.fromPublisher(authenticator.authenticate(request))
       .flatMap(mailboxSession => getDelegatedUsers(mailboxSession)
         .collectSeq()
         .map(seq => Pair.of(mailboxSession.getUser, seq)))
-      .handle[Session] {
-        case (baseUserAndDelegatedUsers, sink) => sessionSupplier.generate(
+      .flatMap { baseUserAndDelegatedUsers =>
+        sessionSupplier.generate(
           username = baseUserAndDelegatedUsers.getLeft,
           delegatedUsers = baseUserAndDelegatedUsers.getRight.toSet,
           urlPrefixes = UrlPrefixes.from(jmapRfc8621Configuration, request))
-          .fold(sink.error, session => sink.next(session))
       }
       .flatMap(session => sendRespond(session, response))
       .onErrorResume(throwable => SMono.fromPublisher(errorHandling(throwable, response)))
       .asJava()
+      .doOnSuccess(_ => updateHttpClientMetricsIfNeeded())
+
+  private def updateHttpClientMetricsIfNeeded(): Unit =
+    if (REACTOR_NETTY_METRICS_ENABLE) {
+      httpClientMetrics.update()
+    }
 
   private val redirectToSession: JMAPRoute.Action = JMAPRoutes.redirectTo(JMAP_SESSION)
 
@@ -108,22 +116,20 @@ class SessionRoutes @Inject()(@Named(InjectionKeys.RFC_8621) val authenticator: 
         .sendByteArray(SMono.just(bytes))
         .`then`()))
 
-  def errorHandling(throwable: Throwable, response: HttpServerResponse): Mono[Void] =
+  private def errorHandling(throwable: Throwable, response: HttpServerResponse): Mono[Void] =
     throwable match {
       case e: UnauthorizedException =>
         LOGGER.warn("Unauthorized", e)
         respondDetails(e.addHeaders(response),
-          ProblemDetails(status = UNAUTHORIZED, detail = e.getMessage),
-          UNAUTHORIZED)
+          ProblemDetails(status = UNAUTHORIZED, detail = e.getMessage))
       case e =>
         LOGGER.error("Unexpected error upon requesting session", e)
         respondDetails(response,
-          ProblemDetails(status = INTERNAL_SERVER_ERROR, detail = e.getMessage),
-          INTERNAL_SERVER_ERROR)
+          ProblemDetails(status = INTERNAL_SERVER_ERROR, detail = e.getMessage))
     }
 
 
-  private def respondDetails(httpServerResponse: HttpServerResponse, details: ProblemDetails, statusCode: HttpResponseStatus = BAD_REQUEST): Mono[Void] =
+  private def respondDetails(httpServerResponse: HttpServerResponse, details: ProblemDetails): Mono[Void] =
     SMono.fromCallable(() => ResponseSerializer.serialize(details).toString)
       .map(_.getBytes(StandardCharsets.UTF_8))
       .flatMap(bytes =>

@@ -28,10 +28,10 @@ import java.util.List;
 
 import org.apache.james.backends.cassandra.CassandraCluster;
 import org.apache.james.backends.cassandra.CassandraClusterExtension;
-import org.apache.james.backends.cassandra.components.CassandraModule;
-import org.apache.james.backends.cassandra.versions.CassandraSchemaVersionModule;
+import org.apache.james.backends.cassandra.components.CassandraDataDefinition;
+import org.apache.james.backends.cassandra.versions.CassandraSchemaVersionDataDefinition;
 import org.apache.james.blob.api.BlobId;
-import org.apache.james.blob.api.HashBlobId;
+import org.apache.james.blob.api.PlainBlobId;
 import org.apache.james.blob.mail.MimeMessagePartsId;
 import org.apache.james.queue.rabbitmq.EnqueueId;
 import org.apache.james.queue.rabbitmq.EnqueuedItem;
@@ -54,9 +54,9 @@ class EnqueuedMailsDaoTest {
     private static final Instant NOW = Instant.now();
     private static final Slice SLICE_OF_NOW = Slice.of(NOW);
 
-    private static final BlobId.Factory BLOB_ID_FACTORY = new HashBlobId.Factory();
-    private static final BlobId HEADER_BLOB_ID = BLOB_ID_FACTORY.from("header blob id");
-    private static final BlobId BODY_BLOB_ID = BLOB_ID_FACTORY.from("body blob id");
+    private static final BlobId.Factory BLOB_ID_FACTORY = new PlainBlobId.Factory();
+    private static final BlobId HEADER_BLOB_ID = BLOB_ID_FACTORY.parse("header blob id");
+    private static final BlobId BODY_BLOB_ID = BLOB_ID_FACTORY.parse("body blob id");
     private static final MimeMessagePartsId MIME_MESSAGE_PARTS_ID = MimeMessagePartsId.builder()
         .headerBlobId(HEADER_BLOB_ID)
         .bodyBlobId(BODY_BLOB_ID)
@@ -64,14 +64,14 @@ class EnqueuedMailsDaoTest {
 
     @RegisterExtension
     static CassandraClusterExtension cassandraCluster = new CassandraClusterExtension(
-            CassandraModule.aggregateModules(CassandraSchemaVersionModule.MODULE, CassandraMailQueueViewModule.MODULE));
+            CassandraDataDefinition.aggregateModules(CassandraSchemaVersionDataDefinition.MODULE, CassandraMailQueueViewDataDefinition.MODULE));
 
     private EnqueuedMailsDAO testee;
     private MailQueueViewBlobReferenceSource blobReferenceSource;
 
     @BeforeEach
     void setUp(CassandraCluster cassandra) {
-        BlobId.Factory blobFactory = new HashBlobId.Factory();
+        BlobId.Factory blobFactory = new PlainBlobId.Factory();
         testee = new EnqueuedMailsDAO(
             cassandra.getConf(),
             blobFactory);

@@ -21,19 +21,20 @@ package org.apache.james.mailbox.cassandra.search;
 
 import static jakarta.mail.Flags.Flag.DELETED;
 import static jakarta.mail.Flags.Flag.SEEN;
+import static org.apache.james.mailbox.model.SearchQuery.DEFAULT_SORTS;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import org.apache.james.backends.cassandra.CassandraCluster;
 import org.apache.james.backends.cassandra.CassandraClusterExtension;
-import org.apache.james.backends.cassandra.components.CassandraModule;
-import org.apache.james.backends.cassandra.versions.CassandraSchemaVersionModule;
+import org.apache.james.backends.cassandra.components.CassandraDataDefinition;
+import org.apache.james.backends.cassandra.versions.CassandraSchemaVersionDataDefinition;
 import org.apache.james.core.Username;
 import org.apache.james.mailbox.MailboxSession;
 import org.apache.james.mailbox.MailboxSessionUtil;
 import org.apache.james.mailbox.MessageUid;
 import org.apache.james.mailbox.cassandra.ids.CassandraId;
 import org.apache.james.mailbox.cassandra.mail.CassandraDeletedMessageDAO;
-import org.apache.james.mailbox.cassandra.modules.CassandraDeletedMessageModule;
+import org.apache.james.mailbox.cassandra.modules.CassandraDeletedMessageDataDefinition;
 import org.apache.james.mailbox.model.Mailbox;
 import org.apache.james.mailbox.model.MailboxPath;
 import org.apache.james.mailbox.model.SearchQuery;
@@ -45,9 +46,9 @@ import org.junit.jupiter.api.extension.RegisterExtension;
 class DeletedWithRangeSearchOverrideTest {
     private static final MailboxSession MAILBOX_SESSION = MailboxSessionUtil.create(Username.of("benwa"));
     private static final Mailbox MAILBOX = new Mailbox(MailboxPath.inbox(MAILBOX_SESSION), UidValidity.of(12), CassandraId.timeBased());
-    private static final CassandraModule MODULE = CassandraModule.aggregateModules(
-        CassandraDeletedMessageModule.MODULE,
-        CassandraSchemaVersionModule.MODULE);
+    private static final CassandraDataDefinition MODULE = CassandraDataDefinition.aggregateModules(
+        CassandraDeletedMessageDataDefinition.MODULE,
+        CassandraSchemaVersionDataDefinition.MODULE);
 
     @RegisterExtension
     static CassandraClusterExtension cassandraCluster = new CassandraClusterExtension(MODULE);
@@ -67,6 +68,7 @@ class DeletedWithRangeSearchOverrideTest {
             SearchQuery.builder()
                 .andCriteria(SearchQuery.flagIsSet(DELETED))
                 .andCriteria(SearchQuery.uid(new SearchQuery.UidRange(MessageUid.of(4), MessageUid.of(45))))
+                .sorts(DEFAULT_SORTS)
                 .build(),
             MAILBOX_SESSION))
             .isTrue();
@@ -77,6 +79,7 @@ class DeletedWithRangeSearchOverrideTest {
         assertThat(testee.applicable(
             SearchQuery.builder()
                 .andCriteria(SearchQuery.flagIsSet(DELETED))
+                .sorts(DEFAULT_SORTS)
                 .build(),
             MAILBOX_SESSION))
             .isFalse();
@@ -87,6 +90,7 @@ class DeletedWithRangeSearchOverrideTest {
         assertThat(testee.applicable(
             SearchQuery.builder()
                 .andCriteria(SearchQuery.sizeEquals(12))
+                .sorts(DEFAULT_SORTS)
                 .build(),
             MAILBOX_SESSION))
             .isFalse();
@@ -98,6 +102,7 @@ class DeletedWithRangeSearchOverrideTest {
             SearchQuery.builder()
                 .andCriteria(SearchQuery.flagIsUnSet(SEEN))
                 .andCriteria(SearchQuery.uid(new SearchQuery.UidRange(MessageUid.MIN_VALUE, MessageUid.of(45))))
+                .sorts(DEFAULT_SORTS)
                 .build()).collectList().block())
             .isEmpty();
     }
@@ -120,6 +125,7 @@ class DeletedWithRangeSearchOverrideTest {
             SearchQuery.builder()
                 .andCriteria(SearchQuery.flagIsUnSet(DELETED))
                 .andCriteria(SearchQuery.uid(new SearchQuery.UidRange(messageUid2, messageUid4)))
+                .sorts(DEFAULT_SORTS)
                 .build()).collectList().block())
             .containsOnly(messageUid2, messageUid3, messageUid4);
     }

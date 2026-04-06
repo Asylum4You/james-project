@@ -23,7 +23,7 @@
     <parent>
         <groupId>org.apache.james</groupId>
         <artifactId>james-server</artifactId>
-        <version>3.9.0-SNAPSHOT</version>
+        <version>3.10.0-SNAPSHOT</version>
         <relativePath>../../pom.xml</relativePath>
     </parent>
 
@@ -85,11 +85,6 @@
         <dependency>
             <groupId>${james.groupId}</groupId>
             <artifactId>testing-base</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>commons-codec</groupId>
-            <artifactId>commons-codec</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>

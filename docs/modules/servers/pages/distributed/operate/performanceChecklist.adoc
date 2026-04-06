@@ -1,0 +1,87 @@
+= Distributed James Server &mdash; Performance checklist
+:navtitle: Performance checklist
+
+:xref-base: distributed
+:backend-name: Cassandra
+:mail-queue-name: CassandraMailQueueView
+include::partial$operate/performanceChecklist.adoc[]
+
+=== RabbitMQ
+
+We recommend against the use of the CassandraMailQueueView, as browsing and advanced queue management features
+is unnecessary for Mail Delivery Agent and are not meaningful in the absence of delays.
+
+Similarly, we recommend turning off queue size metrics, which are expensive to compute.
+
+We also recommend against the use of publish confirms, which comes at a high performance price.
+
+In `rabbitmq.properties`:
+
+....
+cassandra.view.enabled=false
+
+mailqueue.size.metricsEnabled=false
+
+event.bus.publish.confirm.enabled=false
+mailqueue.publish.confirm.enabled=false
+....
+
+=== Object storage
+
+We recommend the use of the blob store cache, which will be populated by email headers which shall be treated as metadata.
+
+`blob.properties`:
+
+....
+cache.enable=true
+cache.cassandra.ttl=1year
+cache.sizeThresholdInBytes=16 KiB
+....
+
+=== Cassandra
+
+People tunning for performance would likely accept relaxing their consistency needs. James allows doing this.
+
+**LightWeight Transactions (LWT)** can be disabled where they are not essential. This can be done within
+xref:[cassandra.properties]:
+
+....
+mailbox.read.strong.consistency=false
+message.read.strong.consistency=false
+message.write.strong.consistency.unsafe=false
+mailrepository.strong.consistency=false
+....
+
+Also, James allows for **Read repairs** where consistency checks are piggy backed on reads randomly. This of course
+comes at a performance cost as it generates extre reads, thus minimizing read repair probability can help improving
+performance. This can be done within
+xref:[cassandra.properties]:
+
+....
+mailbox.read.repair.chance=0.00
+mailbox.counters.read.repair.chance.max=0.000
+mailbox.counters.read.repair.chance.one.hundred=0.000
+....
+
+One can also avoid some Cassandra requests by disabling ACLs (meaning users will only access to the mailboxes they own,
+all mailbox-sharing features will thus not be achievable). This can be done within
+xref:[cassandra.properties]:
+
+....
+acl.enabled=false
+....
+
+Important settings in the `` file includes:
+
+* Throttling: if too low then the Cassandra cluster is under-utilized. If too high, request bursts can cause significant
+Cassandra overload.
+
+....
+  advanced.throttler {
+    class = org.apache.james.backends.cassandra.utils.LockLessConcurrencyLimitingRequestThrottler
+
+    max-queue-size = 10000
+
+    max-concurrent-requests = 192
+  }
+....

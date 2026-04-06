@@ -18,6 +18,8 @@
  ****************************************************************/
 package org.apache.james.mailbox.store.search;
 
+import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Locale;
 import java.util.Set;
@@ -52,6 +54,7 @@ public class SearchUtil {
     private static final char OPEN_SQUARE_BRACKED = '[';
     private static final char CLOSE_SQUARE_BRACKED = ']';
     private static final char COLON = ':';
+    private static final int MAX_RAW_BYTES = 32766;
 
     /**
      * Return the DISPLAY ADDRESS for the given {@link Mailbox}. 
@@ -473,5 +476,35 @@ public class SearchUtil {
         };
     }
 
+    public static String removeGreaterThanCharactersAtBeginningOfLine(String text) {
+        StringBuilder result = new StringBuilder();
+        boolean isNewLine = false;
 
+        for (int i = 0; i < text.length(); i++) {
+            char current = text.charAt(i);
+
+            if (current == '\n') {
+                isNewLine = true;
+                result.append(current);
+            } else if (!isNewLine || current != '>') {
+                result.append(current);
+                isNewLine = false;
+            }
+        }
+
+        return result.toString();
+    }
+
+    public static String truncateSubjectField(String subject) {
+        if (subject == null) {
+            return null;
+        }
+
+        byte[] subjectAsBytes = subject.getBytes(StandardCharsets.UTF_8);
+        if (subjectAsBytes.length < MAX_RAW_BYTES) {
+            return subject;
+        }
+
+        return new String(Arrays.copyOf(subjectAsBytes, MAX_RAW_BYTES), StandardCharsets.UTF_8);
+    }
 }

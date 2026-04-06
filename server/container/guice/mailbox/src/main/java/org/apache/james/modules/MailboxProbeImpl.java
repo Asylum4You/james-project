@@ -26,6 +26,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.Collection;
 import java.util.Date;
+import java.util.List;
 import java.util.stream.Collectors;
 
 import jakarta.inject.Inject;
@@ -46,9 +47,11 @@ import org.apache.james.mailbox.model.MailboxPath;
 import org.apache.james.mailbox.model.MessageId;
 import org.apache.james.mailbox.model.MessageRange;
 import org.apache.james.mailbox.model.MultimailboxesSearchQuery;
+import org.apache.james.mailbox.model.SearchOptions;
 import org.apache.james.mailbox.model.search.MailboxQuery;
 import org.apache.james.mailbox.model.search.Wildcard;
 import org.apache.james.mailbox.probe.MailboxProbe;
+import org.apache.james.util.streams.Limit;
 import org.apache.james.utils.GuiceProbe;
 
 import com.google.common.collect.ImmutableList;
@@ -187,6 +190,13 @@ public class MailboxProbeImpl implements GuiceProbe, MailboxProbe {
         return messageManager.appendMessage(appendCommand, mailboxSession).getId();
     }
 
+    public MessageManager.AppendResult appendMessageRetrieveAppendResult(String username, MailboxPath mailboxPath, MessageManager.AppendCommand appendCommand)
+            throws MailboxException {
+        MailboxSession mailboxSession = mailboxManager.createSystemSession(Username.of(username));
+        MessageManager messageManager = mailboxManager.getMailbox(mailboxPath, mailboxSession);
+        return messageManager.appendMessage(appendCommand, mailboxSession);
+    }
+
     public MessageManager.AppendResult appendMessageAndGetAppendResult(String username, MailboxPath mailboxPath, MessageManager.AppendCommand appendCommand)
         throws MailboxException {
         MailboxSession mailboxSession = mailboxManager.createSystemSession(Username.of(username));
@@ -208,11 +218,22 @@ public class MailboxProbeImpl implements GuiceProbe, MailboxProbe {
         MailboxSession mailboxSession = null;
         try {
             mailboxSession = mailboxManager.createSystemSession(Username.of(user));
-            return block(Flux.from(mailboxManager.search(expression, mailboxSession, limit)).collectList());
+            return block(Flux.from(mailboxManager.search(expression, mailboxSession, SearchOptions.limit(Limit.limit(Math.toIntExact(limit))))).collectList());
         } catch (MailboxException e) {
             throw new RuntimeException(e);
         } finally {
             closeSession(mailboxSession);
         }
+    }
+
+    public void deleteMessage(List<MessageUid> messageUids, MailboxPath mailboxPath, Username user) throws MailboxException {
+        MailboxSession mailboxSession = mailboxManager.createSystemSession(user);
+        MessageManager messageManager = mailboxManager.getMailbox(mailboxPath, mailboxSession);
+        messageManager.delete(messageUids, mailboxSession);
+    }
+
+    public void moveMessages(MessageRange set, MailboxPath from, MailboxPath to, Username user) throws MailboxException {
+        MailboxSession mailboxSession = mailboxManager.createSystemSession(user);
+        mailboxManager.moveMessages(set, from, to, mailboxSession);
     }
 }

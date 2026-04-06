@@ -41,7 +41,7 @@ import org.apache.james.jmap.core.SetError.{SetErrorDescription, SetErrorType}
 import org.apache.james.jmap.core.{ClientId, Invocation, JmapRfc8621Configuration, Properties, ServerId, SessionTranslator, SetError, SubmissionCapabilityFactory, UTCDate, UuidState}
 import org.apache.james.jmap.json.EmailSubmissionSetSerializer
 import org.apache.james.jmap.mail.{EmailSubmissionAddress, EmailSubmissionCreationId, EmailSubmissionCreationRequest, EmailSubmissionCreationResponse, EmailSubmissionId, EmailSubmissionSetRequest, EmailSubmissionSetResponse, Envelope, ParameterName, ParameterValue}
-import org.apache.james.jmap.method.EmailSubmissionSetMethod.{CreationFailure, CreationResult, CreationResults, CreationSuccess, LOGGER, MAIL_METADATA_USERNAME_ATTRIBUTE, NO_DELAY, VALID_PARAMETER_NAME_SET, formatter}
+import org.apache.james.jmap.method.EmailSubmissionSetMethod.{CreationFailure, CreationResult, CreationResults, CreationSuccess, LOGGER, NO_DELAY, VALID_PARAMETER_NAME_SET, formatter}
 import org.apache.james.jmap.routes.{ProcessingContext, SessionSupplier}
 import org.apache.james.lifecycle.api.{LifecycleUtil, Startable}
 import org.apache.james.mailbox.model.{FetchGroup, MessageId, MessageResult}
@@ -51,7 +51,7 @@ import org.apache.james.queue.api.MailQueueFactory.SPOOL
 import org.apache.james.queue.api.{MailQueue, MailQueueFactory}
 import org.apache.james.rrt.api.CanSendFrom
 import org.apache.james.server.core.{MailImpl, MimeMessageSource, MimeMessageWrapper}
-import org.apache.james.util.AuditTrail
+import org.apache.james.util.{AuditTrail, ReactorUtils}
 import org.apache.mailet.{Attribute, AttributeName, AttributeValue, Mail}
 import org.slf4j.{Logger, LoggerFactory}
 import play.api.libs.json._
@@ -65,7 +65,6 @@ import scala.language.postfixOps
 import scala.util.{Failure, Success, Try}
 
 object EmailSubmissionSetMethod {
-  val MAIL_METADATA_USERNAME_ATTRIBUTE: AttributeName = AttributeName.of("org.apache.james.jmap.send.MailMetaData.username")
   val LOGGER: Logger = LoggerFactory.getLogger(classOf[EmailSubmissionSetMethod])
   val noRecipients: SetErrorType = "noRecipients"
   val forbiddenFrom: SetErrorType = "forbiddenFrom"
@@ -98,6 +97,10 @@ object EmailSubmissionSetMethod {
         SetError(EmailSubmissionSetMethod.forbiddenFrom,
           SetErrorDescription(s"Attempt to send a mail whose envelope From not allowed for connected user: ${e.from}"),
           Some(Properties("envelope.mailFrom")))
+      case e: ForbiddenHeaderFromException =>
+        LOGGER.warn(s"Attempt to send a mail whose MimeMessage From is missing")
+        SetError(EmailSubmissionSetMethod.forbiddenFrom,
+          SetErrorDescription(s"Attempt to send a mail whose MimeMessage From is missing"), None)
       case _: MessageNotFoundException =>
         LOGGER.info(" EmailSubmission/set failed as the underlying email could not be found")
         SetError(SetError.invalidArgumentValue,
@@ -157,6 +160,7 @@ case class EmailSubmissionCreationParseException(setError: SetError) extends Exc
 case class NoRecipientException() extends Exception
 case class ForbiddenFromException(from: String) extends Exception
 case class ForbiddenMailFromException(from: List[String]) extends Exception
+case class ForbiddenHeaderFromException() extends Exception
 
 case class MessageMimeMessageSource(id: String, message: MessageResult) extends MimeMessageSource {
   override def getSourceId: String = id
@@ -283,7 +287,7 @@ class EmailSubmissionSetMethod @Inject()(serializer: EmailSubmissionSetSerialize
           .name(submissionId.value)
           .addRecipients(envelope.rcptTo.map(_.email).asJava)
           .sender(envelope.mailFrom.email)
-          .addAttribute(new Attribute(MAIL_METADATA_USERNAME_ATTRIBUTE, AttributeValue.of(mailboxSession.getUser.asString())))
+          .addAttribute(new Attribute(Mail.JMAP_AUTH_USER, AttributeValue.of(mailboxSession.getUser.asString())))
           .build()
         mailImpl.setMessageNoCopy(message)
         mailImpl
@@ -298,7 +302,7 @@ class EmailSubmissionSetMethod @Inject()(serializer: EmailSubmissionSetSerialize
   private def enqueue(mail: Mail, delay: Duration, mailboxSession: MailboxSession): SMono[Unit] =
     (delay match {
       case d if d.isNegative || d.isZero => SMono(queue.enqueueReactive(mail))
-        .doOnSuccess(_ => AuditTrail.entry
+        .`then`(SMono(ReactorUtils.logAsMono(() => AuditTrail.entry
           .username(() => mailboxSession.getUser.asString())
           .protocol("JMAP")
           .action("EmailSubmission")
@@ -308,12 +312,13 @@ class EmailSubmissionSetMethod @Inject()(serializer: EmailSubmissionSetSerialize
               .getOrElse(""),
             "sender", mail.getMaybeSender.asString,
             "recipients", StringUtils.join(mail.getRecipients),
+            "size", mail.getMessageSize.toString,
             "loggedInUser", mailboxSession.getLoggedInUser.toScala
               .map(_.asString())
               .getOrElse("")))
-          .log("JMAP mail spooled."))
+          .log("JMAP mail spooled."))))
       case _ => SMono(queue.enqueueReactive(mail, delay))
-        .doOnSuccess(_ => AuditTrail.entry
+        .`then`(SMono(ReactorUtils.logAsMono(() => AuditTrail.entry
           .username(() => mailboxSession.getUser.asString())
           .protocol("JMAP")
           .action("EmailSubmission")
@@ -321,13 +326,14 @@ class EmailSubmissionSetMethod @Inject()(serializer: EmailSubmissionSetSerialize
             "mimeMessageId", Option(mail.getMessage)
               .flatMap(message => Option(message.getMessageID))
               .getOrElse(""),
+            "size", mail.getMessageSize.toString,
             "sender", mail.getMaybeSender.asString,
             "recipients", StringUtils.join(mail.getRecipients),
             "holdFor", delay.toString,
             "loggedInUser", mailboxSession.getLoggedInUser.toScala
               .map(_.asString())
               .getOrElse("")))
-          .log("JMAP mail spooled."))
+          .log("JMAP mail spooled."))))
     }).`then`(SMono.fromCallable(() => LifecycleUtil.dispose(mail)).subscribeOn(Schedulers.boundedElastic()))
 
   private def retrieveDelay(mailParameters: Option[Map[ParameterName, Option[ParameterValue]]]): Try[Duration] =
@@ -352,15 +358,21 @@ class EmailSubmissionSetMethod @Inject()(serializer: EmailSubmissionSetSerialize
 
   def validateMimeMessages(mimeMessage: MimeMessage) : SMono[MimeMessage] = validateMailAddressHeaderMimeMessage(mimeMessage)
   private def validateMailAddressHeaderMimeMessage(mimeMessage: MimeMessage): SMono[MimeMessage] =
-    SFlux.fromIterable(Map("to" -> Option(mimeMessage.getRecipients(RecipientType.TO)).toList.flatten,
-        "cc" -> Option(mimeMessage.getRecipients(RecipientType.CC)).toList.flatten,
-        "bcc" -> Option(mimeMessage.getRecipients(RecipientType.BCC)).toList.flatten,
-        "from" -> Option(mimeMessage.getFrom).toList.flatten,
-        "sender" -> Option(mimeMessage.getSender).toList,
-        "replyTo" -> Option(mimeMessage.getReplyTo).toList.flatten))
-      .doOnNext { case (headerName, addresses) => (headerName, addresses.foreach(address => validateMailAddress(headerName, address))) }
-      .`then`()
-      .`then`(SMono.just(mimeMessage))
+    Option(mimeMessage.getFrom) match {
+      case Some(from) if from.nonEmpty => SFlux.fromIterable(Map(
+          "to" -> Option(mimeMessage.getRecipients(RecipientType.TO)).toList.flatten,
+          "cc" -> Option(mimeMessage.getRecipients(RecipientType.CC)).toList.flatten,
+          "bcc" -> Option(mimeMessage.getRecipients(RecipientType.BCC)).toList.flatten,
+          "from" -> from.toList,
+          "sender" -> Option(mimeMessage.getSender).toList,
+          "replyTo" -> Option(mimeMessage.getReplyTo).toList.flatten))
+        .doOnNext { case (headerName, addresses) => (headerName, addresses.foreach(address => validateMailAddress(headerName, address))) }
+        .`then`()
+        .`then`(SMono.just(mimeMessage))
+
+      case _ => SMono.error(ForbiddenHeaderFromException())
+    }
+
 
   private def validateMailAddress(headName: String, address: Address): MailAddress =
     Try(new MailAddress(asString(address))) match {

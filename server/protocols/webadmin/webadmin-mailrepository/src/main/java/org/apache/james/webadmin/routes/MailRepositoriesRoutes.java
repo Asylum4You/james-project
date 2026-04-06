@@ -22,18 +22,22 @@ package org.apache.james.webadmin.routes;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Supplier;
-
-import javax.servlet.http.HttpServletResponse;
+import java.util.stream.Stream;
 
 import jakarta.inject.Inject;
 import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage;
+import jakarta.servlet.http.HttpServletResponse;
 
 import org.apache.commons.io.output.CountingOutputStream;
+import org.apache.james.core.MailAddress;
 import org.apache.james.mailrepository.api.MailKey;
+import org.apache.james.mailrepository.api.MailRepository;
 import org.apache.james.mailrepository.api.MailRepositoryPath;
 import org.apache.james.mailrepository.api.MailRepositoryStore;
 import org.apache.james.queue.api.MailQueueFactory;
@@ -48,6 +52,7 @@ import org.apache.james.webadmin.dto.ExtendedMailRepositoryResponse;
 import org.apache.james.webadmin.dto.InaccessibleFieldException;
 import org.apache.james.webadmin.dto.MailDto;
 import org.apache.james.webadmin.dto.MailDto.AdditionalField;
+import org.apache.james.webadmin.dto.MoveMailRepositoryRequest;
 import org.apache.james.webadmin.service.MailRepositoryStoreService;
 import org.apache.james.webadmin.service.ReprocessingAllMailsTask;
 import org.apache.james.webadmin.service.ReprocessingOneMailTask;
@@ -57,23 +62,30 @@ import org.apache.james.webadmin.tasks.TaskFromRequestRegistry;
 import org.apache.james.webadmin.tasks.TaskRegistrationKey;
 import org.apache.james.webadmin.utils.ErrorResponder;
 import org.apache.james.webadmin.utils.ErrorResponder.ErrorType;
+import org.apache.james.webadmin.utils.JsonExtractException;
+import org.apache.james.webadmin.utils.JsonExtractor;
 import org.apache.james.webadmin.utils.JsonTransformer;
 import org.apache.james.webadmin.utils.ParametersExtractor;
 import org.apache.james.webadmin.utils.Responses;
 import org.eclipse.jetty.http.HttpStatus;
 
+import com.github.fge.lambdas.Throwing;
 import com.google.common.base.Splitter;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 
 import spark.HaltException;
 import spark.Request;
+import spark.Response;
+import spark.Route;
 import spark.Service;
 
 public class MailRepositoriesRoutes implements Routes {
 
     public static final String MAIL_REPOSITORIES = "mailRepositories";
     private static final TaskRegistrationKey REPROCESS_ACTION = TaskRegistrationKey.of("reprocess");
+    private static final JsonExtractor<MoveMailRepositoryRequest> MOVE_REQUEST_EXTRACTOR =
+        new JsonExtractor<>(MoveMailRepositoryRequest.class);
 
     private final JsonTransformer jsonTransformer;
     private final MailRepositoryStoreService repositoryStoreService;
@@ -112,9 +124,9 @@ public class MailRepositoriesRoutes implements Routes {
 
         defineDeleteAll();
 
-        defineReprocessAll();
+        definePatchAll();
 
-        defineReprocessOne();
+        definePatchOne();
     }
 
     public void definePutMailRepository() {
@@ -146,9 +158,19 @@ public class MailRepositoriesRoutes implements Routes {
         service.get(MAIL_REPOSITORIES + "/:encodedPath/mails", (request, response) -> {
             Offset offset = ParametersExtractor.extractOffset(request);
             Limit limit = ParametersExtractor.extractLimit(request);
+            MailRepository.Condition condition
+                = Stream.of(ParametersExtractor.extractUpdatedBeforeParam(request).map(this::parseDurationToInstant).map(MailRepository.UpdatedBeforeCondition::new),
+                    ParametersExtractor.extractUpdatedAfterParam(request).map(this::parseDurationToInstant).map(MailRepository.UpdatedAfterCondition::new),
+                    ParametersExtractor.extractSenderParam(request).map(MailRepository.SenderCondition::new),
+                    ParametersExtractor.extractRecipientParam(request).map(MailRepository.RecipientCondition::new),
+                    ParametersExtractor.extractRemoteAddressParam(request).map(MailRepository.RemoteAddressCondition::new),
+                    ParametersExtractor.extractRemoteHostParam(request).map(MailRepository.RemoteHostCondition::new))
+                .flatMap(Optional::stream)
+                .map(MailRepository.Condition.class::cast)
+                .reduce(MailRepository.Condition.ALL, MailRepository.Condition::and);
             MailRepositoryPath path = getRepositoryPath(request);
             try {
-                return repositoryStoreService.listMails(path, offset, limit)
+                return repositoryStoreService.listMails(path, offset, limit, condition)
                     .orElseThrow(() -> repositoryNotFound(request.params("encodedPath"), path));
 
             } catch (MailRepositoryStore.MailRepositoryStoreException | MessagingException e) {
@@ -313,11 +335,14 @@ public class MailRepositoriesRoutes implements Routes {
         service.delete(MAIL_REPOSITORIES + "/:encodedPath/mails", taskFromRequest.asRoute(taskManager), jsonTransformer);
     }
 
-    public void defineReprocessAll() {
-        service.patch(MAIL_REPOSITORIES + "/:encodedPath/mails",
-            TaskFromRequestRegistry.of(REPROCESS_ACTION, this::reprocessAll)
-                .asRoute(taskManager),
-            jsonTransformer);
+    public void definePatchAll() {
+        Route reprocessRoute = TaskFromRequestRegistry.of(REPROCESS_ACTION, this::reprocessAll).asRoute(taskManager);
+        service.patch(MAIL_REPOSITORIES + "/:encodedPath/mails", (request, response) -> {
+            if (hasMoveRequestBody(request)) {
+                return moveAllMails(request, response);
+            }
+            return reprocessRoute.handle(request, response);
+        }, jsonTransformer);
     }
 
     private Task reprocessAll(Request request) throws MailRepositoryStore.MailRepositoryStoreException {
@@ -331,15 +356,19 @@ public class MailRepositoriesRoutes implements Routes {
         return new ReprocessingService.Configuration(parseTargetQueue(request),
             parseTargetProcessor(request),
             parseMaxRetries(request),
+            parseForRecipient(request),
             parseConsume(request).orElse(true),
             parseLimit(request));
     }
 
-    public void defineReprocessOne() {
-        service.patch(MAIL_REPOSITORIES + "/:encodedPath/mails/:key",
-            TaskFromRequestRegistry.of(REPROCESS_ACTION, this::reprocessOne)
-                .asRoute(taskManager),
-            jsonTransformer);
+    public void definePatchOne() {
+        Route reprocessOneRoute = TaskFromRequestRegistry.of(REPROCESS_ACTION, this::reprocessOne).asRoute(taskManager);
+        service.patch(MAIL_REPOSITORIES + "/:encodedPath/mails/:key", (request, response) -> {
+            if (hasMoveRequestBody(request)) {
+                return moveOneMail(request, response);
+            }
+            return reprocessOneRoute.handle(request, response);
+        }, jsonTransformer);
     }
 
     private Task reprocessOne(Request request) {
@@ -347,6 +376,87 @@ public class MailRepositoriesRoutes implements Routes {
         MailKey key = new MailKey(request.params("key"));
 
         return new ReprocessingOneMailTask(reprocessingService, path, extractConfiguration(request), key, Clock.systemUTC());
+    }
+
+    private boolean hasMoveRequestBody(Request request) {
+        String body = request.body();
+        return body != null && !body.isBlank();
+    }
+
+    private Object moveAllMails(Request request, Response response) {
+        MailRepositoryPath sourcePath = getRepositoryPath(request);
+        MoveMailRepositoryRequest moveRequest = parseMoveRequest(request);
+        MailRepositoryPath targetPath = MailRepositoryPath.from(moveRequest.getMailRepository());
+        try {
+            if (!repositoryStoreService.repositoryExists(sourcePath)) {
+                throw repositoryNotFound(request.params("encodedPath"), sourcePath);
+            }
+            if (!repositoryStoreService.repositoryExists(targetPath)) {
+                throw ErrorResponder.builder()
+                    .statusCode(HttpStatus.BAD_REQUEST_400)
+                    .type(ErrorType.INVALID_ARGUMENT)
+                    .message("The target repository '%s' does not exist", moveRequest.getMailRepository())
+                    .haltError();
+            }
+            repositoryStoreService.moveAllMails(sourcePath, targetPath);
+            return Responses.returnNoContent(response);
+        } catch (MailRepositoryStore.MailRepositoryStoreException | MessagingException e) {
+            throw ErrorResponder.builder()
+                .statusCode(HttpStatus.INTERNAL_SERVER_ERROR_500)
+                .type(ErrorType.SERVER_ERROR)
+                .cause(e)
+                .message("Error while moving mails")
+                .haltError();
+        }
+    }
+
+    private Object moveOneMail(Request request, Response response) {
+        MailRepositoryPath sourcePath = getRepositoryPath(request);
+        MailKey mailKey = new MailKey(request.params("key"));
+        MoveMailRepositoryRequest moveRequest = parseMoveRequest(request);
+        MailRepositoryPath targetPath = MailRepositoryPath.from(moveRequest.getMailRepository());
+        try {
+            if (!repositoryStoreService.repositoryExists(sourcePath)) {
+                throw repositoryNotFound(request.params("encodedPath"), sourcePath);
+            }
+            if (!repositoryStoreService.repositoryExists(targetPath)) {
+                throw ErrorResponder.builder()
+                    .statusCode(HttpStatus.BAD_REQUEST_400)
+                    .type(ErrorType.INVALID_ARGUMENT)
+                    .message("The target repository '%s' does not exist", moveRequest.getMailRepository())
+                    .haltError();
+            }
+            repositoryStoreService.moveMail(sourcePath, targetPath, mailKey);
+            return Responses.returnNoContent(response);
+        } catch (MailRepositoryStore.MailRepositoryStoreException | MessagingException e) {
+            throw ErrorResponder.builder()
+                .statusCode(HttpStatus.INTERNAL_SERVER_ERROR_500)
+                .type(ErrorType.SERVER_ERROR)
+                .cause(e)
+                .message("Error while moving mail")
+                .haltError();
+        }
+    }
+
+    private MoveMailRepositoryRequest parseMoveRequest(Request request) {
+        try {
+            MoveMailRepositoryRequest moveRequest = MOVE_REQUEST_EXTRACTOR.parse(request.body());
+            if (moveRequest.getMailRepository() == null || moveRequest.getMailRepository().isBlank()) {
+                throw ErrorResponder.builder()
+                    .statusCode(HttpStatus.BAD_REQUEST_400)
+                    .type(ErrorType.INVALID_ARGUMENT)
+                    .message("'mailRepository' field is mandatory in request body")
+                    .haltError();
+            }
+            return moveRequest;
+        } catch (JsonExtractException e) {
+            throw ErrorResponder.builder()
+                .statusCode(HttpStatus.BAD_REQUEST_400)
+                .type(ErrorType.INVALID_ARGUMENT)
+                .cause(e)
+                .message("Invalid JSON body")
+                .haltError();
+        }
     }
 
     private Set<AdditionalField> extractAdditionalFields(String additionalFieldsParam) throws IllegalArgumentException {
@@ -361,6 +471,11 @@ public class MailRepositoriesRoutes implements Routes {
 
     private Optional<String> parseTargetProcessor(Request request) {
         return Optional.ofNullable(request.queryParams("processor"));
+    }
+
+    private Optional<MailAddress> parseForRecipient(Request request) {
+        return Optional.ofNullable(request.queryParams("forRecipient"))
+            .map(Throwing.function(MailAddress::new));
     }
 
     private Optional<Boolean> parseConsume(Request request) {
@@ -384,5 +499,9 @@ public class MailRepositoriesRoutes implements Routes {
 
     private Optional<Integer> parseMaxRetries(Request request) {
         return ParametersExtractor.extractPositiveInteger(request, "maxRetries");
+    }
+
+    private Instant parseDurationToInstant(Duration duration) {
+        return Instant.now().minus(duration);
     }
 }

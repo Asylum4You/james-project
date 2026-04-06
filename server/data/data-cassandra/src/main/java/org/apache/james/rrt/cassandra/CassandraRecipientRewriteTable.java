@@ -24,7 +24,6 @@ import java.util.stream.Stream;
 import jakarta.inject.Inject;
 
 import org.apache.commons.lang3.tuple.Pair;
-import org.apache.james.core.Domain;
 import org.apache.james.rrt.api.RecipientRewriteTableException;
 import org.apache.james.rrt.lib.AbstractRecipientRewriteTable;
 import org.apache.james.rrt.lib.Mapping;
@@ -34,6 +33,8 @@ import org.apache.james.rrt.lib.MappingsImpl;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
+
+import reactor.core.publisher.Flux;
 
 public class CassandraRecipientRewriteTable extends AbstractRecipientRewriteTable {
     private final CassandraRecipientRewriteTableDAO cassandraRecipientRewriteTableDAO;
@@ -78,17 +79,17 @@ public class CassandraRecipientRewriteTable extends AbstractRecipientRewriteTabl
     }
 
     @Override
-    protected Mappings mapAddress(String user, Domain domain) {
-        return cassandraRecipientRewriteTableDAO.retrieveMappings(MappingSource.fromUser(user, domain)).blockOptional()
-            .or(() -> cassandraRecipientRewriteTableDAO.retrieveMappings(MappingSource.fromDomain(domain)).blockOptional())
-            .orElse(MappingsImpl.empty());
-    }
-
-    @Override
     public Stream<MappingSource> listSources(Mapping mapping) throws RecipientRewriteTableException {
         Preconditions.checkArgument(listSourcesSupportedType.contains(mapping.getType()),
             "Not supported mapping of type %s", mapping.getType());
 
         return cassandraMappingsSourcesDAO.retrieveSources(mapping).toStream();
+    }
+
+    @Override
+    public Flux<MappingSource> listSourcesReactive(Mapping mapping) {
+        Preconditions.checkArgument(listSourcesSupportedType.contains(mapping.getType()),
+            "Not supported mapping of type %s", mapping.getType());
+        return cassandraMappingsSourcesDAO.retrieveSources(mapping);
     }
 }

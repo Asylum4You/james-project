@@ -1,0 +1,25 @@
+= Distributed James Server &mdash; listeners.xml
+:navtitle: listeners.xml
+
+:sample-configuration-prefix-url: https://github.com/apache/james-project/blob/master/server/apps/distributed-app/sample-configuration
+:server-name: Distributed James Server
+:pages-path: distributed
+include::partial$configure/listeners.adoc[]
+
+=== MailboxOperationLoggingListener
+
+Provides more insights on mailbox operations by logging them.
+
+This MailboxListener is supported.
+
+Example:
+
+[source,xml]
+....
+<listeners>
+  <listener>
+    <class>org.apache.james.mailbox.cassandra.MailboxOperationLoggingListener</class>
+  </listener>
+  <!-- ... -->
+</listeners>
+....

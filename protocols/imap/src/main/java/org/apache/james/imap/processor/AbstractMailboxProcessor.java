@@ -57,10 +57,10 @@ import org.apache.james.mailbox.MessageManager.MailboxMetaData;
 import org.apache.james.mailbox.MessageUid;
 import org.apache.james.mailbox.ModSeq;
 import org.apache.james.mailbox.NullableMessageSequenceNumber;
+import org.apache.james.mailbox.exception.InsufficientRightsException;
 import org.apache.james.mailbox.exception.MailboxException;
 import org.apache.james.mailbox.exception.MessageRangeException;
 import org.apache.james.mailbox.exception.OverQuotaException;
-import org.apache.james.mailbox.model.MailboxPath;
 import org.apache.james.mailbox.model.MessageRange;
 import org.apache.james.mailbox.model.MessageRange.Type;
 import org.apache.james.metrics.api.MetricFactory;
@@ -100,6 +100,10 @@ public abstract class AbstractMailboxProcessor<R extends ImapRequest> extends Ab
                         .onErrorResume(DeniedAccessOnSharedMailboxException.class, e -> {
                             no(acceptableMessage, responder, HumanReadableText.DENIED_SHARED_MAILBOX);
                             return Mono.empty();
+                        })
+                        .onErrorResume(InsufficientRightsException.class, e -> {
+                            no(acceptableMessage, responder, HumanReadableText.UNSUFFICIENT_RIGHTS);
+                            return ReactorUtils.logAsMono(() -> LOGGER.warn("Processing failed due to insufficient rights", e));
                         })
                         .onErrorResume(OverQuotaException.class, e -> {
                             no(acceptableMessage, responder, HumanReadableText.FAILURE_OVERQUOTA, StatusResponse.ResponseCode.overQuota());
@@ -363,36 +367,7 @@ public abstract class AbstractMailboxProcessor<R extends ImapRequest> extends Ab
             .then();
     }
 
-    /**
-     * Joins the elements of a mailboxPath together and returns them as a string
-     */
-    private String joinMailboxPath(MailboxPath mailboxPath, char delimiter) {
-        StringBuilder sb = new StringBuilder();
-        if (mailboxPath.getNamespace() != null && !mailboxPath.getNamespace().equals("")) {
-            sb.append(mailboxPath.getNamespace());
-        }
-        if (mailboxPath.getUser() != null && !mailboxPath.getUser().equals("")) {
-            if (sb.length() > 0) {
-                sb.append(delimiter);
-            }
-            sb.append(mailboxPath.getUser().asString());
-        }
-        if (mailboxPath.getName() != null && !mailboxPath.getName().equals("")) {
-            if (sb.length() > 0) {
-                sb.append(delimiter);
-            }
-            sb.append(mailboxPath.getName());
-        }
-        return sb.toString();
-    }
 
-    protected String mailboxName(boolean relative, MailboxPath path, char delimiter) {
-        if (relative) {
-            return path.getName();
-        } else {
-            return joinMailboxPath(path, delimiter);
-        }
-    }
 
     protected MailboxManager getMailboxManager() {
         return mailboxManager;
@@ -444,14 +419,12 @@ public abstract class AbstractMailboxProcessor<R extends ImapRequest> extends Ab
 
     private MessageRange msnRangeToMessageRange(SelectedMailbox selected, long lowVal, long highVal)
             throws MessageRangeException {
-        // Take care of "*" and "*:*" values by return the last message in
-        // the mailbox. See IMAP-289
         if (lowVal == Long.MAX_VALUE && highVal == Long.MAX_VALUE) {
-            Optional<MessageUid> last = selected.getLastUid();
-            if (!last.isPresent()) {
-                throw new MessageRangeException("Mailbox is empty");
-            }
-            return last.get().toRange();
+            // Take care of "*" and "*:*" values by returning the last message in the mailbox. See IMAP-289
+            return selected.getLastUid().map(MessageRange::one).orElseGet(MessageRange::all);
+        } else if (lowVal == 1 && highVal == Long.MAX_VALUE) {
+            // Take care of "1:*" values by returning all messages in the mailbox. See IMAP-289
+            return MessageRange.all();
         }
 
         MessageUid lowUid = msnlowValToUid(selected, lowVal);

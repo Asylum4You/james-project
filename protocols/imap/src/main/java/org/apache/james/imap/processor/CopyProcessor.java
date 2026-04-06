@@ -19,11 +19,14 @@
 
 package org.apache.james.imap.processor;
 
+import java.util.List;
+
 import jakarta.inject.Inject;
 
 import org.apache.james.imap.api.message.IdRange;
 import org.apache.james.imap.api.message.response.StatusResponseFactory;
 import org.apache.james.imap.api.process.SelectedMailbox;
+import org.apache.james.imap.main.PathConverter;
 import org.apache.james.imap.message.request.CopyRequest;
 import org.apache.james.mailbox.MailboxManager;
 import org.apache.james.mailbox.MailboxSession;
@@ -38,8 +41,8 @@ public class CopyProcessor extends AbstractMessageRangeProcessor<CopyRequest> {
 
     @Inject
     public CopyProcessor(MailboxManager mailboxManager, StatusResponseFactory factory,
-                         MetricFactory metricFactory) {
-        super(CopyRequest.class, mailboxManager, factory, metricFactory);
+                         MetricFactory metricFactory, PathConverter.Factory pathConverterFactory) {
+        super(CopyRequest.class, mailboxManager, factory, metricFactory, pathConverterFactory);
     }
 
     @Override
@@ -53,6 +56,14 @@ public class CopyProcessor extends AbstractMessageRangeProcessor<CopyRequest> {
                                          MailboxSession mailboxSession,
                                          MessageRange messageSet) {
         return Flux.from(getMailboxManager().copyMessagesReactive(messageSet, currentMailbox.getMailboxId(), targetMailbox, mailboxSession));
+    }
+
+    @Override
+    protected Flux<MessageRange> processAll(MailboxId targetMailbox,
+                                            SelectedMailbox currentMailbox,
+                                            MailboxSession mailboxSession,
+                                            List<MessageRange> messageSets) {
+        return Flux.from(getMailboxManager().copyMessagesReactive(messageSets, currentMailbox.getMailboxId(), targetMailbox, mailboxSession));
     }
 
     @Override

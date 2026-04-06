@@ -67,7 +67,7 @@ public class SMTPServerTest {
     public static final String USER_LOCALHOST = "test_user_smtp@localhost";
     public static final String USER_LOCAL_DOMAIN = "test_user_smtp@example.local";
 
-    final static class AlterableDNSServer implements DNSService {
+    static final class AlterableDNSServer implements DNSService {
 
         private InetAddress localhostByName = null;
 
@@ -536,7 +536,9 @@ public class SMTPServerTest {
     @ParameterizedTest
     @ValueSource(strings = {"good", "127.0.0.1", "adomain.com", "sub.domain.com", "[abc.def]", "[124.54.67.43]",
         "fe80::1ff:fe23:4567:890a", "[fe80::1ff:fe23:4567:890a]",
-        "2001:db8:85a3:8d3:1319:8a2e:370:7348", "[2001:db8:85a3:8d3:1319:8a2e:370:7348]"})
+        "2001:db8:85a3:8d3:1319:8a2e:370:7348", "[2001:db8:85a3:8d3:1319:8a2e:370:7348]",
+        "IPV6:2a01:cb06:b841:bf5d:38ff:861a:1646:ab00", "ipv6:2a01:cb06:b841:bf5d:38ff:861a:1646:ab00",
+        "[IPV6:2a01:cb06:b841:bf5d:38ff:861a:1646:ab00]", "[ipv6:2a01:cb06:b841:bf5d:38ff:861a:1646:ab00]"})
     public void testValidEHLO(String helo) throws Exception {
         init(smtpConfiguration);
 
@@ -1271,7 +1273,7 @@ public class SMTPServerTest {
             .isEqualTo(503);
 
         smtpProtocol.addRecipient("mail@sample.com");
-        smtpProtocol.sendShortMessageData("Subject: test\r\n\r\nTest body testAuth\r\n");
+        smtpProtocol.sendShortMessageData("From: " + sender + "\r\n\r\nSubject: test\r\n\r\nTest body testAuth\r\n");
 
         smtpProtocol.quit();
 
@@ -1312,7 +1314,7 @@ public class SMTPServerTest {
 
         smtpProtocol.setSender(sender);
         smtpProtocol.addRecipient("mail@sample.com");
-        smtpProtocol.sendShortMessageData("Subject: test\r\n\r\nTest body testAuth\r\n");
+        smtpProtocol.sendShortMessageData("From: " + sender + "\r\n\r\nSubject: test\r\n\r\nTest body testAuth\r\n");
 
         smtpProtocol.quit();
 
@@ -1397,7 +1399,7 @@ public class SMTPServerTest {
 
         smtpProtocol.setSender(sender);
         smtpProtocol.addRecipient("mail@sample.com");
-        smtpProtocol.sendShortMessageData("Subject: test\r\n\r\nTest body testAuth\r\n");
+        smtpProtocol.sendShortMessageData("From: " + sender + "\r\n\r\nSubject: test\r\n\r\nTest body testAuth\r\n");
 
         smtpProtocol.quit();
 
@@ -1405,6 +1407,36 @@ public class SMTPServerTest {
         assertThat(testSystem.queue.getLastMail())
             .as("mail received by mail server")
             .isNotNull();
+    }
+
+
+    // CF JAMES-4040
+    @Test
+    public void shouldBeCompatibleWithEMClient() throws Exception {
+        smtpConfiguration.setAuthorizedAddresses("128.0.0.1/8");
+        smtpConfiguration.setAuthorizingAnnounce();
+        init(smtpConfiguration);
+
+        SMTPClient smtpProtocol = new SMTPClient();
+        InetSocketAddress bindedAddress = testSystem.getBindedAddress();
+        smtpProtocol.connect(bindedAddress.getAddress().getHostAddress(), bindedAddress.getPort());
+
+        smtpProtocol.sendCommand("ehlo", "[IPv6:::ffff:172.16.149.220]");
+        assertThat(smtpProtocol.getReplyString()).contains("250");
+    }
+
+    @Test
+    void ehloShouldAcceptAlphanumericHostname() throws Exception {
+        smtpConfiguration.setAuthorizedAddresses("128.0.0.1/8");
+        smtpConfiguration.setAuthorizingAnnounce();
+        init(smtpConfiguration);
+
+        SMTPClient smtpProtocol = new SMTPClient();
+        InetSocketAddress bindedAddress = testSystem.getBindedAddress();
+        smtpProtocol.connect(bindedAddress.getAddress().getHostAddress(), bindedAddress.getPort());
+
+        smtpProtocol.sendCommand("ehlo", "7kO2OrE");
+        assertThat(smtpProtocol.getReplyString()).contains("250");
     }
 
     @Test
@@ -1439,7 +1471,7 @@ public class SMTPServerTest {
 
         smtpProtocol.setSender(sender);
         smtpProtocol.addRecipient("mail@sample.com");
-        smtpProtocol.sendShortMessageData("Subject: test\r\n\r\nTest body testAuth\r\n");
+        smtpProtocol.sendShortMessageData("From: " + sender + "\r\n\r\nSubject: test\r\n\r\nTest body testAuth\r\n");
 
         smtpProtocol.quit();
 
@@ -1747,7 +1779,7 @@ public class SMTPServerTest {
             .as("authenticated.. not reject")
             .isEqualTo(250);
 
-        smtpProtocol.sendShortMessageData("Subject: test\r\n\r\nTest body testDNSRBLNotRejectAuthUser\r\n");
+        smtpProtocol.sendShortMessageData("From: " + sender + "\r\n\r\nSubject: test\r\n\r\nTest body testDNSRBLNotRejectAuthUser\r\n");
 
         smtpProtocol.quit();
 

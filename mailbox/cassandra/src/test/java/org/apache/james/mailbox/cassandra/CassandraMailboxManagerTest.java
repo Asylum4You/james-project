@@ -33,19 +33,21 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.IntStream;
 
+import jakarta.mail.Flags;
+
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.james.backends.cassandra.CassandraCluster;
 import org.apache.james.backends.cassandra.CassandraClusterExtension;
 import org.apache.james.backends.cassandra.StatementRecorder;
 import org.apache.james.backends.cassandra.init.configuration.CassandraConfiguration;
 import org.apache.james.blob.api.BlobStore;
-import org.apache.james.blob.api.HashBlobId;
+import org.apache.james.blob.api.PlainBlobId;
 import org.apache.james.blob.cassandra.BlobTables;
 import org.apache.james.core.Username;
 import org.apache.james.events.EventBus;
+import org.apache.james.eventsourcing.eventstore.JsonEventSerializer;
 import org.apache.james.eventsourcing.eventstore.cassandra.CassandraEventStore;
 import org.apache.james.eventsourcing.eventstore.cassandra.EventStoreDao;
-import org.apache.james.eventsourcing.eventstore.JsonEventSerializer;
 import org.apache.james.mailbox.MailboxManagerTest;
 import org.apache.james.mailbox.MailboxSession;
 import org.apache.james.mailbox.MessageManager;
@@ -102,7 +104,6 @@ import org.junit.jupiter.api.extension.RegisterExtension;
 import com.github.fge.lambdas.Throwing;
 import com.google.common.collect.ImmutableList;
 
-import jakarta.mail.Flags;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -652,7 +653,7 @@ public class CassandraMailboxManagerTest extends MailboxManagerTest<CassandraMai
             saveThreadData(session.getUser(), mimeMessageIds, message.getId().getMessageId(), message.getThreadId(), Optional.of(new Subject("Test"))).block();
             CassandraMessageId cassandraMessageId = (CassandraMessageId) message.getId().getMessageId();
             ThreadTablePartitionKey partitionKey = threadLookupDAO(cassandraCluster)
-                .selectOneRow(cassandraMessageId).block();
+                .selectOneRow(message.getThreadId(), cassandraMessageId).block();
 
             mailboxManager.deleteMailbox(inbox, session);
 
@@ -662,7 +663,7 @@ public class CassandraMailboxManagerTest extends MailboxManagerTest<CassandraMai
                     .isEmpty();
 
                 softly.assertThat(threadLookupDAO(cassandraCluster)
-                    .selectOneRow(cassandraMessageId).block())
+                    .selectOneRow(message.getThreadId(), cassandraMessageId).block())
                     .isNull();
             });
         }
@@ -684,7 +685,7 @@ public class CassandraMailboxManagerTest extends MailboxManagerTest<CassandraMai
             saveThreadData(session.getUser(), mimeMessageIds, message.getId().getMessageId(), message.getThreadId(), Optional.of(new Subject("Test"))).block();
             CassandraMessageId cassandraMessageId = (CassandraMessageId) message.getId().getMessageId();
             ThreadTablePartitionKey partitionKey = threadLookupDAO(cassandraCluster)
-                .selectOneRow(cassandraMessageId).block();
+                .selectOneRow(message.getThreadId(), cassandraMessageId).block();
 
             cassandraCluster.getConf().registerScenario(fail()
                 .times(1)
@@ -701,7 +702,7 @@ public class CassandraMailboxManagerTest extends MailboxManagerTest<CassandraMai
                     .isEmpty();
 
                 softly.assertThat(threadLookupDAO(cassandraCluster)
-                        .selectOneRow(cassandraMessageId).block())
+                        .selectOneRow(message.getThreadId(), cassandraMessageId).block())
                     .isNull();
             });
         }
@@ -723,7 +724,7 @@ public class CassandraMailboxManagerTest extends MailboxManagerTest<CassandraMai
             saveThreadData(session.getUser(), mimeMessageIds, message.getId().getMessageId(), message.getThreadId(), Optional.of(new Subject("Test"))).block();
             CassandraMessageId cassandraMessageId = (CassandraMessageId) message.getId().getMessageId();
             ThreadTablePartitionKey partitionKey = threadLookupDAO(cassandraCluster)
-                .selectOneRow(cassandraMessageId).block();
+                .selectOneRow(message.getThreadId(), cassandraMessageId).block();
 
             inboxManager.delete(ImmutableList.of(message.getId().getUid()), session);
 
@@ -733,7 +734,7 @@ public class CassandraMailboxManagerTest extends MailboxManagerTest<CassandraMai
                     .isEmpty();
 
                 softly.assertThat(threadLookupDAO(cassandraCluster)
-                        .selectOneRow(cassandraMessageId).block())
+                        .selectOneRow(message.getThreadId(), cassandraMessageId).block())
                     .isNull();
             });
         }
@@ -755,7 +756,7 @@ public class CassandraMailboxManagerTest extends MailboxManagerTest<CassandraMai
             saveThreadData(session.getUser(), mimeMessageIds, message.getId().getMessageId(), message.getThreadId(), Optional.of(new Subject("Test"))).block();
             CassandraMessageId cassandraMessageId = (CassandraMessageId) message.getId().getMessageId();
             ThreadTablePartitionKey partitionKey = threadLookupDAO(cassandraCluster)
-                .selectOneRow(cassandraMessageId).block();
+                .selectOneRow(message.getThreadId(), cassandraMessageId).block();
 
             cassandraCluster.getConf().registerScenario(fail()
                 .times(1)
@@ -772,7 +773,7 @@ public class CassandraMailboxManagerTest extends MailboxManagerTest<CassandraMai
                     .isEmpty();
 
                 softly.assertThat(threadLookupDAO(cassandraCluster)
-                        .selectOneRow(cassandraMessageId).block())
+                        .selectOneRow(message.getThreadId(), cassandraMessageId).block())
                     .isNull();
             });
         }
@@ -811,18 +812,18 @@ public class CassandraMailboxManagerTest extends MailboxManagerTest<CassandraMai
 
         private CassandraAttachmentDAOV2 attachmentDAO(CassandraCluster cassandraCluster) {
             return new CassandraAttachmentDAOV2(
-                new HashBlobId.Factory(),
+                new PlainBlobId.Factory(),
                 cassandraCluster.getConf());
         }
 
         private CassandraMessageIdDAO messageIdDAO(CassandraCluster cassandraCluster) {
-            return new CassandraMessageIdDAO(cassandraCluster.getConf(), new HashBlobId.Factory());
+            return new CassandraMessageIdDAO(cassandraCluster.getConf(), new PlainBlobId.Factory());
         }
 
         private CassandraMessageIdToImapUidDAO imapUidDAO(CassandraCluster cassandraCluster) {
             return new CassandraMessageIdToImapUidDAO(
                 cassandraCluster.getConf(),
-                new HashBlobId.Factory(),
+                new PlainBlobId.Factory(),
                 CassandraConfiguration.DEFAULT_CONFIGURATION);
         }
 
@@ -831,7 +832,8 @@ public class CassandraMailboxManagerTest extends MailboxManagerTest<CassandraMai
                 cassandraCluster.getConf(),
                 cassandraCluster.getTypesProvider(),
                 mock(BlobStore.class),
-                new HashBlobId.Factory());
+                new PlainBlobId.Factory(),
+                CassandraConfiguration.DEFAULT_CONFIGURATION);
         }
 
         private CassandraThreadDAO threadDAO(CassandraCluster cassandraCluster) {
@@ -846,7 +848,7 @@ public class CassandraMailboxManagerTest extends MailboxManagerTest<CassandraMai
             return threadDAO(cassandra.getCassandraCluster())
                 .insertSome(username, hashMimeMessagesIds(mimeMessageIds), messageId, threadId, hashSubject(baseSubject))
                 .then(threadLookupDAO(cassandra.getCassandraCluster())
-                    .insert(messageId, username, hashMimeMessagesIds(mimeMessageIds)));
+                    .insert(messageId, threadId, username, hashMimeMessagesIds(mimeMessageIds)));
         }
 
         private Set<MimeMessageId> buildMimeMessageIdSet(Optional<MimeMessageId> mimeMessageId, Optional<MimeMessageId> inReplyTo, Optional<List<MimeMessageId>> references) {

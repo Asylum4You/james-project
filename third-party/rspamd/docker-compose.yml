@@ -30,13 +30,13 @@ services:
       - "8000:8000"
 
   redis:
-    image: redis:7.0.12
+    image: redis:8.0.2
     command:
       - "--loglevel"
       - "debug"
 
   clamav:
-    image: clamav/clamav:1.1
+    image: clamav/clamav:1.4
 
   rspamd:
     depends_on:
@@ -45,13 +45,13 @@ services:
       redis:
           condition: service_started
     container_name: rspamd
-    image: a16bitsysop/rspamd:3.5-r7-alpine3.18.2-r0
+    image: rspamd/rspamd:3.12.0
     environment:
-      - REDIS=redis
-      - CLAMAV=clamav
-      - PASSWORD=admin
+      - RSPAMD_PASSWORD=admin
     volumes:
-      - $PWD/sample-configuration/antivirus.conf:/etc/rspamd/override.d/antivirus.conf
-      - $PWD/sample-configuration/statistic.conf:/etc/rspamd/statistic.conf
+      - $PWD/sample-configuration/antivirus.conf:/etc/rspamd/local.d/antivirus.conf
+      - $PWD/sample-configuration/statistic.conf:/etc/rspamd/local.d/statistic.conf
+      - $PWD/sample-configuration/redis.conf:/etc/rspamd/local.d/redis.conf
+      - $PWD/sample-configuration/worker-controller.inc:/etc/rspamd/local.d/worker-controller.inc
     ports:
       - 11334:11334

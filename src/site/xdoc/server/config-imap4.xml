@@ -86,12 +86,17 @@
         <dt><strong>maxQueueSize</strong></dt>
         <dd>Upper bound to the IMAP throttler queue. Upon burst, requests that cannot be queued are rejected and not executed.
             Integer, defaults to 4096, must be positive, 0 means no queue.</dd>
-        <dt><strong>handler.proxyRequired</strong></dt>
+        <dt><strong>proxyRequired</strong></dt>
         <dd>
           Enables proxy support for this service for incoming connections. HAProxy's protocol
           (https://www.haproxy.org/download/2.7/doc/proxy-protocol.txt) is used and might be compatible
           with other proxies (e.g. traefik). If enabled, it is *required* to initiate the connection
           using HAProxy's proxy protocol.
+        </dd>
+        <dt><strong>proxyFirst</strong></dt>
+        <dd>Whether proxy frames should be handled before SSL handshakes. This allows setting either the loadbalancer in TCP mode
+            (so transparent for SSL then Proxy frames needs to be handled first) or set up SSL termination between proxy and server
+            (more suited for some cloud vendors). Defaults to true (TCP transparent).
         </dd>
         <dt><strong>handler.handlerchain</strong></dt>
         <dd>This loads the core CommandHandlers. Only remove this if you really 
@@ -102,6 +107,8 @@
         <dd>Whether to enable Authentication PLAIN/ LOGIN command. Defaults to true.</dd>
         <dt><strong>auth.requireSSL</strong></dt>
         <dd>true or false. Defaults to true. Whether to require SSL to authenticate. If this is required, the IMAP server will disable authentication on unencrypted channels.</dd>
+        <dt><strong>auth.adminUsers.adminUser</strong></dt>
+        <dd>XML list of administrators able to impersonate any IMAP users. This is typically enable on non publicly exposed IMAP servers eg port 994 for admin support or migration.</dd>
         <dt><strong>auth.oidc.oidcConfigurationURL</strong></dt>
         <dd>Provide OIDC url address for information to user. Only configure this when you want to authenticate IMAP server using a OIDC provider.</dd>
         <dt><strong>auth.oidc.jwksURL</strong></dt>
@@ -134,6 +141,9 @@
 
         <dt><strong>ignoreIDLEUponProcessing</strong></dt>
         <dd>true or false - Allow disabling the heartbeat handler. Defaults to true.</dd>
+
+      <dt><strong>idCommandResponse.field</strong></dt>
+      <dd>Store the fields response for ID Command, with each tag containing a name-value pair corresponding to the attribute name. Ref: rfc2971</dd>
       </dl>
 
     <subsection name="OIDC set up">
@@ -141,6 +151,34 @@
             Please configure <code>auth.oidc</code> part to use this.</p>
         <p>We do supply an <a href="https://github.com/apache/james-project/tree/master/examples/oidc">example</a> of such a setup. It uses the
             <a href="https://www.keycloak.org/">Keycloack</a> OIDC provider, but usage of similar technologies is definitely doable.</p>
+    </subsection>
+    <subsection name="Traffic Shaping">
+
+        <p>James ships optional <a href="https://netty.io/4.0/api/io/netty/handler/traffic/ChannelTrafficShapingHandler.html">Netty built in Traffic Shaping</a>
+            that can be optionally configured.</p>
+
+        <ul>This enables both:
+            <li>Record per channel bandwidth consumption</li>
+            <li>Allows defining per channel bandwidth limit, which helps at fairness and maintaining a good quality of service.</li>
+        </ul>
+
+        <p>Example:</p>
+
+        <pre><code>
+&lt;imapserver&gt;
+    &lt;!-- ... --&gt;
+        &lt;trafficShaping&gt;
+            &lt;writeTrafficPerSecond&gt;0&lt;/writeTrafficPerSecond&gt;
+            &lt;readTrafficPerSecond&gt;0&lt;/readTrafficPerSecond&gt;
+            &lt;checkInterval&gt;1000&lt;/checkInterval&gt;
+            &lt;maxDelays&gt;15000&lt;/maxDelays&gt;
+        &lt;/trafficShaping&gt;
+&lt;/imapserver&gt;
+        </code></pre>
+
+        <p>Those tags maps to the corresponding Netty argument.</p>
+
+        <p>If omitted no traffic handle is added to the channel pipeline.</p>
     </subsection>
 
     <subsection name="Extending IMAP">
@@ -165,6 +203,23 @@
     <subsection name="Mail user agents auto-configuration">
         <p>Check this example on <a href="https://github.com/apache/james-project/tree/master/examples/imap-autoconf">Mail user agents auto-configuration</a>.</p>
     </subsection>
+
+    <subsection name="Local cache for partial Fetch">
+        <p>Because some clients uses partial fetch in order to emulate retriable download of individual body parts
+            we offer a way for James to cache in the IMAP session the latest partially fetched message. This is done using
+            a weak reference, a total size dedicated to the cache as well as a time to leave cache cleanup, all of this
+            being configurable.</p>
+
+        <p>Example:</p>
+    </subsection>
+
+    <pre><code>
+&lt;imapserver&gt;
+        &lt;partialBodyFetchCacheEnabled&gt;true&lt;/partialBodyFetchCacheEnabled&gt;
+        &lt;partialBodyFetchCacheDuration&gt;2min&lt;/partialBodyFetchCacheDuration&gt;
+        &lt;partialBodyFetchCacheSize&gt;500 MiB&lt;/partialBodyFetchCacheSize&gt;
+&lt;/imapserver&gt;
+    </code></pre>
 </section>
 
 </body>

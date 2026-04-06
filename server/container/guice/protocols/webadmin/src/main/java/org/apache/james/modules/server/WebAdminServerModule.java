@@ -42,7 +42,7 @@ import org.apache.james.server.task.json.dto.AdditionalInformationDTOModule;
 import org.apache.james.task.TaskExecutionDetails;
 import org.apache.james.utils.ClassName;
 import org.apache.james.utils.ExtensionConfiguration;
-import org.apache.james.utils.GuiceGenericLoader;
+import org.apache.james.utils.GuiceLoader;
 import org.apache.james.utils.GuiceProbe;
 import org.apache.james.utils.InitializationOperation;
 import org.apache.james.utils.InitilizationOperationBuilder;
@@ -59,6 +59,7 @@ import org.apache.james.webadmin.WebAdminServer;
 import org.apache.james.webadmin.authentication.AuthenticationFilter;
 import org.apache.james.webadmin.authentication.JwtFilter;
 import org.apache.james.webadmin.authentication.NoAuthenticationFilter;
+import org.apache.james.webadmin.authentication.PasswordFilter;
 import org.apache.james.webadmin.dto.DTOModuleInjections;
 import org.apache.james.webadmin.mdc.RequestLogger;
 import org.apache.james.webadmin.utils.JsonTransformer;
@@ -108,11 +109,11 @@ public class WebAdminServerModule extends AbstractModule {
     @Provides
     @Singleton
     @Named("webAdminRoutes")
-    public List<Routes> provideRoutes(GuiceGenericLoader loader, WebAdminConfiguration configuration, Set<Routes> routesList) {
+    public List<Routes> provideRoutes(GuiceLoader guiceLoader, WebAdminConfiguration configuration, Set<Routes> routesList) {
         List<Routes> customRoutes = configuration.getAdditionalRoutes()
             .stream()
             .map(ClassName::new)
-            .map(Throwing.function(loader.<Routes>withNamingSheme(NamingScheme.IDENTITY)::instantiate))
+            .map(Throwing.function(guiceLoader.<Routes>withNamingSheme(NamingScheme.IDENTITY)::instantiate))
             .peek(routes -> LOGGER.info("Loading WebAdmin route extension {}", routes.getClass().getCanonicalName()))
             .collect(ImmutableList.toImmutableList());
 
@@ -125,10 +126,10 @@ public class WebAdminServerModule extends AbstractModule {
     @Provides
     @Singleton
     @Named(DTOModuleInjections.CUSTOM_WEBADMIN_DTO)
-    public Set<AdditionalInformationDTOModule<? extends TaskExecutionDetails.AdditionalInformation, ? extends AdditionalInformationDTO>> provideAdditionalDTOs(GuiceGenericLoader loader, ExtensionConfiguration extensionConfiguration) {
+    public Set<AdditionalInformationDTOModule<? extends TaskExecutionDetails.AdditionalInformation, ? extends AdditionalInformationDTO>> provideAdditionalDTOs(GuiceLoader guiceLoader, ExtensionConfiguration extensionConfiguration) {
         return extensionConfiguration.getTaskExtensions()
             .stream()
-            .map(Throwing.function(loader.<TaskExtensionModule>withNamingSheme(NamingScheme.IDENTITY)::instantiate))
+            .map(Throwing.function(guiceLoader.<TaskExtensionModule>withNamingSheme(NamingScheme.IDENTITY)::instantiate))
             .map(TaskExtensionModule::taskAdditionalInformationDTOModules)
             .flatMap(Collection::stream)
             .collect(Collectors.toSet());
@@ -154,6 +155,7 @@ public class WebAdminServerModule extends AbstractModule {
                     Optional.ofNullable(configurationFile.getString("jwt.publickeypem.url", null))))
                 .maxThreadCount(Optional.ofNullable(configurationFile.getInteger("maxThreadCount", null)))
                 .minThreadCount(Optional.ofNullable(configurationFile.getInteger("minThreadCount", null)))
+                .password(Optional.ofNullable(configurationFile.getString("password", null)))
                 .build();
         } catch (FileNotFoundException e) {
             LOGGER.info("No webadmin.properties file. Disabling WebAdmin interface.");
@@ -182,13 +184,16 @@ public class WebAdminServerModule extends AbstractModule {
     @Provides
     @Singleton
     public AuthenticationFilter providesAuthenticationFilter(PropertiesProvider propertiesProvider,
+                                                             WebAdminConfiguration webAdminConfiguration,
                                                              @Named("webadmin") JwtTokenVerifier.Factory jwtTokenVerifier) throws Exception {
         try {
             Configuration configurationFile = propertiesProvider.getConfiguration("webadmin");
             if (configurationFile.getBoolean("jwt.enabled", DEFAULT_JWT_DISABLED)) {
                 return new JwtFilter(jwtTokenVerifier);
             }
-            return new NoAuthenticationFilter();
+            return webAdminConfiguration.getPassword()
+                .<AuthenticationFilter>map(PasswordFilter::new)
+                .orElse(new NoAuthenticationFilter());
         } catch (FileNotFoundException e) {
             return new NoAuthenticationFilter();
         }

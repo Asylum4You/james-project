@@ -101,7 +101,7 @@
         </processor>
 
         <processor state="relay" enableJmx="true">
-            <mailet matcher="All" class="PerSenderRateLimit">
+            <mailet match="All" class="PerSenderRateLimit">
                 <keyPrefix>myPrefix</keyPrefix>
                 <duration>1h</duration>
                 <precision>1h</precision>
@@ -111,7 +111,7 @@
                 <totalSize>200M</totalSize>
             </mailet>
             <mailet match="All" class="RemoteDelivery">
-                <outgoingQueue>outgoing</outgoingQueue>
+                <outgoing>outgoing</outgoing>
                 <delayTime>5000, 100000, 500000</delayTime>
                 <maxRetries>3</maxRetries>
                 <maxDnsProblemRetries>0</maxDnsProblemRetries>

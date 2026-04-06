@@ -28,8 +28,16 @@ import org.apache.commons.configuration2.tree.ImmutableNode;
 import org.apache.james.core.Username;
 import org.apache.james.domainlist.api.DomainList;
 import org.apache.james.lifecycle.api.Configurable;
+import org.apache.james.metrics.api.GaugeRegistry;
+import org.apache.james.user.api.InvalidUsernameException;
 import org.apache.james.user.api.UsersRepositoryException;
 import org.apache.james.user.lib.UsersRepositoryImpl;
+
+import com.github.fge.lambdas.Throwing;
+import com.unboundid.ldap.sdk.LDAPConnectionPool;
+import com.unboundid.ldap.sdk.LDAPException;
+
+import reactor.core.publisher.Mono;
 
 /**
  * <p>
@@ -92,8 +100,11 @@ import org.apache.james.user.lib.UsersRepositoryImpl;
  * &quot;user&quot; for Microsoft Active Directory.</li>
  **
  * <li>
- * <b>poolSize:</b> (optional, default = 4) The maximum number of connection
- * in the pool.</li>
+ * <b>poolSize:</b> (optional, default = 4) The maximum number of connection in the pool. Note that if the pool is exhausted,
+ * extra connections will be created on the fly as needed.</li>
+ * <li><b>maxWaitTime</b>: (optional, default = 1000) the number of milli seconds to wait before creating off-pool
+ * connections, using a pool connection if released in time. This effectively smooth out traffic burst, thus in some case can help
+ * not overloading the LDAP</li>
  * <li>
  * </ul>
  * </p>
@@ -151,11 +162,22 @@ import org.apache.james.user.lib.UsersRepositoryImpl;
  *
  */
 public class ReadOnlyUsersLDAPRepository extends UsersRepositoryImpl<ReadOnlyLDAPUsersDAO> implements Configurable {
-    private LdapRepositoryConfiguration ldapConfiguration;
+    private final LdapRepositoryConfiguration ldapConfiguration;
 
     @Inject
-    public ReadOnlyUsersLDAPRepository(DomainList domainList) {
-        super(domainList, new ReadOnlyLDAPUsersDAO());
+    public ReadOnlyUsersLDAPRepository(DomainList domainList,
+                                       GaugeRegistry gaugeRegistry,
+                                       LDAPConnectionPool ldapConnectionPool,
+                                       LdapRepositoryConfiguration configuration) {
+        super(domainList, new ReadOnlyLDAPUsersDAO(gaugeRegistry, ldapConnectionPool, configuration));
+        this.ldapConfiguration = configuration;
+    }
+
+    public ReadOnlyUsersLDAPRepository(DomainList domainList,
+                                       GaugeRegistry gaugeRegistry,
+                                       LdapRepositoryConfiguration configuration) throws LDAPException {
+        super(domainList, new ReadOnlyLDAPUsersDAO(gaugeRegistry, new LDAPConnectionFactory(configuration).getLdapConnectionPool(), configuration));
+        this.ldapConfiguration = configuration;
     }
 
     /**
@@ -169,13 +191,7 @@ public class ReadOnlyUsersLDAPRepository extends UsersRepositoryImpl<ReadOnlyLDA
      */
     @Override
     public void configure(HierarchicalConfiguration<ImmutableNode> configuration) throws ConfigurationException {
-        configure(LdapRepositoryConfiguration.from(configuration));
         super.configure(configuration);
-    }
-
-    public void configure(LdapRepositoryConfiguration configuration) {
-        usersDAO.configure(configuration);
-        this.ldapConfiguration = configuration;
     }
 
     /**
@@ -196,14 +212,28 @@ public class ReadOnlyUsersLDAPRepository extends UsersRepositoryImpl<ReadOnlyLDA
         return ldapConfiguration.supportsVirtualHosting();
     }
 
+    /**
+     * Determines if the given username has administrator privileges.
+     * <p>
+     * If the {@code administratorId} is set in the LDAP configuration, the method will return
+     * {@code true} only if the given username matches the configured administrator ID.
+     * <p>
+     * If the {@code administratorId} is not set, the method falls back to the default
+     * administrator determination provided by the parent implementation which could
+     * support a list of administrators.
+     * </p>
+     *
+     * @param username The {@link Username} to check for administrator privileges.
+     * @return {@code true} if the username has administrator privileges, {@code false} otherwise.
+     * @throws UsersRepositoryException If an error occurs while validating the username.
+     */
     @Override
     public boolean isAdministrator(Username username) throws UsersRepositoryException {
         assertValid(username);
 
-        if (ldapConfiguration.getAdministratorId().isPresent()) {
-            return ldapConfiguration.getAdministratorId().get().equals(username);
-        }
-        return false;
+        return ldapConfiguration.getAdministratorId()
+            .map(ldapAdministratorAttribute -> ldapAdministratorAttribute.equals(username))
+            .orElseGet(Throwing.supplier(() -> super.isAdministrator(username)));
     }
 
     @Override
@@ -218,6 +248,20 @@ public class ReadOnlyUsersLDAPRepository extends UsersRepositoryImpl<ReadOnlyLDA
         boolean localPartAsLoginUsernameSupported = ldapConfiguration.getResolveLocalPartAttribute().isPresent();
         if (!localPartAsLoginUsernameSupported) {
             assertDomainPartValid(username);
+        }
+    }
+
+    @Override
+    public Mono<Void> assertValidReactive(Username username) {
+        try {
+            assertLocalPartValid(username);
+            boolean localPartAsLoginUsernameSupported = ldapConfiguration.getResolveLocalPartAttribute().isPresent();
+            if (!localPartAsLoginUsernameSupported) {
+                return assertDomainPartValidReactive(username);
+            }
+            return Mono.empty();
+        } catch (InvalidUsernameException e) {
+            return Mono.error(e);
         }
     }
 }

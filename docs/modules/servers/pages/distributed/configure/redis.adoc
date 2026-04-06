@@ -1,0 +1,5 @@
+= Distributed James Server &mdash; redis.properties
+:navtitle: redis.properties
+
+:sample-configuration-prefix-url: https://github.com/apache/james-project/blob/master/server/apps/distributed-app/sample-configuration
+include::partial$configure/redis.adoc[]

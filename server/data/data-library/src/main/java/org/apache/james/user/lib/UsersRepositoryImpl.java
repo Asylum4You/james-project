@@ -20,8 +20,11 @@
 package org.apache.james.user.lib;
 
 import java.time.temporal.ChronoUnit;
+import java.util.Arrays;
 import java.util.Iterator;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 
 import jakarta.inject.Inject;
 
@@ -45,7 +48,11 @@ import org.apache.james.util.DurationParser;
 import org.reactivestreams.Publisher;
 import org.slf4j.LoggerFactory;
 
+import com.github.fge.lambdas.Throwing;
 import com.google.common.base.CharMatcher;
+import com.google.common.collect.ImmutableSet;
+
+import reactor.core.publisher.Mono;
 
 public class UsersRepositoryImpl<T extends UsersDAO> implements UsersRepository, Configurable {
     public static final org.slf4j.Logger LOGGER = LoggerFactory.getLogger(UsersRepositoryImpl.class);
@@ -54,7 +61,7 @@ public class UsersRepositoryImpl<T extends UsersDAO> implements UsersRepository,
     private final DomainList domainList;
     protected final T usersDAO;
     private boolean virtualHosting;
-    private Optional<Username> administratorId;
+    private Set<Username> administratorIds;
     private long verifyFailureDelay;
     private UserEntityValidator validator;
 
@@ -73,11 +80,29 @@ public class UsersRepositoryImpl<T extends UsersDAO> implements UsersRepository,
     @Override
     public void configure(HierarchicalConfiguration<ImmutableNode> configuration) throws ConfigurationException {
         virtualHosting = configuration.getBoolean("enableVirtualHosting", usersDAO.getDefaultVirtualHostingValue());
-        administratorId = Optional.ofNullable(configuration.getString("administratorId"))
-            .map(Username::of);
+
+        administratorIds = parseAdministratorId(configuration)
+            .orElseGet(() -> parseAdministratorIds(configuration));
+
         verifyFailureDelay = Optional.ofNullable(configuration.getString("verifyFailureDelay"))
             .map(string -> DurationParser.parse(string, ChronoUnit.SECONDS).toMillis())
             .orElse(0L);
+        LOGGER.debug("Init configure users repository with virtualHosting {}, verifyFailureDelay {}",
+            virtualHosting, verifyFailureDelay);
+    }
+
+    private Optional<Set<Username>> parseAdministratorId(HierarchicalConfiguration<ImmutableNode> configuration) {
+        return Optional.ofNullable(configuration.getString("administratorId"))
+            .map(id -> ImmutableSet.of(Username.of(id)));
+    }
+
+    private Set<Username> parseAdministratorIds(HierarchicalConfiguration<ImmutableNode> configuration) {
+        return configuration.configurationsAt("administratorIds")
+            .stream()
+            .flatMap(e -> Arrays.stream(e.getStringArray("administratorId")))
+            .filter(Objects::nonNull)
+            .map(Username::of)
+            .collect(ImmutableSet.toImmutableSet());
     }
 
     public void setEnableVirtualHosting(boolean virtualHosting) {
@@ -88,6 +113,12 @@ public class UsersRepositoryImpl<T extends UsersDAO> implements UsersRepository,
     public void assertValid(Username username) throws UsersRepositoryException {
         assertDomainPartValid(username);
         assertLocalPartValid(username);
+    }
+
+    @Override
+    public Mono<Void> assertValidReactive(Username username) {
+        return assertDomainPartValidReactive(username)
+            .then(Mono.fromRunnable(Throwing.runnable(() -> assertLocalPartValid(username)).sneakyThrow()));
     }
 
     protected void assertDomainPartValid(Username username) throws UsersRepositoryException {
@@ -109,6 +140,33 @@ public class UsersRepositoryImpl<T extends UsersDAO> implements UsersRepository,
             // @ only allowed when virtualhosting is supported
             if (username.hasDomainPart()) {
                 throw new InvalidUsernameException("Given Username contains a @domainpart but virtualhosting support is disabled");
+            }
+        }
+    }
+
+    protected Mono<Void> assertDomainPartValidReactive(Username username) {
+        if (supportVirtualHosting()) {
+            // need a @ in the username
+            if (!username.hasDomainPart()) {
+                return Mono.error(new InvalidUsernameException("Given Username needs to contain a @domainpart"));
+            } else {
+                Domain domain = username.getDomainPart().get();
+                return Mono.from(domainList.containsDomainReactive(domain))
+                    .onErrorMap(DomainListException.class, e -> new UsersRepositoryException("Unable to query DomainList", e))
+                    .handle((result, sink) -> {
+                        if (!result) {
+                            sink.error(new InvalidUsernameException("Domain does not exist in DomainList"));
+                        } else {
+                            sink.complete();
+                        }
+                    });
+            }
+        } else {
+            // @ only allowed when virtualhosting is supported
+            if (username.hasDomainPart()) {
+                return Mono.error(new InvalidUsernameException("Given Username contains a @domainpart but virtualhosting support is disabled"));
+            } else {
+                return Mono.empty();
             }
         }
     }
@@ -205,6 +263,11 @@ public class UsersRepositoryImpl<T extends UsersDAO> implements UsersRepository,
     }
 
     @Override
+    public Publisher<Username> listUsersOfADomainReactive(Domain domain) {
+        return usersDAO.listUsersOfADomainReactive(domain, supportVirtualHosting());
+    }
+
+    @Override
     public boolean supportVirtualHosting() {
         return virtualHosting;
     }
@@ -213,8 +276,7 @@ public class UsersRepositoryImpl<T extends UsersDAO> implements UsersRepository,
     public boolean isAdministrator(Username username) throws UsersRepositoryException {
         assertValid(username);
 
-        return administratorId.map(id -> id.equals(username))
-            .orElse(false);
+        return administratorIds.contains(username);
     }
 
     @Override
@@ -228,7 +290,7 @@ public class UsersRepositoryImpl<T extends UsersDAO> implements UsersRepository,
             if (supportVirtualHosting()) {
                 return new MailAddress(username.asString());
             }
-            return new MailAddress(username.getLocalPart(), domainList.getDefaultDomain());
+            return MailAddress.of(username.getLocalPart(), domainList.getDefaultDomain());
         } catch (Exception e) {
             throw new UsersRepositoryException("Failed to compute mail address associated with the user", e);
         }

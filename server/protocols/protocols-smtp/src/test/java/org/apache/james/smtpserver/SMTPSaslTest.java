@@ -61,9 +61,8 @@ class SMTPSaslTest {
     public static final String SCOPE = "scope";
     public static final String FAIL_RESPONSE_TOKEN = Base64.getEncoder().encodeToString(
         String.format("{\"status\":\"invalid_token\",\"scope\":\"%s\",\"schemes\":\"%s\"}", SCOPE, OIDC_URL).getBytes(UTF_8));
-    public static final String VALID_TOKEN = OIDCSASLHelper.generateOauthBearer(USER.asString(), OidcTokenFixture.VALID_TOKEN);
-    public static final String INVALID_TOKEN = OIDCSASLHelper.generateOauthBearer(USER.asString(), OidcTokenFixture.INVALID_TOKEN);
-
+    public static final String VALID_OAUTHBEARER_TOKEN = OIDCSASLHelper.generateEncodedOauthbearerInitialClientResponse(USER.asString(), OidcTokenFixture.VALID_TOKEN);
+    public static final String INVALID_OAUTHBEARER_TOKEN = OIDCSASLHelper.generateEncodedOauthbearerInitialClientResponse(USER.asString(), OidcTokenFixture.INVALID_TOKEN);
 
 
     private final SMTPServerTestSystem testSystem = new SMTPServerTestSystem();
@@ -116,16 +115,47 @@ class SMTPSaslTest {
     void oauthShouldSuccessWhenValidToken() throws Exception {
         SMTPSClient client = initSMTPSClient();
 
-        client.sendCommand("AUTH OAUTHBEARER " + VALID_TOKEN);
+        client.sendCommand("AUTH OAUTHBEARER " + VALID_OAUTHBEARER_TOKEN);
 
         assertThat(client.getReplyString()).contains("235 Authentication successful.");
+
+        client.sendCommand("NOOP");
+        assertThat(client.getReplyString()).contains("250 2.0.0 OK");
+    }
+
+    @Test
+    void oauthShouldSuccessWhenValidTokenAndContinuation() throws Exception {
+        SMTPSClient client = initSMTPSClient();
+
+        client.sendCommand("AUTH OAUTHBEARER");
+        assertThat(client.getReplyString()).contains("334");
+        client.sendCommand(VALID_OAUTHBEARER_TOKEN);
+
+        assertThat(client.getReplyString()).contains("235 Authentication successful.");
+
+        client.sendCommand("NOOP");
+        assertThat(client.getReplyString()).contains("250 2.0.0 OK");
+    }
+
+    @Test
+    void oauthShouldSuccessWhenValidTokenAndContinuationAndXOauth2() throws Exception {
+        SMTPSClient client = initSMTPSClient();
+
+        client.sendCommand("AUTH XOAUTH2");
+        assertThat(client.getReplyString()).contains("334");
+        client.sendCommand(OIDCSASLHelper.generateEncodedOauthbearerInitialClientResponse(USER.asString(), OidcTokenFixture.VALID_TOKEN));
+
+        assertThat(client.getReplyString()).contains("235 Authentication successful.");
+
+        client.sendCommand("NOOP");
+        assertThat(client.getReplyString()).contains("250 2.0.0 OK");
     }
 
     @Test
     void oauthShouldSupportXOAUTH2Type() throws Exception {
         SMTPSClient client = initSMTPSClient();
 
-        client.sendCommand("AUTH XOAUTH2 " + VALID_TOKEN);
+        client.sendCommand("AUTH XOAUTH2 " + OIDCSASLHelper.generateEncodedOauthbearerInitialClientResponse(USER.asString(), OidcTokenFixture.VALID_TOKEN));
 
         assertThat(client.getReplyString()).contains("235 Authentication successful.");
     }
@@ -141,7 +171,7 @@ class SMTPSaslTest {
             .as("Should not advertise OAUTHBEARER when no TLS connect.")
             .doesNotContain("OAUTHBEARER");
 
-        client.sendCommand("AUTH OAUTHBEARER " + VALID_TOKEN);
+        client.sendCommand("AUTH OAUTHBEARER " + VALID_OAUTHBEARER_TOKEN);
         assertThat(client.getReplyString()).contains("504 Unrecognized Authentication Type");
     }
 
@@ -149,7 +179,7 @@ class SMTPSaslTest {
     void oauthShouldFailWhenInvalidToken() throws Exception {
         SMTPSClient client = initSMTPSClient();
 
-        client.sendCommand("AUTH OAUTHBEARER " + INVALID_TOKEN);
+        client.sendCommand("AUTH OAUTHBEARER " + INVALID_OAUTHBEARER_TOKEN);
         assertThat(client.getReplyString()).contains("334 " + FAIL_RESPONSE_TOKEN);
 
         client.sendCommand("AQ==");
@@ -162,11 +192,11 @@ class SMTPSaslTest {
 
         client.sendCommand("EHLO localhost");
 
-        client.sendCommand("AUTH OAUTHBEARER " + VALID_TOKEN);
+        client.sendCommand("AUTH OAUTHBEARER " + VALID_OAUTHBEARER_TOKEN);
 
         client.setSender(USER.asString());
         client.addRecipient("mail@domain.org");
-        client.sendShortMessageData("Subject: test\r\n\r\nTest body testAuth\r\n");
+        client.sendShortMessageData("From: " + USER.asString() + "\r\n\r\nSubject: test\r\n\r\nTest body testAuth\r\n");
         client.quit();
 
         assertThat(testSystem.queue.getLastMail())
@@ -194,8 +224,8 @@ class SMTPSaslTest {
     void shouldNotOauthWhenAlreadyAuthenticated() throws Exception {
         SMTPSClient client = initSMTPSClient();
 
-        client.sendCommand("AUTH OAUTHBEARER " + VALID_TOKEN);
-        client.sendCommand("AUTH OAUTHBEARER " + VALID_TOKEN);
+        client.sendCommand("AUTH OAUTHBEARER " + VALID_OAUTHBEARER_TOKEN);
+        client.sendCommand("AUTH OAUTHBEARER " + VALID_OAUTHBEARER_TOKEN);
 
         assertThat(client.getReplyString()).contains("503 5.5.0 User has previously authenticated.  Further authentication is not required!");
     }
@@ -209,7 +239,7 @@ class SMTPSaslTest {
 
         SMTPSClient client = initSMTPSClient();
 
-        client.sendCommand("AUTH OAUTHBEARER " + VALID_TOKEN);
+        client.sendCommand("AUTH OAUTHBEARER " + VALID_OAUTHBEARER_TOKEN);
         assertThat(client.getReplyString()).contains("504 Unrecognized Authentication Type");
     }
 
@@ -293,7 +323,7 @@ class SMTPSaslTest {
 
         SMTPSClient client = initSMTPSClient();
 
-        client.sendCommand("AUTH OAUTHBEARER " + VALID_TOKEN);
+        client.sendCommand("AUTH OAUTHBEARER " + VALID_OAUTHBEARER_TOKEN);
 
         assertThat(client.getReplyString()).contains("334 " + FAIL_RESPONSE_TOKEN);
 
@@ -322,7 +352,7 @@ class SMTPSaslTest {
 
         SMTPSClient client = initSMTPSClient();
 
-        client.sendCommand("AUTH OAUTHBEARER " + VALID_TOKEN);
+        client.sendCommand("AUTH OAUTHBEARER " + VALID_OAUTHBEARER_TOKEN);
 
         assertThat(client.getReplyString()).contains("235 Authentication successful.");
     }
@@ -347,7 +377,7 @@ class SMTPSaslTest {
 
         SMTPSClient client = initSMTPSClient();
 
-        client.sendCommand("AUTH OAUTHBEARER " + VALID_TOKEN);
+        client.sendCommand("AUTH OAUTHBEARER " + VALID_OAUTHBEARER_TOKEN);
 
         assertThat(client.getReplyString()).contains("451 Unable to process request");
     }
@@ -372,7 +402,7 @@ class SMTPSaslTest {
 
         SMTPSClient client = initSMTPSClient();
 
-        client.sendCommand("AUTH OAUTHBEARER " + VALID_TOKEN);
+        client.sendCommand("AUTH OAUTHBEARER " + VALID_OAUTHBEARER_TOKEN);
 
         assertThat(client.getReplyString()).contains("235 Authentication successful.");
     }
@@ -396,7 +426,7 @@ class SMTPSaslTest {
 
         SMTPSClient client = initSMTPSClient();
 
-        client.sendCommand("AUTH OAUTHBEARER " + VALID_TOKEN);
+        client.sendCommand("AUTH OAUTHBEARER " + VALID_OAUTHBEARER_TOKEN);
 
         assertThat(client.getReplyString()).contains("451 Unable to process request");
     }
@@ -404,7 +434,7 @@ class SMTPSaslTest {
     @Test
     void oauthShouldImpersonateFailWhenNOTDelegated() throws Exception {
         SMTPSClient client = initSMTPSClient();
-        String tokenWithImpersonation = OIDCSASLHelper.generateOauthBearer("another@domain.org", OidcTokenFixture.VALID_TOKEN);
+        String tokenWithImpersonation = OIDCSASLHelper.generateEncodedOauthbearerInitialClientResponse("another@domain.org", OidcTokenFixture.VALID_TOKEN);
         client.sendCommand("AUTH OAUTHBEARER " + tokenWithImpersonation);
 
         assertThat(client.getReplyString()).contains("334 ");
@@ -412,10 +442,11 @@ class SMTPSaslTest {
         client.sendCommand("AQ==");
         assertThat(client.getReplyString()).contains("535 Authentication Failed");
     }
+
     @Test
     void oauthShouldImpersonateSuccessWhenDelegated() throws Exception {
         SMTPSClient client = initSMTPSClient();
-        String tokenWithImpersonation = OIDCSASLHelper.generateOauthBearer(USER2.asString(), OidcTokenFixture.VALID_TOKEN);
+        String tokenWithImpersonation = OIDCSASLHelper.generateEncodedOauthbearerInitialClientResponse(USER2.asString(), OidcTokenFixture.VALID_TOKEN);
         client.sendCommand("AUTH OAUTHBEARER " + tokenWithImpersonation);
 
         assertThat(client.getReplyString()).contains("235 Authentication successful.");
@@ -427,11 +458,11 @@ class SMTPSaslTest {
 
         client.sendCommand("EHLO localhost");
 
-        client.sendCommand("AUTH OAUTHBEARER " + OIDCSASLHelper.generateOauthBearer(USER2.asString(), OidcTokenFixture.VALID_TOKEN));
+        client.sendCommand("AUTH OAUTHBEARER " + OIDCSASLHelper.generateEncodedOauthbearerInitialClientResponse(USER2.asString(), OidcTokenFixture.VALID_TOKEN));
 
         client.setSender(USER2.asString());
         client.addRecipient("mail@domain.org");
-        client.sendShortMessageData("Subject: test\r\n\r\nTest body testAuth\r\n");
+        client.sendShortMessageData("From: " + USER2.asString() + "\r\n\r\nSubject: test\r\n\r\nTest body testAuth\r\n");
         client.quit();
 
         assertThat(testSystem.queue.getLastMail())

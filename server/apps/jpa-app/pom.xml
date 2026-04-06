@@ -24,7 +24,7 @@
     <parent>
         <groupId>org.apache.james</groupId>
         <artifactId>james-server</artifactId>
-        <version>3.9.0-SNAPSHOT</version>
+        <version>3.10.0-SNAPSHOT</version>
         <relativePath>../../pom.xml</relativePath>
     </parent>
 
@@ -110,6 +110,10 @@
         </dependency>
         <dependency>
             <groupId>${james.groupId}</groupId>
+            <artifactId>james-server-guice-lucene</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>${james.groupId}</groupId>
             <artifactId>james-server-guice-mailbox</artifactId>
         </dependency>
         <dependency>
@@ -176,6 +180,10 @@
         </dependency>
         <dependency>
             <groupId>${james.groupId}</groupId>
+            <artifactId>james-server-protocols-smtp-dkim</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>${james.groupId}</groupId>
             <artifactId>james-server-testing</artifactId>
             <scope>test</scope>
         </dependency>
@@ -193,12 +201,8 @@
             <artifactId>logback-classic</artifactId>
         </dependency>
         <dependency>
-            <groupId>ch.qos.logback.contrib</groupId>
-            <artifactId>logback-jackson</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>ch.qos.logback.contrib</groupId>
-            <artifactId>logback-json-classic</artifactId>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
         </dependency>
         <dependency>
             <groupId>com.linagora</groupId>
@@ -208,10 +212,6 @@
             <groupId>io.rest-assured</groupId>
             <artifactId>rest-assured</artifactId>
             <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.derby</groupId>
-            <artifactId>derby</artifactId>
         </dependency>
         <dependency>
             <groupId>org.awaitility</groupId>
@@ -283,14 +283,22 @@
                     <container>
                         <mainClass>org.apache.james.JPAJamesServerMain</mainClass>
                         <ports>
-                            <port>80</port> <!-- JMAP -->
-                            <port>143</port> <!-- IMAP -->
-                            <port>993</port> <!-- IMAPS -->
-                            <port>25</port> <!-- SMTP -->
-                            <port>465</port> <!-- SMTP + STARTTLS -->
-                            <port>587</port> <!-- SMTPS -->
-                            <port>4000</port> <!-- GLOWROOT, if activated -->
-                            <port>8000</port> <!-- WEBADMIN -->
+                            <port>80</port>
+                            <!-- JMAP -->
+                            <port>143</port>
+                            <!-- IMAP -->
+                            <port>993</port>
+                            <!-- IMAPS -->
+                            <port>25</port>
+                            <!-- SMTP -->
+                            <port>465</port>
+                            <!-- SMTP + STARTTLS -->
+                            <port>587</port>
+                            <!-- SMTPS -->
+                            <port>4000</port>
+                            <!-- GLOWROOT, if activated -->
+                            <port>8000</port>
+                            <!-- WEBADMIN -->
                         </ports>
                         <appRoot>/root</appRoot>
                         <jvmFlags>
@@ -309,9 +317,10 @@
                             <volume>/root/glowroot/data</volume>
                             <!-- Data for ActiveMQ mailQueue -->
                             <volume>/root/var</volume>
-                            <!-- Data for derby database -->
+                            <!-- Data for H2 database -->
                             <volume>/var/store</volume>
                         </volumes>
+                        <extraClasspath>/root/libs/james-jdbc-driver.jar</extraClasspath>
                     </container>
                     <extraDirectories>
                         <paths>
@@ -339,7 +348,8 @@
                         <permissions>
                             <permission>
                                 <file>/usr/bin/james-cli</file>
-                                <mode>755</mode> <!-- Read/write/execute for owner, read/execute for group/other -->
+                                <mode>755</mode>
+                                <!-- Read/write/execute for owner, read/execute for group/other -->
                             </permission>
                         </permissions>
                     </extraDirectories>
@@ -357,7 +367,7 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
-                    <!-- Isolation issues with Derby inMemory database -->
+                    <!-- Isolation issues with H2 inMemory database -->
                     <reuseForks>false</reuseForks>
                     <!-- Speed up a bit things -->
                     <forkCount>1C</forkCount>

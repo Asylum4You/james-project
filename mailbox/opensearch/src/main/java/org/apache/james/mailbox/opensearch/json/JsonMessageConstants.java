@@ -45,8 +45,8 @@ public interface JsonMessageConstants {
     String SENT_DATE = "sentDate";
     String SAVE_DATE = "saveDate";
     String ATTACHMENTS = "attachments";
-    String TEXT = "text";
     String MIME_MESSAGE_ID = "mimeMessageID";
+    String USER = "user";
 
     String MODSEQ = "modSeq";
     String USER_FLAGS = "userFlags";

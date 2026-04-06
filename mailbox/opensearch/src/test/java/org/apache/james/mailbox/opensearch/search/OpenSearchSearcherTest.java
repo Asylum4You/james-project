@@ -47,7 +47,9 @@ import org.apache.james.mailbox.model.MailboxId;
 import org.apache.james.mailbox.model.MailboxPath;
 import org.apache.james.mailbox.model.MessageId;
 import org.apache.james.mailbox.model.MultimailboxesSearchQuery;
+import org.apache.james.mailbox.model.SearchOptions;
 import org.apache.james.mailbox.model.SearchQuery;
+import org.apache.james.mailbox.opensearch.DefaultMailboxMappingFactory;
 import org.apache.james.mailbox.opensearch.IndexAttachments;
 import org.apache.james.mailbox.opensearch.IndexHeaders;
 import org.apache.james.mailbox.opensearch.MailboxIdRoutingKeyFactory;
@@ -55,7 +57,7 @@ import org.apache.james.mailbox.opensearch.MailboxIndexCreationUtil;
 import org.apache.james.mailbox.opensearch.OpenSearchMailboxConfiguration;
 import org.apache.james.mailbox.opensearch.events.OpenSearchListeningMessageSearchIndex;
 import org.apache.james.mailbox.opensearch.json.MessageToOpenSearchJson;
-import org.apache.james.mailbox.opensearch.query.CriterionConverter;
+import org.apache.james.mailbox.opensearch.query.DefaultCriterionConverter;
 import org.apache.james.mailbox.opensearch.query.QueryConverter;
 import org.apache.james.mailbox.tika.TikaConfiguration;
 import org.apache.james.mailbox.tika.TikaExtension;
@@ -63,6 +65,7 @@ import org.apache.james.mailbox.tika.TikaHttpClientImpl;
 import org.apache.james.mailbox.tika.TikaTextExtractor;
 import org.apache.james.metrics.tests.RecordingMetricFactory;
 import org.apache.james.mime4j.dom.Message;
+import org.apache.james.util.streams.Limit;
 import org.awaitility.Awaitility;
 import org.awaitility.Durations;
 import org.awaitility.core.ConditionFactory;
@@ -77,6 +80,7 @@ import org.opensearch.client.opensearch.core.SearchRequest;
 import com.github.fge.lambdas.Throwing;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
+
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -116,7 +120,7 @@ class OpenSearchSearcherTest {
         WriteAliasName writeAliasName = new WriteAliasName(UUID.randomUUID().toString());
         indexName = new IndexName(UUID.randomUUID().toString());
         MailboxIndexCreationUtil.prepareClient(client, readAliasName, writeAliasName, indexName,
-            openSearch.getDockerOpenSearch().configuration());
+            openSearch.getDockerOpenSearch().configuration(), new DefaultMailboxMappingFactory());
 
         InMemoryIntegrationResources resources = InMemoryIntegrationResources.builder()
             .preProvisionnedFakeAuthenticator()
@@ -128,10 +132,11 @@ class OpenSearchSearcherTest {
                 preInstanciationStage.getMapperFactory(),
                 ImmutableSet.of(),
                 new OpenSearchIndexer(client, writeAliasName),
-                new OpenSearchSearcher(client, new QueryConverter(new CriterionConverter()), SEARCH_SIZE, readAliasName, routingKeyFactory),
+                new OpenSearchSearcher(client, new QueryConverter(new DefaultCriterionConverter()), SEARCH_SIZE, readAliasName, routingKeyFactory),
                 new MessageToOpenSearchJson(textExtractor, ZoneId.of("Europe/Paris"), IndexAttachments.YES, IndexHeaders.YES),
                 preInstanciationStage.getSessionProvider(), routingKeyFactory, messageIdFactory,
-                OpenSearchMailboxConfiguration.builder().build(), new RecordingMetricFactory()))
+                OpenSearchMailboxConfiguration.builder().build(), new RecordingMetricFactory(),
+                ImmutableSet.of()))
             .noPreDeletionHooks()
             .storeQuotaManager()
             .build();
@@ -163,7 +168,7 @@ class OpenSearchSearcherTest {
             .collectList()
             .block();
 
-        awaitForOpenSearch(QueryBuilders.matchAll().build()._toQuery(), composedMessageIds.size());
+        awaitForOpenSearch(QueryBuilders.matchAll().build().toQuery(), composedMessageIds.size());
 
         MultimailboxesSearchQuery multimailboxesSearchQuery = MultimailboxesSearchQuery
             .from(SearchQuery.of(SearchQuery.all()))
@@ -173,7 +178,7 @@ class OpenSearchSearcherTest {
             .stream()
             .map(ComposedMessageId::getMessageId)
             .collect(ImmutableList.toImmutableList());
-        assertThat(storeMailboxManager.search(multimailboxesSearchQuery, session, numberOfMailboxes + 1)
+        assertThat(storeMailboxManager.search(multimailboxesSearchQuery, session, SearchOptions.limit(Limit.limit(numberOfMailboxes + 1)))
             .collectList().block())
             .containsExactlyInAnyOrderElementsOf(expectedMessageIds);
     }
@@ -183,10 +188,10 @@ class OpenSearchSearcherTest {
 
         String recipient = "user@example.com";
         return Mono.from(messageManager.appendMessageReactive(MessageManager.AppendCommand.from(
-            Message.Builder.of()
-                .setTo(recipient)
-                .setBody("Hello", StandardCharsets.UTF_8)),
-            session))
+                    Message.Builder.of()
+                        .setTo(recipient)
+                        .setBody("Hello", StandardCharsets.UTF_8)),
+                session))
             .map(MessageManager.AppendResult::getId);
     }
 

@@ -4,13 +4,13 @@ Web administration for JAMES
 The web administration supports for now the CRUD operations on the domains, the users, their mailboxes and their quotas,
  managing mail repositories, performing cassandra migrations, and much more, as described in the following sections.
 
-**WARNING**: This API allow authentication only via the use of JWT. If not configured with JWT, an administrator should ensure an attacker can not use this API.
+**WARNING**: This API supports authentication only via the use of JWT. If JWT is disabled (the default), an administrator should ensure an attacker cannot use this API.
 
-By the way, some endpoints are not filtered by authentication. Those endpoints are not related to data stored in James, for example: Swagger documentation & James health checks.
+By the way, some endpoints are not filtered by authentication. Those endpoints are not related to data stored in James, such as Swagger documentation and James health checks.
 
-Please also note **webadmin** is only enabled with **Guice**. You can not use it when using James with **Spring**, as the required injections are not implemented.
+Please also note **webadmin** is only enabled with **Guice**. You cannot use it when using James with **Spring**, as the required injections are not implemented.
 
-In case of any error, the system will return an error message which is json format like this:
+In case of any error, the response will contain a JSON error message in the following format:
 
 ```
 {
@@ -37,6 +37,7 @@ Finally, please note that in case of a malformed URL the 400 bad request respons
  - [Administrating quotas by users](#Administrating_quotas_by_users)
  - [Administrating quotas by domains](#Administrating_quotas_by_domains)
  - [Administrating global quotas](#Administrating_global_quotas)
+ - [Administrating DropLists](#Administrating_DropLists)
  - [Cassandra Schema upgrades](#Cassandra_Schema_upgrades)
  - [Correcting ghost mailbox](#Correcting_ghost_mailbox)
  - [Creating address aliases](#Creating_address_aliases)
@@ -121,6 +122,63 @@ Response codes:
  - 200: All checks have answered with a Healthy or Degraded status. James services can still be used.
  - 503: At least one check have answered with a Unhealthy status
 
+Additional query parameters are supported:
+
+- `strict` allows you enable the strict mode. In this mode, if any checks have the result of Degraded or Unhealthy status, the response code will be 503. If omitted, degraded checks would be reported with status code 200.
+
+```
+curl -XGET http://ip:port/healthcheck?strict
+```
+
+### Check specific components
+
+Performs health checks for the given components. Components are referenced by their URL encoded names.
+
+```
+curl -XGET http://ip:port/healthcheck?check=HealthCheck1&check=HealthCheck%20two
+```
+
+Will return a list of healthChecks execution result, with an aggregated result:
+
+```
+{
+  "status": "healthy",
+  "checks": [
+    {
+      "componentName": "HealthCheck1",
+      "escapedComponentName": "HealthCheck1",
+      "status": "healthy"
+      "cause": null
+    },
+    {
+      "componentName": "HealthCheck two",
+      "escapedComponentName": "HealthCheck%20two",
+      "status": "healthy"
+      "cause": null
+    }
+  ]
+}
+```
+
+*status* field can be:
+
+* *healthy*: Component works normally
+* *degraded*: Component works in degraded mode. Some non-critical services may not be working, or latencies are high, for example. Cause contains explanations.
+* *unhealthy*: The component is currently not working. Cause contains explanations.
+
+Response codes:
+
+* 200: All checks have answered with a Healthy or Degraded status. James services can still be used.
+* 503: At least one check have answered with a Unhealthy status
+
+Additional query parameters are supported:
+
+- `strict` allows you enable the strict mode. In this mode, if any checks have the result of Degraded or Unhealthy status, the response code will be 503. If omitted, degraded checks would be reported with status code 200.
+
+```
+curl -XGET http://ip:port/healthcheck?strict&check=HealthCheck1&check=HealthCheck%20two
+```
+
 ### Check single component
 
 Performs a health check for the given component. The component is referenced by its URL encoded name.
@@ -145,6 +203,14 @@ Response codes:
  - 200: The check has answered with a Healthy or Degraded status.
  - 404: A component with the given name was not found.
  - 503: The check has anwered with a Unhealthy status.
+
+Additional query parameters are supported:
+
+- `strict` allows you enable the strict mode. In this mode, if any checks have the result of Degraded or Unhealthy status, the response code will be 503. If omitted, degraded checks would be reported with status code 200.
+
+```
+curl -XGET http://ip:port/healthcheck/checks/{backend-name}%20backend?strict
+```
  
 ### List all health checks
  
@@ -425,6 +491,18 @@ The answer looks like:
 Response codes:
 
  - 200: The user name list was successfully retrieved
+
+Additional query parameters are supported:
+
+- `hasNoMailboxes` allows you to select users who don't have any mailboxes (also means that they have never logged in and received any emails).
+```
+curl -XGET http://ip:port/users?hasNoMailboxes
+```
+
+- `hasNotAllSystemMailboxes` allows you to select users who don't have enough system mailboxes (also means that they have never logged in but received some emails).
+```
+curl -XGET http://ip:port/users?hasNotAllSystemMailboxes
+```
 
 ### Retrieving the list of allowed `From` headers for a given user
 
@@ -790,6 +868,69 @@ firewall rules.
 
 Due to all of those risks, a `I-KNOW-WHAT-I-M-DOING` header should be positioned to `ALL-SERVICES-ARE-OFFLINE` in order 
 to prevent accidental calls.
+
+
+#### Fixing mailboxes flag inconsistencies
+
+##### Fixing mailbox messages deleted flag inconsistencies
+
+This task is only available on top of Guice Cassandra products.
+
+```bash
+curl -XPOST /messages?task=SolveMessageDeletedInconsistencies
+```
+
+Will schedule a task for fixing mailbox messages `deleted` flag inconsistencies created by the
+mailbox denormalization process.
+
+Response codes:
+
+* 201: Success. Corresponding task id is returned.
+* 400: Error in the request. Details can be found in the reported error.
+
+The scheduled task will have the following type
+`solve-mailbox-flag-inconsistencies` and the following
+`additionalInformation` example:
+
+```json
+{
+"timestamp": "2024-09-17T04:58:33.683813161Z",
+"type": "solve-mailbox-flag-inconsistencies",
+"processedMailboxEntries": 1,
+"errors": ["551f0580-82fb-11ea-970e-f9c83d4cf8c2"],
+"targetFlag": "DELETED"
+}
+```
+
+##### Fixing mailbox messages recent flag inconsistencies
+
+This task is only available on top of Guice Cassandra products.
+
+```bash
+curl -XPOST /messages?task=SolveMessageRecentInconsistencies
+```
+
+Will schedule a task for fixing mailbox messages `recent` flag inconsistencies created by the
+mailbox denormalization process.
+
+Response codes:
+
+* 201: Success. Corresponding task id is returned.
+* 400: Error in the request. Details can be found in the reported error.
+
+The scheduled task will have the following type
+`solve-mailbox-flag-inconsistencies` and the following
+`additionalInformation` example:
+
+```json
+{
+"timestamp": "2024-09-17T04:59:10.042097161Z",
+"type": "solve-mailbox-flag-inconsistencies",
+"processedMailboxEntries": 2,
+"errors": ["551f0580-82fb-11ea-970e-f9c83d4cf8c2"],
+"targetFlag": "RECENT"
+}
+```
 
 #### Recomputing mailbox counters
 
@@ -1344,6 +1485,69 @@ However the source of truth will not be impacted, hence rerunning the task will 
 This task could be run safely online and can be scheduled on a recurring basis outside of peak traffic 
 by an admin to ensure Cassandra message consistency.
 
+=== Running a filtering rule on a specific mailbox for all users
+
+```
+curl -XPOST http://ip:port/messages?action=triage&mailboxName={mailboxName} \
+-d '{
+  "id": "1",
+  "name": "rule 1",
+  "action": {
+    "moveTo": {
+      "mailboxName": "Trash"
+    }
+  },
+  "conditionGroup": {
+    "conditionCombiner": "OR",
+    "conditions": [
+      {
+        "comparator": "contains",
+        "field": "subject",
+        "value": "plop"
+      },
+      {
+        "comparator": "exactly-equals",
+        "field": "from",
+        "value": "bob@example.com"
+      }
+    ]
+  }
+}'
+```
+
+Will schedule a task for each user running a filtering rule passed as query parameter in `mailboxName` mailbox.
+
+Query parameter `mailboxName` should not be empty, nor contain `% *` characters, nor starting with `#`.
+If a user does not have a mailbox with that name, it will skip that user.
+
+The action of the rule should be `moveTo` with a mailbox name defined. If mailbox ids are defined in `appendIn` action,
+it will fail, as it makes no sense cluster scoped.
+
+Response codes:
+
+* 201: Success. Map[Username, TaskId] is returned.
+* 400: Invalid mailbox name
+* 400: Invalid JSON payload (including mailbox ids defined in the action)
+* 400: mailboxName query parameter is missing
+
+The response is a map of task id per user:
+
+```
+[
+  {
+    "username": "alice@example.org", "taskId": "5641376-02ed-47bd-bcc7-76ff6262d92a"
+  },
+  {
+    "username": "bob@example.org", "taskId": "5641376-02ed-47bd-bcc7-42cc1313f47b"
+  },
+
+  [...]
+
+]
+```
+
+[More details about details returned by running a filtering rule on a mailbox](#Running_a_filtering_rule_on_a_mailbox).
+
 ## Administrating user mailboxes
 
  - [Creating a mailbox](#Creating_a_mailbox)
@@ -1599,6 +1803,77 @@ the following `additionalInformation`:
     "messagesSuccessCount": 10,
     "timestamp": "2007-12-03T10:15:30Z",
     "type": "ClearMailboxContentTask",
+    "username": "bob@domain.tld"
+}
+```
+
+### Running a filtering rule on a mailbox
+
+```
+curl -XPOST http://ip:port/users/{usernameToBeUsed}/mailboxes/{mailboxName}/messages?action=triage \
+-d '{
+    "id": "1",
+    "name": "rule 1",
+    "action": {
+        "appendIn": {
+            "mailboxIds": ["23"]
+        }
+    },
+    "conditionGroup": {
+        "conditionCombiner": "OR",
+        "conditions": [
+            {
+                "comparator": "contains",
+                "field": "subject",
+                "value": "plop"
+            },
+            {
+                "comparator": "exactly-equals",
+                "field": "from",
+                "value": "bob@example.com"
+            }
+        ]
+    }
+}'
+```
+
+Will schedule a task for running a filtering rule passed as payload in ``mailboxName`` mailbox of ``usernameToBeUsed``.
+
+[More details about endpoints returning a task](#Endpoints_returning_a_task).
+
+Resource name `usernameToBeUsed` should be an existing user.
+
+Resource name `mailboxName` should not be empty, nor contain `% *` characters, nor starting with `#`.
+
+The rule json payload has some extra conditions available compared to the JMAP filtering mailet as some operations would make sense:
+
+- Flags:
+    * fields: flag
+    * comparators: isSet, isUnset
+    * values: system flag ("$seen", "$flagged", etc) or a custom user flag.
+
+- Dates:
+    * fields: sentDate, savedDate, internalDate
+    * comparators: isOlderThan, isNewerThan
+    * values: durations ("2d", "6h", ...)
+
+Response codes:
+
+* 201: Success. Corresponding task id is returned.
+* 400: Invalid mailbox name
+* 400: Invalid JSON payload
+* 404: Invalid get on user mailboxes. The `username` or `mailboxName` does not exit
+
+The scheduled task will have the following type `RunRulesOnMailboxTask` and
+the following `additionalInformation`:
+
+```
+{
+    "mailboxName": "mbx1",
+    "rulesOnMessagesApplySuccessfully": 9,
+    "rulesOnMessagesApplyFailed": 3,
+    "timestamp": "2024-12-03T10:15:30Z",
+    "type": "RunRulesOnMailboxTask",
     "username": "bob@domain.tld"
 }
 ```
@@ -2389,6 +2664,146 @@ Response codes:
 
  - 204: The quota has been updated to unlimited value.
 
+## Administrating DropLists
+
+The DropList, also known as the mail blacklist, is a collection of
+domains and email addresses that are denied from sending emails within the system.
+
+Owner scopes:
+
+- `global`: contains entries that are blocked across all domains and addresses within the system.
+  Entries in the global owner scope apply universally and affect all users and domains.
+- `domain`: each domain can have its own droplist, which contains entries specific to that domain.
+- `user`: allow to customize personalized droplist of blocked domains and email addresses.
+
+The `deniedEntityType` query parameter is optional and can take the values `domain` or `address`.
+
+- [Getting the DropList](#Getting_the_DropList)
+- [Testing a denied entity existence](#Testing_a_denied_entity_existence)
+- [Add Entry to the DropList](#Add_Entry_to_the_DropList)
+- [Remove Entry from the DropList](#Remove_Entry_from_the_DropList)
+
+### Getting the DropList
+#### Global DropList
+
+```
+curl -XGET http://ip:port/droplist/global?deniedEntityType=null|domain|address
+```
+#### Domain DropList
+```
+curl -XGET http://ip:port/droplist/domain/target.com?deniedEntityType=null|domain|address
+```
+
+#### User DropList
+
+```
+curl -XGET http://ip:port/droplist/user/tagret@target.com?deniedEntityType=null|domain|address
+```
+
+The answer looks like:
+```
+[ "evil.com", "devil.com", "bad_guy@crime.com", "hacker@murder.org" ]
+```
+
+Response codes:
+
+* 200: The drop list was successfully retrieved
+* 400: Invalid `owner scope` or `deniedEntityType`
+
+### Testing a denied entity existence
+#### Global DropList
+
+```
+curl -XHEAD http://ip:port/droplist/global/attacker@evil.com
+```
+```
+curl -XHEAD http://ip:port/droplist/global/evil.com
+```
+
+#### Domain DropList
+
+```
+curl -XHEAD http://ip:port/droplist/domain/target.com/attacker@evil.com
+```
+```
+curl -XHEAD http://ip:port/droplist/domain/target.com/evil.com
+```
+
+#### User DropList
+
+```
+curl -XHEAD http://ip:port/droplist/user/target@target.com/attacker@evil.com
+```
+```
+curl -XHEAD http://ip:port/droplist/user/target@target.com/evil.com
+```
+Response codes:
+
+* 200: The denied entity exists
+* 404: The denied entity does not exist
+
+### Add Entry to the DropList
+
+The denied entity must be a valid email address or [domain](#create-a-domain).
+
+#### Global DropList
+```
+curl -XPUT http://ip:port/droplist/global/attacker@evil.com
+```
+```
+curl -XPUT http://ip:port/droplist/global/evil.com
+```
+#### Domain DropList
+
+```
+curl -XPUT http://ip:port/droplist/domain/target.com/attacker@evil.com
+```
+```
+curl -XPUT http://ip:port/droplist/domain/target.com/evil.com
+```
+#### User DropList
+
+```
+curl -XPUT http://ip:port/droplist/user/target@target.com/attacker@evil.com
+```
+```
+curl -XPUT http://ip:port/droplist/user/target@target.com/evil.com
+```
+Response codes:
+
+* 204: The denied entity was successfully added
+* 400: The denied entity is invalid
+
+### Remove Entry from the DropList
+#### Global DropList
+
+```
+curl -XDELETE http://ip:port/droplist/global/attacker@evil.com
+```
+```
+curl -XDELETE http://ip:port/droplist/global/evil.com
+```
+
+#### Domain DropList
+
+```
+curl -XDELETE http://ip:port/droplist/domain/target.com/attacker@evil.com
+```
+```
+curl -XDELETE http://ip:port/droplist/domain/target.com/evil.com
+```
+#### User DropList
+
+```
+curl -XDELETE http://ip:port/droplist/user/target@target.com/attacker@evil.com
+```
+```
+curl -XDELETE http://ip:port/droplist/user/target@target.com/evil.com
+```
+Response codes:
+
+* 204: Entry deleted successfully.
+
 ## Cassandra Schema upgrades
 
 Cassandra upgrades implies the creation of a new table. Thus restarting James is needed, as new tables are created on restart.
@@ -2551,6 +2966,7 @@ to be configured.
 Note that email addresses are restricted to ASCII character set. Mail addresses not matching this criteria will be rejected.
 
  - [Listing groups](#Listing_groups)
+ - [Deleting all groups](#Deleting_all_groups)
  - [Listing members of a group](#Listing_members_of_a_group)
  - [Adding a group member](#Adding_a_group_member)
  - [Removing a group member](#Removing_a_group_member)
@@ -2570,6 +2986,18 @@ Will return the groups as a list of JSON Strings representing mail addresses. Fo
 Response codes:
 
  - 200: Success
+
+### Deleting all groups
+
+```
+curl -XDELETE http://ip:port/address/groups
+```
+
+Will delete all groups.
+
+Response codes:
+
+- 204: Success
 
 ### Listing members of a group
 
@@ -3103,6 +3531,48 @@ Response codes:
 - 200: OK
 - 400: Invalid parameter value
 
+### Listing sources for a mapping
+
+This endpoint allows receiving all mappings pointing to a corresponding user.
+
+```
+curl -XGET http://ip:port/mappings/sources/{userAddress}?type={type}
+```
+
+Return all mappings of a user where:
+
+ - `userAddress`: is the selected user
+ - `type`: Type of the mapping. One of `group`, `forward`, `address`, `alias`. Compulsory.
+
+Response body:
+
+```
+["group1@domain.tld","group2@domain.tld"]
+```
+
+Response codes:
+
+ - 200: OK
+ - 400: Invalid parameter value
+
+### Deleting sources for a mapping
+
+This endpoint allows deleting all mappings pointing to a corresponding user.
+
+```
+curl -XDELETE http://ip:port/mappings/sources/{userAddress}?type={type}
+```
+
+Deletes all mappings of a user where:
+
+ - `userAddress`: is the selected user
+ - `type`: Type of the mapping. One of `group`, `forward`, `address`, `alias`. Compulsory.
+
+Response codes:
+
+ - 204: OK
+ - 400: Invalid parameter value
+
 ## Administrating mail repositories
 
  - [Create a mail repository](#Create_a_mail_repository)
@@ -3225,6 +3695,21 @@ Example:
 
 ```
 curl -XGET 'http://ip:port/mailRepositories/var%2Fmail%2Ferror%2F/mails?limit=100&offset=500'
+```
+
+You can also pass the following additional URL parameters to filter results:
+
+- updatedBefore: filter mails by mail last updated. For example, if the value is `2d` and the current time is `21-12-2024 13:00:00`, the condition would be: last updated < 19-12-2024 13:00:00 (currentTime - `2d`). Some other value samples: `2d`, `2 days`, `2h`, `2 hours`.
+- updatedAfter: filter mails by mail last updated. For example, if the value is `2d` and the current time is `21-12-2024 13:00:00`, the condition would be: last updated > 19-12-2024 13:00:00 (currentTime - `2d`). Some other value samples: `2d`, `2 days`, `2h`, `2 hours`.
+- sender: filter mails by mail sender. If the input value is in the special format `*@domain.com`, mails are filters by domain.
+- recipient: filter by recipient. If the input value is in the special format `*@domain.com`, mails are filters by domain.
+- remoteAddress: filter mails by remoteAddress.
+- remoteHost: filter mails by remoteHost.
+
+Example:
+
+```
+curl -XGET /mailRepositories/var%2Fmail%2Ferror%2F/mails?updatedBefore=2d&remoteAddress=128.45.67.89
 ```
 
 Response codes:
@@ -4197,7 +4682,7 @@ Here are the following actions available on the 'Deleted Messages Vault'
 Deleted messages of a specific user can be restored by calling the following endpoint:
 
 ```
-curl -XPOST http://ip:port/deletedMessages/users/userToRestore@domain.ext?action=restore
+curl -XPOST http://ip:port/deletedMessages/users/userToRestore@domain.ext?action=restore[&force=true]
 
 {
   "combinator": "and",
@@ -4309,20 +4794,23 @@ Messages in the Deleted Messages Vault of a specified user that are matched with
 }
 ```
 
-**Warning**: Current web-admin uses `US` locale as the default. Therefore, there might be some conflicts when using String `containsIgnoreCase` comparators to apply 
-on the String data of other special locales stored in the Vault. More details at [JIRA](https://issues.apache.org/jira/browse/MAILBOX-384) 
+**Warning**: Current web-admin uses `US` locale as the default. Therefore, there might be some conflicts when using String `containsIgnoreCase` comparators to apply
+on the String data of other special locales stored in the Vault. More details at [JIRA](https://issues.apache.org/jira/browse/MAILBOX-384)
+
+**Note**: The optional `force` query parameter (`&force=true`) bypasses the user existence check.
+This is useful for restoring the vault of a deleted user or a virtual user.
 
 Response code:
 
  - 201: Task for restoring deleted has been created
- - 400: Bad request: 
+ - 400: Bad request:
    - action query param is not present
    - action query param is not a valid action
    - user parameter is invalid
    - can not parse the JSON body
    - Json query object contains unsupported operator, fieldName
-   - Json query object values violate parsing rules 
- - 404: User not found
+   - Json query object values violate parsing rules
+ - 404: User not found (bypassed when `force=true`)
  
 [More details about endpoints returning a task](#Endpoints_returning_a_task).
 
@@ -4347,16 +4835,19 @@ while:
 Retrieve deleted messages matched with requested query from an user then share the content to a targeted mail address (exportTo)
 
 ```
-curl -XPOST 'http://ip:port/deletedMessages/users/userExportFrom@domain.ext?action=export&exportTo=userReceiving@domain.ext'
+curl -XPOST 'http://ip:port/deletedMessages/users/userExportFrom@domain.ext?action=export&exportTo=userReceiving@domain.ext[&force=true]'
 
 BODY: is the json query has the same structure with Restore Deleted Messages section
 ```
 **Note**: Json query passing into the body follows the same rules & restrictions like in [Restore Deleted Messages](#Restore_deleted_messages)
 
+**Note**: The optional `force` query parameter (`&force=true`) bypasses the user existence check.
+This is useful for exporting the vault of a deleted user or a virtual user.
+
 Response code:
 
  - 201: Task for exporting has been created
- - 400: Bad request: 
+ - 400: Bad request:
    - exportTo query param is not present
    - exportTo query param is not a valid mail address
    - action query param is not present
@@ -4364,8 +4855,8 @@ Response code:
    - user parameter is invalid
    - can not parse the JSON body
    - Json query object contains unsupported operator, fieldName
-   - Json query object values violate parsing rules 
- - 404: User not found
+   - Json query object values violate parsing rules
+ - 404: User not found (bypassed when `force=true`)
 
 [More details about endpoints returning a task](#Endpoints_returning_a_task).
 
@@ -4410,18 +4901,21 @@ You may want to call this endpoint on a regular basis.
 Delete a Deleted Message with `MessageId`
 
 ```
-curl -XDELETE http://ip:port/deletedMessages/users/user@domain.ext/messages/3294a976-ce63-491e-bd52-1b6f465ed7a2
+curl -XDELETE http://ip:port/deletedMessages/users/user@domain.ext/messages/3294a976-ce63-491e-bd52-1b6f465ed7a2[?force=true]
 ```
 
 [More details about endpoints returning a task](#Endpoints_returning_a_task).
 
+**Note**: The optional `force` query parameter (`?force=true`) bypasses the user existence check.
+This is useful for removing a message from the vault of a deleted user or a virtual user.
+
 Response code:
 
  - 201: Task for deleting message has been created
- - 400: Bad request: 
+ - 400: Bad request:
    - user parameter is invalid
    - messageId parameter is invalid
- - 404: User not found
+ - 404: User not found (bypassed when `force=true`)
  
 The scheduled task will have the following type `deleted-messages-delete` and the following `additionalInformation`:
  
@@ -4575,6 +5069,14 @@ Additionnal optional task parameters are supported:
  
 Example of date format: `2023-04-15T07:23:27.541254+07:00` and `2023-04-15T07%3A23%3A27.541254%2B07%3A00` once URL encoded.
 
+### Cleaning up old tasks
+
+```
+curl -XDELETE http://ip:port/tasks?olderThan=30day
+```
+
+Will start a task which will cleanup old tasks still referenced in the TaskManager.
+
 ### Endpoints returning a task
 
 Many endpoints do generate a task.
@@ -4640,7 +5142,10 @@ Response codes :
  - 201: the taskId of the created task
  - 400: Invalid action argument for performing operation on mappings data
 
-## Reloading server certificates
+
+## Server administration
+
+### Reloading server certificates
 
 Certificates for TCP based protocols (IMAP, SMTP, POP3, LMTP and ManageSieve) can be updated at
 runtime, without service interuption and without closing existing connections.
@@ -4662,3 +5167,141 @@ Return code:
 
  - 204: the certificate is reloaded
  - 400: Invalid request.
+
+### Disconnecting users
+
+James maintains a set of stateful connections and provide an API allowing to close any of the existing
+connections, including:
+
+- IMAP protocol
+- SMTP protocol
+- JMAP websocket and event source sub protocols
+
+James keeps track of active channels and would iterate through them, destroying corresponding channels.
+
+#### Disconnecting a specific user
+
+```
+curl -XDELETE /servers/channels/bob@domain.tld
+```
+
+Will destroy channels belonging to `bob@domain.tld`.
+
+Return code:
+
+- 204: disconnect the user successfully
+
+#### Disconnecting all users
+
+```
+curl -XDELETE /servers/channels
+```
+
+Will close all channels.
+
+Return code:
+
+- 204: disconnect all users successfully
+
+#### Disconnecting a group of users
+
+```
+curl -XDELETE /servers/channels -d `["badGuy1@domain.tld","badGuy1@domain.tld"]`
+```
+
+Will disconnect `badGuy1@domain.tld` and `badGuy2@domain.tld`.
+
+Return code:
+
+- 204: disconnect the users successfully
+- 400: Invalid request
+
+### Listing connected users
+
+```
+curl -XGET /servers/connectedUsers
+```
+
+Will return a list of users having channels opened on the server:
+
+```
+[
+"alice@domain.tld",
+"bob@domain.tld"
+]
+```
+
+### Listing channels of a user
+
+```
+curl -XGET /servers/channels/bob@domain
+```
+
+Will return a description and statistics for channels of a user:
+
+```
+[
+ {
+  "protocol": "IMAP",
+  "endpoint": "imapserver",
+  "remoteAddress": "127.0.0.1",
+  "connectionDate": "2024-11-21T10:46:37.476425406Z",
+  "isActive": true,
+  "isOpen": true,
+  "isWritable": true,
+  "isEncrypted": false,
+  "username": "bob@domain",
+  "protocolSpecificInformation": {
+    "loggedInUser": "bob@domain",
+    "isCompressed": "false",
+    "selectedMailbox": "1",
+    "isIdling": "false",
+    "requestCount": "3",
+    "userAgent": "{name=Thunderbird, version=102.7.1}",
+    "cumulativeWrittenBytes": "448",
+    "cumulativeReadBytes": "103",
+    "liveReadThroughputBytePerSecond": "0",
+    "liveWriteThroughputBytePerSecond": "0"
+  }
+ }
+]
+```
+
+
+### Listing all channels
+
+```
+curl -XGET /servers/channels
+```
+
+Will return a description and statistics for channels of all users:
+
+```
+[
+ {
+  "protocol": "IMAP",
+  "endpoint": "imapserver",
+  "remoteAddress": "127.0.0.1",
+  "connectionDate": "2024-11-21T10:46:37.476425406Z",
+  "isActive": true,
+  "isOpen": true,
+  "isWritable": true,
+  "isEncrypted": false,
+  "username": "bob@domain",
+  "protocolSpecificInformation": {
+    "loggedInUser": "bob@domain",
+    "isCompressed": "false",
+    "selectedMailbox": "1",
+    "isIdling": "false",
+    "requestCount": "3",
+    "userAgent": "{name=Thunderbird, version=102.7.1}",
+    "cumulativeWrittenBytes": "448",
+    "cumulativeReadBytes": "103",
+    "liveReadThroughputBytePerSecond": "0",
+    "liveWriteThroughputBytePerSecond": "0"
+  }
+ }
+]
+```
+
+Be warned that the output can be very large if a significant count of channels is opened.

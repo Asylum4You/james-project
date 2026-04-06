@@ -24,17 +24,46 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.xmlunit.matchers.EvaluateXPathMatcher.hasXPath;
 
 import java.io.IOException;
+import java.util.Map;
 
 import javax.xml.transform.Source;
 
+import org.apache.james.protocols.smtp.SMTPConfiguration;
 import org.assertj.core.api.Assertions;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.w3c.dom.Node;
 import org.xmlunit.builder.Input;
 import org.xmlunit.xpath.JAXPXPathEngine;
 import org.xmlunit.xpath.XPathEngine;
 
 public class SmtpConfigurationTest {
+    @Nested
+    class SenderVerificationModeTest {
+        @ParameterizedTest
+        @ValueSource(strings = {"strict", "STRICT", "  strict", "strict ", "sTrIcT", "true", " true", "TrUe"})
+        void parseStrict(String value) {
+            Assertions.assertThat(SMTPConfiguration.SenderVerificationMode.parse(value))
+                .isEqualTo(SMTPConfiguration.SenderVerificationMode.STRICT);
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {"disabled", "DISABLED", "  disabled", "DiSaBleD", "false", " false", "FalSe"})
+        void parseDisabled(String value) {
+            Assertions.assertThat(SMTPConfiguration.SenderVerificationMode.parse(value))
+                .isEqualTo(SMTPConfiguration.SenderVerificationMode.DISABLED);
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {"relaxed", "RELAXED", "  relaxed", "ReLaXeD"})
+        void parseRelaxed(String value) {
+            Assertions.assertThat(SMTPConfiguration.SenderVerificationMode.parse(value))
+                .isEqualTo(SMTPConfiguration.SenderVerificationMode.RELAXED);
+        }
+    }
+
     @Test
     public void authenticationCanBeRequired() throws IOException {
         assertThat(SmtpConfiguration.builder()
@@ -43,6 +72,24 @@ public class SmtpConfigurationTest {
                 .serializeAsXml(),
             hasXPath("/smtpservers/smtpserver/authRequired/text()",
                 is("true")));
+    }
+
+    @Test
+    public void startTlsDisabledByDefault() throws IOException {
+
+        assertThat(SmtpConfiguration.builder()
+                        .build()
+                        .serializeAsXml(),
+                hasXPath("//tls/@startTLS", is("false")));
+    }
+
+    @Test
+    public void startTlsCanBeCustomized() throws IOException {
+
+        assertThat(SmtpConfiguration.builder()
+                        .requireStartTls()
+                        .build().serializeAsXml(),
+                hasXPath("//tls/@startTLS", is("true")));
     }
 
     @Test
@@ -72,7 +119,7 @@ public class SmtpConfigurationTest {
                 .build()
                 .serializeAsXml(),
             hasXPath("/smtpservers/smtpserver/verifyIdentity/text()",
-                is("false")));
+                is("DISABLED")));
     }
 
     @Test
@@ -101,7 +148,7 @@ public class SmtpConfigurationTest {
                 .build()
                 .serializeAsXml(),
             hasXPath("/smtpservers/smtpserver/verifyIdentity/text()",
-                is("true")));
+                is("STRICT")));
     }
 
     @Test
@@ -150,6 +197,35 @@ public class SmtpConfigurationTest {
     public void verifyIdentityShouldBeDisabledByDefault() throws IOException {
         assertThat(SmtpConfiguration.DEFAULT.serializeAsXml(),
             hasXPath("/smtpservers/smtpserver/verifyIdentity/text()",
-                is("false")));
+                is("DISABLED")));
     }
+
+    @Test
+    public void addHookShouldRegisterHookWithoutConfig() throws IOException {
+        String hookFqcn = "com.example.hooks.MyCustomHook";
+
+        SmtpConfiguration configuration = SmtpConfiguration.builder()
+                .addHook(hookFqcn)
+                .build();
+
+        assertThat(configuration.serializeAsXml(),
+                hasXPath("/smtpservers/smtpserver/handlerchain/handler[@class='" + hookFqcn + "']/@class", is(hookFqcn)));
+    }
+
+    @Test
+    public void addHookShouldRegisterHookWithConfig() throws IOException {
+        String hookFqcn = "com.example.hooks.MyCustomHook";
+        Map<String, String> hookConfig = Map.of("param1", "value1", "param2", "value2");
+
+        SmtpConfiguration configuration = SmtpConfiguration.builder()
+                .addHook(hookFqcn, hookConfig)
+                .build();
+
+        String xmlOutput = configuration.serializeAsXml();
+        assertThat(xmlOutput, hasXPath("/smtpservers/smtpserver/handlerchain/handler[@class='" + hookFqcn + "']/@class", is(hookFqcn)));
+        assertThat(xmlOutput, hasXPath("/smtpservers/smtpserver/handlerchain/handler[@class='" + hookFqcn + "']/param1/text()", is("value1")));
+        assertThat(xmlOutput, hasXPath("/smtpservers/smtpserver/handlerchain/handler[@class='" + hookFqcn + "']/param2/text()", is("value2")));
+    }
+
+
 }

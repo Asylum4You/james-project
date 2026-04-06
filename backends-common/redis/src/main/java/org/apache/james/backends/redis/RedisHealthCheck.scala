@@ -19,46 +19,47 @@
 
 package org.apache.james.backends.redis
 
-import java.time.Duration
-
-import io.lettuce.core.api.StatefulConnection
+import io.lettuce.core.api.reactive.RedisStringReactiveCommands
 import io.lettuce.core.cluster.RedisClusterClient
 import io.lettuce.core.codec.StringCodec
-import io.lettuce.core.{RedisClient, RedisURI}
+import io.lettuce.core.masterreplica.MasterReplica
+import io.lettuce.core.{AbstractRedisClient, RedisClient}
 import jakarta.inject.Inject
+import org.apache.james.backends.redis.RedisHealthCheck.{healthCheckKey, healthCheckValue, redisComponent}
 import org.apache.james.core.healthcheck.{ComponentName, HealthCheck, Result}
 import org.reactivestreams.Publisher
 import reactor.core.scala.publisher.SMono
 
-import scala.concurrent.ExecutionContext.Implicits.global
 import scala.jdk.CollectionConverters._
-import scala.jdk.FutureConverters._
 
-class RedisHealthCheck @Inject()(redisConfiguration: RedisConfiguration) extends HealthCheck {
-  private val redisComponent: ComponentName = new ComponentName("Redis")
-  private val healthcheckTimeout = Duration.ofSeconds(3)
+object RedisHealthCheck {
+  val redisComponent: ComponentName = new ComponentName("Redis")
+  val healthCheckKey: String = "healthcheck"
+  val healthCheckValue: String = "healthy"
+}
+
+class RedisHealthCheck @Inject()(redisClientFactory: RedisClientFactory, redisConfiguration: RedisConfiguration) extends HealthCheck {
+
+  private val rawRedisClient: AbstractRedisClient = redisClientFactory.rawRedisClient
+  private val redisCommand: RedisStringReactiveCommands[String, String] = redisConfiguration match {
+    case _: StandaloneRedisConfiguration => rawRedisClient.asInstanceOf[RedisClient].connect().reactive()
+    case _: ClusterRedisConfiguration => rawRedisClient.asInstanceOf[RedisClusterClient].connect().reactive()
+    case masterReplicaRedisConfiguration: MasterReplicaRedisConfiguration => MasterReplica.connect(rawRedisClient.asInstanceOf[RedisClient],
+        StringCodec.UTF8,
+        masterReplicaRedisConfiguration.redisURI.value.asJava)
+      .reactive()
+    case sentinelRedisConfiguration: SentinelRedisConfiguration =>  MasterReplica.connect(rawRedisClient.asInstanceOf[RedisClient],
+        StringCodec.UTF8,
+        sentinelRedisConfiguration.redisURI)
+      .reactive()
+  }
 
   override def componentName(): ComponentName = redisComponent
 
   override def check(): Publisher[Result] =
-    connectRedis()
-      .`then`(SMono.just(Result.healthy(redisComponent)))
+    SMono(redisCommand.set(healthCheckKey, healthCheckValue)
+        .`then`(redisCommand.getdel(healthCheckKey)))
+      .map(_ => Result.healthy(redisComponent))
+      .switchIfEmpty(SMono.just(Result.degraded(redisComponent, "Can not write to Redis.")))
       .onErrorResume(_ => SMono.just(Result.degraded(redisComponent, "Can not connect to Redis.")))
-
-  private def connectRedis(): SMono[StatefulConnection[String, String]] =
-    if (redisConfiguration.isCluster) {
-      val redisUris = redisConfiguration.redisURI.value.asJava
-      redisUris.forEach(redisUri => redisUri.setTimeout(healthcheckTimeout))
-      val redisClusterClient = RedisClusterClient.create(redisUris)
-
-      SMono.fromFuture(redisClusterClient.connectAsync(StringCodec.UTF8).asScala)
-        .doOnTerminate(() => redisClusterClient.shutdownAsync())
-    } else {
-      val redisUri: RedisURI = redisConfiguration.redisURI.value.last
-      redisUri.setTimeout(healthcheckTimeout)
-      val redisClient = RedisClient.create(redisUri)
-
-      SMono.fromFuture(redisClient.connectAsync(StringCodec.UTF8, redisUri).asScala)
-        .doOnTerminate(() => redisClient.shutdownAsync())
-    }
 }

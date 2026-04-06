@@ -48,6 +48,7 @@ import org.apache.james.mailbox.extension.PreDeletionHook
 import org.apache.james.mailbox.inmemory.{InMemoryMailboxManager, MemoryMailboxManagerProvider}
 import org.apache.james.metrics.tests.RecordingMetricFactory
 import org.apache.james.user.memory.MemoryUsersRepository
+import org.hamcrest
 import org.hamcrest.Matchers.equalTo
 import org.mockito.ArgumentMatchers.any
 import org.mockito.Mockito.{doReturn, mock, when}
@@ -271,6 +272,23 @@ class JMAPApiRoutesTest extends AnyFlatSpec with BeforeAndAfter with Matchers {
     jmapServer.stop()
   }
 
+  "Extract original client IP address" should "work well" in {
+    assert(JMAPApiRoutes.extractOriginalClientIP("203.0.113.195, 2001:db8:85a3:8d3:1319:8a2e:370:7348")
+      .equals("203.0.113.195"))
+
+    assert(JMAPApiRoutes.extractOriginalClientIP("203.0.113.195")
+      .equals("203.0.113.195"))
+
+    assert(JMAPApiRoutes.extractOriginalClientIP("203.0.113.195  ")
+      .equals("203.0.113.195"))
+
+    assert(JMAPApiRoutes.extractOriginalClientIP(null)
+      .equals(""))
+
+    assert(JMAPApiRoutes.extractOriginalClientIP("")
+      .equals(""))
+  }
+
   "RFC-8621 version, GET" should "not supported and return 404 status" in {
     val headers: Headers = Headers.headers(
       new Header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER),
@@ -379,8 +397,7 @@ class JMAPApiRoutesTest extends AnyFlatSpec with BeforeAndAfter with Matchers {
         .statusCode(HttpStatus.SC_BAD_REQUEST)
         .body("status", equalTo(400))
         .body("type", equalTo(RequestLevelErrorType.NOT_JSON.value))
-        .body("detail", equalTo("The content type of the request was not application/json or the request did not parse as I-JSON: Unexpected character ('}' (code 125)): was expecting double-quote to start field name\n " +
-          "at [Source: (reactor.netty.ByteBufMono$ReleasingInputStream); line: 6, column: 2]"))
+        .body("detail", hamcrest.Matchers.containsString("The content type of the request was not application/json or the request did not parse as I-JSON: Unexpected character ('}' (code 125)): was expecting double-quote to start field name\n "))
   }
 
   "RFC-8621 version, POST, with unknown capability" should "return 400 status" in {

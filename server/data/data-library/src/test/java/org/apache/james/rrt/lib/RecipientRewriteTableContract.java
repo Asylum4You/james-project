@@ -105,6 +105,20 @@ public interface RecipientRewriteTableContract {
     }
 
     @Test
+    default void testStoreDuplicateMapping() throws Exception {
+        Domain domain = Domain.of("james");
+        MappingSource source = MappingSource.fromUser(USER, domain);
+
+        Mapping mapping = Mapping.group(ADDRESS);
+        Mapping mapping2 = Mapping.group(ADDRESS);
+
+        virtualUserTable().addMapping(source, mapping);
+        virtualUserTable().addMapping(source, mapping2);
+
+        assertThat(virtualUserTable().mapAddress(USER, domain).size()).isEqualTo(1);
+    }
+
+    @Test
     default void testQuotedLocalPart() {
         assertThatCode(() -> virtualUserTable().getResolvedMappings("\"a@b\"", Domain.of("test"))).doesNotThrowAnyException();
     }
@@ -409,6 +423,19 @@ public interface RecipientRewriteTableContract {
         virtualUserTable().addMapping(source2, mapping);
 
         assertThat(virtualUserTable().listSources(mapping)).contains(source, source2);
+    }
+
+    @Test
+    default void listSourcesShouldReturnWhenSourceHasMultipleMappings() throws Exception {
+        MappingSource source = MappingSource.fromUser(USER, Domain.of("james"));
+        Mapping mapping = Mapping.group(ADDRESS);
+        Mapping mapping2 = Mapping.group(ADDRESS_2);
+
+        virtualUserTable().addMapping(source, mapping);
+        virtualUserTable().addMapping(source, mapping2);
+
+        assertThat(virtualUserTable().listSources(mapping)).contains(source);
+        assertThat(virtualUserTable().listSources(mapping2)).contains(source);
     }
 
     @Test

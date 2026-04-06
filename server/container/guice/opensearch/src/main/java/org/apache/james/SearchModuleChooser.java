@@ -34,18 +34,24 @@ import org.apache.james.mailbox.exception.MailboxException;
 import org.apache.james.mailbox.model.Mailbox;
 import org.apache.james.mailbox.model.MailboxId;
 import org.apache.james.mailbox.model.MessageId;
+import org.apache.james.mailbox.model.MultimailboxesSearchQuery;
+import org.apache.james.mailbox.model.SearchOptions;
 import org.apache.james.mailbox.model.SearchQuery;
 import org.apache.james.mailbox.model.UpdatedFlags;
+import org.apache.james.mailbox.searchhighligt.SearchHighlighter;
+import org.apache.james.mailbox.searchhighligt.SearchSnippet;
 import org.apache.james.mailbox.store.mail.model.MailboxMessage;
 import org.apache.james.mailbox.store.search.ListeningMessageSearchIndex;
 import org.apache.james.mailbox.store.search.MessageSearchIndex;
 import org.apache.james.mailbox.store.search.SimpleMessageSearchIndex;
 import org.apache.james.modules.mailbox.OpenSearchClientModule;
 import org.apache.james.modules.mailbox.OpenSearchDisabledModule;
+import org.apache.james.modules.mailbox.OpenSearchMailboxMappingModule;
 import org.apache.james.modules.mailbox.OpenSearchMailboxModule;
 import org.apache.james.modules.server.ReIndexingModule;
 import org.apache.james.quota.search.QuotaSearcher;
 import org.apache.james.quota.search.scanning.ScanningQuotaSearcher;
+import org.reactivestreams.Publisher;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
@@ -103,12 +109,17 @@ public class SearchModuleChooser {
         }
 
         @Override
+        public void postReindexing() {
+            throw new NotImplementedException("not implemented");
+        }
+
+        @Override
         public Flux<MessageUid> doSearch(MailboxSession session, Mailbox mailbox, SearchQuery searchQuery) throws MailboxException {
             throw new NotImplementedException("not implemented");
         }
 
         @Override
-        public Flux<MessageId> search(MailboxSession session, Collection<MailboxId> mailboxIds, SearchQuery searchQuery, long limit) {
+        public Flux<MessageId> search(MailboxSession session, Collection<MailboxId> mailboxIds, SearchQuery searchQuery, SearchOptions searchOptions) {
             throw new NotImplementedException("not implemented");
         }
 
@@ -132,23 +143,37 @@ public class SearchModuleChooser {
         }
     }
 
-    public static List<Module> chooseModules(SearchConfiguration searchConfiguration) {
-        switch (searchConfiguration.getImplementation()) {
-            case OpenSearch:
-                return ImmutableList.of(
-                    new OpenSearchClientModule(),
-                    new OpenSearchMailboxModule(),
-                    new ReIndexingModule());
-            case Scanning:
-                return ImmutableList.of(
-                    new ScanningQuotaSearchModule(),
-                    new ScanningSearchModule());
-            case OpenSearchDisabled:
-                return ImmutableList.of(
-                    new OpenSearchDisabledModule(),
-                    new ScanningQuotaSearchModule());
-            default:
-                throw new RuntimeException("Unsupported search implementation " + searchConfiguration.getImplementation());
+    private static class FakeSearchHighlighter implements SearchHighlighter {
+
+        @Override
+        public Publisher<SearchSnippet> highlightSearch(List<MessageId> messageIds, MultimailboxesSearchQuery expression, MailboxSession session) {
+            return Mono.error(new NotImplementedException("not implemented"));
         }
+    }
+
+    private static class FakeSearchHighlightModule extends AbstractModule {
+        @Override
+        protected void configure() {
+            bind(SearchHighlighter.class).toInstance(new FakeSearchHighlighter());
+        }
+    }
+
+    public static List<Module> chooseModules(SearchConfiguration searchConfiguration) {
+        return switch (searchConfiguration.getImplementation()) {
+            case OpenSearch -> ImmutableList.of(
+                new OpenSearchClientModule(),
+                new OpenSearchMailboxMappingModule(),
+                new OpenSearchMailboxModule(),
+                new ReIndexingModule(),
+                new OpenSearchHighlightModule());
+            case Scanning -> ImmutableList.of(
+                new ScanningQuotaSearchModule(),
+                new ScanningSearchModule(),
+                new FakeSearchHighlightModule());
+            case OpenSearchDisabled -> ImmutableList.of(
+                new OpenSearchDisabledModule(),
+                new ScanningQuotaSearchModule(),
+                new FakeSearchHighlightModule());
+        };
     }
 }

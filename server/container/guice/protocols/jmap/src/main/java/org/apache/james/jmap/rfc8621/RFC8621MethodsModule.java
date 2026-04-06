@@ -27,10 +27,13 @@ import java.util.Set;
 
 import org.apache.commons.configuration2.Configuration;
 import org.apache.commons.configuration2.ex.ConfigurationException;
+import org.apache.james.core.ConnectionDescriptionSupplier;
+import org.apache.james.core.Disconnector;
 import org.apache.james.jmap.JMAPRoutes;
 import org.apache.james.jmap.JMAPRoutesHandler;
 import org.apache.james.jmap.Version;
 import org.apache.james.jmap.api.model.TypeName;
+import org.apache.james.jmap.api.pushsubscription.PushSubscriptionDisconnector;
 import org.apache.james.jmap.api.upload.UploadService;
 import org.apache.james.jmap.api.upload.UploadServiceDefaultImpl;
 import org.apache.james.jmap.change.EmailDeliveryTypeName$;
@@ -49,6 +52,7 @@ import org.apache.james.jmap.http.rfc8621.InjectionKeys;
 import org.apache.james.jmap.mail.DefaultNamespaceFactory;
 import org.apache.james.jmap.mail.NamespaceFactory;
 import org.apache.james.jmap.mail.SortOrderProvider;
+import org.apache.james.jmap.method.BlobCopyMethod;
 import org.apache.james.jmap.method.CoreEchoMethod;
 import org.apache.james.jmap.method.DelegateGetMethod;
 import org.apache.james.jmap.method.DelegateSetMethod;
@@ -59,6 +63,8 @@ import org.apache.james.jmap.method.EmailGetMethod;
 import org.apache.james.jmap.method.EmailImportMethod;
 import org.apache.james.jmap.method.EmailParseMethod;
 import org.apache.james.jmap.method.EmailQueryMethod;
+import org.apache.james.jmap.method.EmailQueryOptimizer;
+import org.apache.james.jmap.method.EmailQueryViewOptimizer;
 import org.apache.james.jmap.method.EmailSetMethod;
 import org.apache.james.jmap.method.EmailSubmissionSetMethod;
 import org.apache.james.jmap.method.IdentityChangesMethod;
@@ -77,6 +83,7 @@ import org.apache.james.jmap.method.PushSubscriptionSetMethod;
 import org.apache.james.jmap.method.QuotaChangesMethod;
 import org.apache.james.jmap.method.QuotaGetMethod;
 import org.apache.james.jmap.method.QuotaQueryMethod;
+import org.apache.james.jmap.method.SearchSnippetGetMethod;
 import org.apache.james.jmap.method.SystemZoneIdProvider;
 import org.apache.james.jmap.method.ThreadChangesMethod;
 import org.apache.james.jmap.method.ThreadGetMethod;
@@ -86,19 +93,15 @@ import org.apache.james.jmap.method.ZoneIdProvider;
 import org.apache.james.jmap.pushsubscription.DefaultWebPushClient;
 import org.apache.james.jmap.pushsubscription.PushClientConfiguration;
 import org.apache.james.jmap.pushsubscription.WebPushClient;
-import org.apache.james.jmap.routes.BlobResolver;
 import org.apache.james.jmap.routes.DownloadRoutes;
 import org.apache.james.jmap.routes.EventSourceRoutes;
 import org.apache.james.jmap.routes.JMAPApiRoutes;
-import org.apache.james.jmap.routes.MessageBlobResolver;
-import org.apache.james.jmap.routes.MessagePartBlobResolver;
 import org.apache.james.jmap.routes.SessionRoutes;
-import org.apache.james.jmap.routes.UploadResolver;
 import org.apache.james.jmap.routes.UploadRoutes;
 import org.apache.james.jmap.routes.WebSocketRoutes;
 import org.apache.james.metrics.api.MetricFactory;
 import org.apache.james.utils.ClassName;
-import org.apache.james.utils.GuiceGenericLoader;
+import org.apache.james.utils.GuiceLoader;
 import org.apache.james.utils.InitializationOperation;
 import org.apache.james.utils.InitilizationOperationBuilder;
 import org.apache.james.utils.NamingScheme;
@@ -141,6 +144,7 @@ public class RFC8621MethodsModule extends AbstractModule {
 
         Multibinder<Method> methods = Multibinder.newSetBinder(binder(), Method.class);
         methods.addBinding().to(CoreEchoMethod.class);
+        methods.addBinding().to(BlobCopyMethod.class);
         methods.addBinding().to(EmailChangesMethod.class);
         methods.addBinding().to(EmailImportMethod.class);
         methods.addBinding().to(EmailGetMethod.class);
@@ -171,6 +175,7 @@ public class RFC8621MethodsModule extends AbstractModule {
         methods.addBinding().to(DelegateSetMethod.class);
         methods.addBinding().to(DelegatedAccountSetMethod.class);
         methods.addBinding().to(MailboxQueryChangesMethod.class);
+        methods.addBinding().to(SearchSnippetGetMethod.class);
 
         Multibinder<JMAPRoutes> routes = Multibinder.newSetBinder(binder(), JMAPRoutes.class);
         routes.addBinding().to(SessionRoutes.class);
@@ -193,10 +198,17 @@ public class RFC8621MethodsModule extends AbstractModule {
         typeNameMultibinder.addBinding().toInstance(EmailDeliveryTypeName$.MODULE$);
         typeNameMultibinder.addBinding().toInstance(VacationResponseTypeName$.MODULE$);
 
-        Multibinder<BlobResolver> blobResolverMultibinder = Multibinder.newSetBinder(binder(), BlobResolver.class);
-        blobResolverMultibinder.addBinding().to(MessageBlobResolver.class);
-        blobResolverMultibinder.addBinding().to(UploadResolver.class);
-        blobResolverMultibinder.addBinding().to(MessagePartBlobResolver.class);
+        Multibinder<Disconnector> disconnectorMultibinder = Multibinder.newSetBinder(binder(), Disconnector.class);
+        disconnectorMultibinder.addBinding().to(WebSocketRoutes.class);
+        disconnectorMultibinder.addBinding().to(EventSourceRoutes.class);
+        disconnectorMultibinder.addBinding().to(PushSubscriptionDisconnector.class);
+
+        Multibinder<ConnectionDescriptionSupplier> connectionDescriptionSupplierMultibinder = Multibinder.newSetBinder(binder(), ConnectionDescriptionSupplier.class);
+        connectionDescriptionSupplierMultibinder.addBinding().to(WebSocketRoutes.class);
+        connectionDescriptionSupplierMultibinder.addBinding().to(EventSourceRoutes.class);
+
+        Multibinder<EmailQueryOptimizer> emailQueryOptimizerMultibinder = Multibinder.newSetBinder(binder(), EmailQueryOptimizer.class);
+        emailQueryOptimizerMultibinder.addBinding().to(EmailQueryViewOptimizer.class);
     }
 
     @ProvidesIntoSet
@@ -218,13 +230,13 @@ public class RFC8621MethodsModule extends AbstractModule {
     @Provides
     @Singleton
     @Named("jmapRFC8621AuthenticationStrategies")
-    public Set<AuthenticationStrategy> provideAuthenticationStrategies(GuiceGenericLoader loader,
+    public Set<AuthenticationStrategy> provideAuthenticationStrategies(GuiceLoader guiceLoader,
                                                                        JmapRfc8621Configuration configuration) {
         return configuration.getAuthenticationStrategiesAsJava()
             .orElse(DEFAULT_AUTHENTICATION_STRATEGIES)
             .stream()
             .map(ClassName::new)
-            .map(Throwing.function(loader.<AuthenticationStrategy>withNamingSheme(
+            .map(Throwing.function(guiceLoader.<AuthenticationStrategy>withNamingSheme(
                 new NamingScheme.OptionalPackagePrefix(IMPLICIT_AUTHENTICATION_STRATEGY_FQDN_PREFIX))::instantiate))
             .collect(ImmutableSet.toImmutableSet());
     }

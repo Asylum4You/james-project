@@ -24,7 +24,7 @@
     <parent>
         <groupId>org.apache.james</groupId>
         <artifactId>james-server</artifactId>
-        <version>3.9.0-SNAPSHOT</version>
+        <version>3.10.0-SNAPSHOT</version>
         <relativePath>../../pom.xml</relativePath>
     </parent>
 
@@ -47,12 +47,6 @@
     </dependencyManagement>
 
     <dependencies>
-        <dependency>
-            <groupId>${james.groupId}</groupId>
-            <artifactId>apache-james-linshare</artifactId>
-            <type>test-jar</type>
-            <scope>test</scope>
-        </dependency>
         <dependency>
             <groupId>${james.groupId}</groupId>
             <artifactId>apache-james-mailbox-store</artifactId>
@@ -113,6 +107,10 @@
         <dependency>
             <groupId>${james.groupId}</groupId>
             <artifactId>james-server-guice-lmtp</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>${james.groupId}</groupId>
+            <artifactId>james-server-guice-lucene</artifactId>
         </dependency>
         <dependency>
             <groupId>${james.groupId}</groupId>
@@ -188,6 +186,10 @@
         </dependency>
         <dependency>
             <groupId>${james.groupId}</groupId>
+            <artifactId>james-server-protocols-smtp-dkim</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>${james.groupId}</groupId>
             <artifactId>james-server-testing</artifactId>
             <scope>test</scope>
         </dependency>
@@ -211,14 +213,6 @@
             <artifactId>logback-classic</artifactId>
         </dependency>
         <dependency>
-            <groupId>ch.qos.logback.contrib</groupId>
-            <artifactId>logback-jackson</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>ch.qos.logback.contrib</groupId>
-            <artifactId>logback-json-classic</artifactId>
-        </dependency>
-        <dependency>
             <groupId>io.rest-assured</groupId>
             <artifactId>rest-assured</artifactId>
             <scope>test</scope>
@@ -226,6 +220,11 @@
         <dependency>
             <groupId>org.apache.pdfbox</groupId>
             <artifactId>pdfbox</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-core</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>
@@ -294,14 +293,22 @@
                     <container>
                         <mainClass>org.apache.james.MemoryJamesServerMain</mainClass>
                         <ports>
-                            <port>80</port> <!-- JMAP -->
-                            <port>143</port> <!-- IMAP -->
-                            <port>993</port> <!-- IMAPS -->
-                            <port>25</port> <!-- SMTP -->
-                            <port>465</port> <!-- SMTP + STARTTLS -->
-                            <port>587</port> <!-- SMTPS -->
-                            <port>4000</port> <!-- GLOWROOT, if activated -->
-                            <port>8000</port> <!-- WEBADMIN -->
+                            <port>80</port>
+                            <!-- JMAP -->
+                            <port>143</port>
+                            <!-- IMAP -->
+                            <port>993</port>
+                            <!-- IMAPS -->
+                            <port>25</port>
+                            <!-- SMTP -->
+                            <port>465</port>
+                            <!-- SMTP + STARTTLS -->
+                            <port>587</port>
+                            <!-- SMTPS -->
+                            <port>4000</port>
+                            <!-- GLOWROOT, if activated -->
+                            <port>8000</port>
+                            <!-- WEBADMIN -->
                         </ports>
                         <appRoot>/root</appRoot>
                         <jvmFlags>
@@ -346,7 +353,8 @@
                         <permissions>
                             <permission>
                                 <file>/usr/bin/james-cli</file>
-                                <mode>755</mode> <!-- Read/write/execute for owner, read/execute for group/other -->
+                                <mode>755</mode>
+                                <!-- Read/write/execute for owner, read/execute for group/other -->
                             </permission>
                         </permissions>
                     </extraDirectories>

@@ -25,13 +25,19 @@ import static io.restassured.RestAssured.with;
 import static org.apache.james.webadmin.Constants.SEPARATOR;
 import static org.apache.james.webadmin.vault.routes.DeletedMessagesVaultRoutes.MESSAGE_PATH_PARAM;
 import static org.apache.james.webadmin.vault.routes.DeletedMessagesVaultRoutes.USERS;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.eclipse.jetty.http.HttpStatus.CREATED_201;
 import static org.hamcrest.CoreMatchers.notNullValue;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.nullValue;
 import static org.hamcrest.collection.IsMapWithSize.anEmptyMap;
 
 import java.io.ByteArrayInputStream;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.Date;
+import java.util.List;
+import java.util.Map;
 import java.util.stream.Stream;
 
 import jakarta.mail.Flags;
@@ -53,6 +59,7 @@ import org.apache.james.junit.categories.BasicFeature;
 import org.apache.james.mailbox.MailboxSession;
 import org.apache.james.mailbox.events.GenericGroup;
 import org.apache.james.mailbox.events.MailboxEvents.MailboxAdded;
+import org.apache.james.mailbox.exception.MailboxException;
 import org.apache.james.mailbox.inmemory.InMemoryId;
 import org.apache.james.mailbox.model.ComposedMessageId;
 import org.apache.james.mailbox.model.MailboxConstants;
@@ -71,17 +78,20 @@ import org.apache.james.modules.blobstore.BlobStoreConfiguration;
 import org.apache.james.probe.DataProbe;
 import org.apache.james.server.core.MailImpl;
 import org.apache.james.task.TaskManager;
+import org.apache.james.util.ReactorUtils;
 import org.apache.james.utils.DataProbeImpl;
 import org.apache.james.utils.MailRepositoryProbeImpl;
 import org.apache.james.utils.WebAdminGuiceProbe;
 import org.apache.james.vault.VaultConfiguration;
 import org.apache.james.webadmin.WebAdminUtils;
+import org.apache.james.webadmin.data.jmap.RunRulesOnMailboxTask;
 import org.apache.james.webadmin.routes.CassandraMailboxMergingRoutes;
 import org.apache.james.webadmin.routes.MailQueueRoutes;
 import org.apache.james.webadmin.routes.MailRepositoriesRoutes;
 import org.apache.james.webadmin.routes.TasksRoutes;
 import org.apache.james.webadmin.service.ClearMailboxContentTask;
 import org.apache.james.webadmin.vault.routes.DeletedMessagesVaultRoutes;
+import org.awaitility.Awaitility;
 import org.eclipse.jetty.http.HttpStatus;
 import org.hamcrest.Matchers;
 import org.junit.jupiter.api.BeforeEach;
@@ -91,9 +101,23 @@ import org.junit.jupiter.api.extension.RegisterExtension;
 
 import io.restassured.RestAssured;
 import io.restassured.http.ContentType;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
 @Tag(BasicFeature.TAG)
 class RabbitMQWebAdminServerTaskSerializationIntegrationTest {
+    private static class MailboxIdPair {
+        private final MailboxId origin;
+        private final MailboxId destination;
+
+        private MailboxIdPair(MailboxId origin, MailboxId destination) {
+            this.origin = origin;
+            this.destination = destination;
+        }
+    }
+
+    private static final int TASK_COUNT = 60;
+    private static final int MESSAGES_PER_ORIGIN_MAILBOX = 20;
 
     @RegisterExtension
     static JamesServerExtension testExtension = new JamesServerBuilder<CassandraRabbitMQJamesConfiguration>(tmpDir ->
@@ -117,6 +141,7 @@ class RabbitMQWebAdminServerTaskSerializationIntegrationTest {
 
     private static final String DOMAIN = "domain";
     private static final String USERNAME = "username@" + DOMAIN;
+    private static final String USERNAME_2 = "username2@" + DOMAIN;
 
     private DataProbe dataProbe;
     private MailboxProbe mailboxProbe;
@@ -184,6 +209,69 @@ class RabbitMQWebAdminServerTaskSerializationIntegrationTest {
             .body("additionalInformation.username", is(USERNAME))
             .body("additionalInformation.subscribedCount", is(1))
             .body("additionalInformation.unsubscribedCount", is(0));
+    }
+
+    @Test
+    void multipleMailboxMergingTasksShouldCompleteQuicklyDespitePollingInterval(GuiceJamesServer server) throws Exception {
+        server.getProbe(DataProbeImpl.class).addUser(USERNAME, "secret");
+        mailboxProbe.createMailbox(MailboxConstants.USER_NAMESPACE, USERNAME, MailboxConstants.INBOX);
+
+        List<MailboxIdPair> mailboxes = Flux.range(0, TASK_COUNT)
+            .flatMap(this::provisionMailbox, ReactorUtils.LOW_CONCURRENCY)
+            .collectList()
+            .block();
+
+        List<String> taskIds = mailboxes.stream()
+            .map(pair -> given()
+                .contentType(ContentType.JSON)
+                .body("{" +
+                    "\"mergeOrigin\":\"" + pair.origin.serialize() + "\"," +
+                    "\"mergeDestination\":\"" + pair.destination.serialize() + "\"" +
+                    "}")
+                .post(CassandraMailboxMergingRoutes.BASE)
+                .then()
+                .statusCode(CREATED_201)
+                .extract()
+                .jsonPath()
+                .getString("taskId"))
+            .toList();
+
+        // expect all tasks to complete within 2 minutes
+        Awaitility.await()
+            .atMost(Duration.ofMinutes(2))
+            .untilAsserted(() -> taskIds.forEach(taskId -> given()
+                .basePath(TasksRoutes.BASE)
+                .get(taskId + "/await")
+                .then()
+                .statusCode(HttpStatus.OK_200)
+                .body("status", is("completed"))));
+    }
+
+    private Mono<MailboxIdPair> provisionMailbox(Integer number) {
+        return Mono.fromCallable(() -> {
+            String originMailboxName = "origin-" + number;
+            MailboxId originMailboxId = mailboxProbe.createMailbox(MailboxConstants.USER_NAMESPACE, USERNAME, originMailboxName);
+            MailboxId destinationMailboxId = mailboxProbe.createMailbox(MailboxConstants.USER_NAMESPACE, USERNAME, "destination-" + number);
+
+            try {
+                appendMessages(USERNAME, originMailboxName, MESSAGES_PER_ORIGIN_MAILBOX);
+            } catch (MailboxException e) {
+                throw new RuntimeException(e);
+            }
+            return new MailboxIdPair(originMailboxId, destinationMailboxId);
+        });
+    }
+
+    private void appendMessages(String username, String mailboxName, int messageCount) throws MailboxException {
+        MailboxPath mailboxPath = new MailboxPath(MailboxConstants.USER_NAMESPACE, Username.of(username), mailboxName);
+        Flux.range(0, messageCount)
+            .flatMap(i -> Mono.fromCallable(() -> mailboxProbe.appendMessage(username, mailboxPath,
+                new ByteArrayInputStream(("Subject: test " + i + "\r\n\r\nbody").getBytes(StandardCharsets.UTF_8)),
+                new Date(),
+                false,
+                new Flags())), ReactorUtils.DEFAULT_CONCURRENCY)
+            .collectList()
+            .block();
     }
 
     @Test
@@ -713,6 +801,132 @@ class RabbitMQWebAdminServerTaskSerializationIntegrationTest {
             .body("additionalInformation.messagesFailCount", is(0))
             .body("additionalInformation.username", is(USERNAME))
             .body("additionalInformation.mailboxName", is(MailboxConstants.INBOX));
+    }
+
+    @Test
+    void runRulesOnMailboxShouldComplete(GuiceJamesServer server) throws Exception {
+        server.getProbe(DataProbeImpl.class).addUser(USERNAME, "secret");
+        mailboxProbe.createMailbox(MailboxConstants.USER_NAMESPACE, USERNAME, MailboxConstants.INBOX);
+        MailboxId otherMailboxId = mailboxProbe.createMailbox(MailboxConstants.USER_NAMESPACE, USERNAME, "otherMailbox");
+
+        mailboxProbe.appendMessage(
+            USERNAME,
+            MailboxPath.inbox(Username.of(USERNAME)),
+            new ByteArrayInputStream("Subject: test\r\n\r\ntestmail".getBytes()),
+            new Date(),
+            false,
+            new Flags());
+
+        String taskId = given()
+            .queryParam("action", "triage")
+            .body("""
+            {
+              "id": "1",
+              "name": "rule 1",
+              "action": {
+                "appendIn": {
+                  "mailboxIds": ["%s"]
+                },
+                "important": false,
+                "keyworkds": [],
+                "reject": false,
+                "seen": false
+              },
+              "conditionGroup": {
+                "conditionCombiner": "AND",
+                "conditions": [
+                  {
+                    "comparator": "contains",
+                    "field": "subject",
+                    "value": "test"
+                  }
+                ]
+              }
+            }""".formatted(otherMailboxId.serialize()))
+            .post("users/" + USERNAME + "/mailboxes/" + MailboxConstants.INBOX + "/messages")
+            .jsonPath()
+            .getString("taskId");
+
+        with()
+            .basePath(TasksRoutes.BASE)
+        .when()
+            .get(taskId + "/await")
+        .then()
+            .body("status", is(TaskManager.Status.COMPLETED.getValue()))
+            .body("taskId", is(taskId))
+            .body("type", is(RunRulesOnMailboxTask.TASK_TYPE.asString()))
+            .body("additionalInformation.rulesOnMessagesApplySuccessfully", is(1))
+            .body("additionalInformation.rulesOnMessagesApplyFailed", is(0))
+            .body("additionalInformation.username", is(USERNAME))
+            .body("additionalInformation.mailboxPath", is(MailboxPath.forUser(Username.of(USERNAME), MailboxConstants.INBOX).asString()));
+    }
+
+    @Test
+    void runRulesOnAllUsersMailboxShouldComplete(GuiceJamesServer server) throws Exception {
+        server.getProbe(DataProbeImpl.class).addUser(USERNAME, "secret");
+        server.getProbe(DataProbeImpl.class).addUser(USERNAME_2, "secret");
+        mailboxProbe.createMailbox(MailboxConstants.USER_NAMESPACE, USERNAME, MailboxConstants.INBOX);
+        mailboxProbe.createMailbox(MailboxConstants.USER_NAMESPACE, USERNAME, "otherMailbox");
+        mailboxProbe.createMailbox(MailboxConstants.USER_NAMESPACE, USERNAME_2, MailboxConstants.INBOX);
+        mailboxProbe.createMailbox(MailboxConstants.USER_NAMESPACE, USERNAME_2, "otherMailbox");
+
+        mailboxProbe.appendMessage(
+            USERNAME,
+            MailboxPath.inbox(Username.of(USERNAME)),
+            new ByteArrayInputStream("Subject: test\r\n\r\ntestmail".getBytes()),
+            new Date(),
+            false,
+            new Flags());
+
+        mailboxProbe.appendMessage(
+            USERNAME_2,
+            MailboxPath.inbox(Username.of(USERNAME_2)),
+            new ByteArrayInputStream("Subject: test\r\n\r\ntestmail".getBytes()),
+            new Date(),
+            false,
+            new Flags());
+
+        List<Map<String, String>> list = given()
+            .queryParams("action", "triage", "mailboxName", MailboxConstants.INBOX)
+            .body("""
+            {
+              "id": "1",
+              "name": "rule 1",
+              "action": {
+                "appendIn": {
+                  "mailboxIds": []
+                },
+                "moveTo": {
+                  "mailboxName": "otherMailbox"
+                },
+                "important": false,
+                "keyworkds": [],
+                "reject": false,
+                "seen": false
+              },
+              "conditionGroup": {
+                "conditionCombiner": "AND",
+                "conditions": [
+                  {
+                    "comparator": "contains",
+                    "field": "subject",
+                    "value": "test"
+                  }
+                ]
+              }
+            }""")
+            .post("/messages")
+        .then()
+            .statusCode(CREATED_201)
+            .extract()
+            .jsonPath()
+            .getList(".");
+
+        assertThat(list)
+            .hasSize(2)
+            .first()
+            .satisfies(map -> assertThat(map).hasSize(2)
+                .containsKeys("taskId", "username"));
     }
 
     @Test

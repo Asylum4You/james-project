@@ -50,6 +50,7 @@ import org.eclipse.jetty.http.HttpStatus;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import reactor.core.publisher.Flux;
 import spark.Request;
 import spark.Route;
 import spark.Service;
@@ -65,9 +66,11 @@ public class DeletedMessagesVaultRoutes implements Routes {
     private static final String USER_PATH_PARAM = ":user";
     private static final String MESSAGE_ID_PARAM = ":messageId";
     static final String USER_PATH = ROOT_PATH + SEPARATOR + USERS + SEPARATOR + USER_PATH_PARAM;
-    private static final String DELETE_PATH = ROOT_PATH + SEPARATOR + USERS + SEPARATOR + USER_PATH_PARAM + SEPARATOR + MESSAGE_PATH_PARAM + SEPARATOR + MESSAGE_ID_PARAM;
+    static final String MESSAGES_PATH = ROOT_PATH + SEPARATOR + USERS + SEPARATOR + USER_PATH_PARAM + SEPARATOR + MESSAGE_PATH_PARAM;
+    private static final String DELETE_PATH = MESSAGES_PATH + SEPARATOR + MESSAGE_ID_PARAM;
     private static final String SCOPE_QUERY_PARAM = "scope";
     private static final String EXPORT_TO_QUERY_PARAM = "exportTo";
+    private static final String FORCE_QUERY_PARAM = "force";
 
     private final RestoreService vaultRestore;
     private final ExportService vaultExport;
@@ -103,6 +106,7 @@ public class DeletedMessagesVaultRoutes implements Routes {
     @Override
     public void define(Service service) {
         service.post(USER_PATH, userActions(), jsonTransformer);
+        service.post(MESSAGES_PATH, this::browseMessages, jsonTransformer);
         service.delete(ROOT_PATH, deleteWithScope(), jsonTransformer);
 
         TaskFromRequest deleteTaskFromRequest = this::deleteMessage;
@@ -118,13 +122,23 @@ public class DeletedMessagesVaultRoutes implements Routes {
 
     private Task export(Request request) throws JsonExtractException {
         Username username = extractUser(request);
-        validateUserExist(username);
+        validateUserExist(request, username);
         return new DeletedMessagesVaultExportTask(vaultExport, username, extractQuery(request), extractMailAddress(request));
+    }
+
+    private Object browseMessages(Request request, spark.Response response) throws JsonExtractException {
+        Username username = extractUser(request);
+        validateUserExist(request, username);
+        Query query = extractQuery(request);
+        return Flux.from(deletedMessageVault.search(username, query))
+            .map(DeletedMessageDTO::from)
+            .collectList()
+            .block();
     }
 
     private Task restore(Request request) throws JsonExtractException {
         Username username = extractUser(request);
-        validateUserExist(username);
+        validateUserExist(request, username);
         return new DeletedMessagesVaultRestoreTask(vaultRestore, username, extractQuery(request));
     }
 
@@ -137,13 +151,16 @@ public class DeletedMessagesVaultRoutes implements Routes {
 
     private Task deleteMessage(Request request) {
         Username username = extractUser(request);
-        validateUserExist(username);
+        validateUserExist(request, username);
         MessageId messageId = parseMessageId(request);
 
         return new DeletedMessagesVaultDeleteTask(deletedMessageVault, username, messageId);
     }
 
-    private void validateUserExist(Username username) {
+    private void validateUserExist(Request request, Username username) {
+        if (Boolean.parseBoolean(request.queryParams(FORCE_QUERY_PARAM))) {
+            return;
+        }
         try {
             if (!usersRepository.contains(username)) {
                 throw ErrorResponder.builder()

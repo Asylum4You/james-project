@@ -20,11 +20,17 @@ package org.apache.james.imapserver.netty;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Predicate;
+import java.util.stream.Stream;
 
 import jakarta.inject.Inject;
 
 import org.apache.commons.configuration2.HierarchicalConfiguration;
 import org.apache.commons.configuration2.tree.ImmutableNode;
+import org.apache.james.core.ConnectionDescription;
+import org.apache.james.core.ConnectionDescriptionSupplier;
+import org.apache.james.core.Disconnector;
+import org.apache.james.core.Username;
 import org.apache.james.filesystem.api.FileSystem;
 import org.apache.james.imap.ImapSuite;
 import org.apache.james.imap.api.ConnectionCheckFactory;
@@ -35,16 +41,18 @@ import org.apache.james.metrics.api.GaugeRegistry;
 import org.apache.james.metrics.api.MetricFactory;
 import org.apache.james.protocols.lib.netty.AbstractConfigurableAsyncServer;
 import org.apache.james.protocols.lib.netty.AbstractServerFactory;
+import org.apache.james.protocols.netty.Encryption;
 
 import com.github.fge.lambdas.functions.ThrowingFunction;
 
-public class IMAPServerFactory extends AbstractServerFactory {
+public class IMAPServerFactory extends AbstractServerFactory implements Disconnector, ConnectionDescriptionSupplier {
 
     protected final FileSystem fileSystem;
     protected final ThrowingFunction<HierarchicalConfiguration<ImmutableNode>, ImapSuite> imapSuiteProvider;
     protected final ImapMetrics imapMetrics;
     protected final GaugeRegistry gaugeRegistry;
     protected final ConnectionCheckFactory connectionCheckFactory;
+    protected Encryption.Factory encryptionFactory;
 
     @Inject
     @Deprecated
@@ -66,6 +74,11 @@ public class IMAPServerFactory extends AbstractServerFactory {
         this.connectionCheckFactory = connectionCheckFactory;
     }
 
+    @Inject
+    public void setEncryptionFactory(Encryption.Factory encryptionFactory) {
+        this.encryptionFactory = encryptionFactory;
+    }
+
     protected IMAPServer createServer(HierarchicalConfiguration<ImmutableNode> config) {
         ImapSuite imapSuite = imapSuiteProvider.apply(config);
 
@@ -76,16 +89,39 @@ public class IMAPServerFactory extends AbstractServerFactory {
     protected List<AbstractConfigurableAsyncServer> createServers(HierarchicalConfiguration<ImmutableNode> config) throws Exception {
         List<AbstractConfigurableAsyncServer> servers = new ArrayList<>();
         List<HierarchicalConfiguration<ImmutableNode>> configs = config.configurationsAt("imapserver");
-        
+
         for (HierarchicalConfiguration<ImmutableNode> serverConfig: configs) {
             IMAPServer server = createServer(serverConfig);
             server.setFileSystem(fileSystem);
+            server.setEncryptionFactory(encryptionFactory);
             server.configure(serverConfig);
             servers.add(server);
         }
 
         return servers;
-
     }
 
+    public List<IMAPServer> getImapServers() {
+        return getServers()
+            .stream()
+            .filter(AbstractConfigurableAsyncServer::isEnabled)
+            .map(IMAPServer.class::cast)
+            .toList();
+    }
+
+    @Override
+    public void disconnect(Predicate<Username> username) {
+        getServers()
+            .stream()
+            .map(server -> (IMAPServer) server)
+            .forEach(imapServer -> imapServer.disconnect(username));
+    }
+
+    @Override
+    public Stream<ConnectionDescription> describeConnections() {
+        return getServers()
+            .stream()
+            .map(server -> (IMAPServer) server)
+            .flatMap(IMAPServer::describeConnections);
+    }
 }

@@ -26,7 +26,6 @@ import static org.awaitility.Durations.ONE_HUNDRED_MILLISECONDS;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.ZoneId;
-import java.util.Iterator;
 import java.util.List;
 import java.util.UUID;
 
@@ -43,18 +42,16 @@ import org.apache.james.mailbox.MessageUid;
 import org.apache.james.mailbox.inmemory.InMemoryMessageId;
 import org.apache.james.mailbox.inmemory.manager.InMemoryIntegrationResources;
 import org.apache.james.mailbox.model.ComposedMessageId;
-import org.apache.james.mailbox.model.FetchGroup;
-import org.apache.james.mailbox.model.Header;
 import org.apache.james.mailbox.model.MailboxId;
 import org.apache.james.mailbox.model.MailboxPath;
 import org.apache.james.mailbox.model.MessageId;
 import org.apache.james.mailbox.model.MessageRange;
-import org.apache.james.mailbox.model.MessageResult;
 import org.apache.james.mailbox.model.MultimailboxesSearchQuery;
+import org.apache.james.mailbox.model.SearchOptions;
 import org.apache.james.mailbox.model.SearchQuery;
 import org.apache.james.mailbox.opensearch.events.OpenSearchListeningMessageSearchIndex;
 import org.apache.james.mailbox.opensearch.json.MessageToOpenSearchJson;
-import org.apache.james.mailbox.opensearch.query.CriterionConverter;
+import org.apache.james.mailbox.opensearch.query.DefaultCriterionConverter;
 import org.apache.james.mailbox.opensearch.query.QueryConverter;
 import org.apache.james.mailbox.opensearch.search.OpenSearchSearcher;
 import org.apache.james.mailbox.store.search.AbstractMessageSearchIndexTest;
@@ -66,6 +63,7 @@ import org.apache.james.metrics.tests.RecordingMetricFactory;
 import org.apache.james.mime4j.dom.Message;
 import org.apache.james.mime4j.stream.RawField;
 import org.apache.james.util.ClassLoaderUtils;
+import org.apache.james.util.streams.Limit;
 import org.awaitility.Awaitility;
 import org.awaitility.Durations;
 import org.awaitility.core.ConditionFactory;
@@ -74,6 +72,8 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.opensearch.client.opensearch._types.query_dsl.MatchAllQuery;
 import org.opensearch.client.opensearch._types.query_dsl.Query;
 import org.opensearch.client.opensearch._types.query_dsl.QueryBuilders;
@@ -83,7 +83,6 @@ import org.opensearch.client.opensearch.core.GetResponse;
 import org.opensearch.client.opensearch.core.SearchRequest;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.github.fge.lambdas.Throwing;
 import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
@@ -97,7 +96,7 @@ class OpenSearchIntegrationTest extends AbstractMessageSearchIndexTest {
             .and().pollDelay(ONE_HUNDRED_MILLISECONDS)
             .await();
     static final int SEARCH_SIZE = 1;
-    private final QueryConverter queryConverter = new QueryConverter(new CriterionConverter());
+    private final QueryConverter queryConverter = new QueryConverter(new DefaultCriterionConverter(openSearchMailboxConfiguration()));
 
     @RegisterExtension
     static TikaExtension tika = new TikaExtension();
@@ -135,6 +134,7 @@ class OpenSearchIntegrationTest extends AbstractMessageSearchIndexTest {
     protected OpenSearchMailboxConfiguration openSearchMailboxConfiguration() {
         return OpenSearchMailboxConfiguration.builder()
             .optimiseMoves(false)
+            .textFuzzinessSearch(false)
             .build();
     }
 
@@ -149,7 +149,8 @@ class OpenSearchIntegrationTest extends AbstractMessageSearchIndexTest {
         indexName = new IndexName(UUID.randomUUID().toString());
         MailboxIndexCreationUtil.prepareClient(
             client, readAliasName, writeAliasName, indexName,
-            openSearch.getDockerOpenSearch().configuration());
+            openSearch.getDockerOpenSearch().configuration(),
+            new DefaultMailboxMappingFactory());
 
         InMemoryIntegrationResources resources = InMemoryIntegrationResources.builder()
             .preProvisionnedFakeAuthenticator()
@@ -162,11 +163,12 @@ class OpenSearchIntegrationTest extends AbstractMessageSearchIndexTest {
                 ImmutableSet.of(),
                 new OpenSearchIndexer(client,
                     writeAliasName),
-                new OpenSearchSearcher(client, new QueryConverter(new CriterionConverter()), SEARCH_SIZE,
+                new OpenSearchSearcher(client, queryConverter, SEARCH_SIZE,
                     readAliasName, routingKeyFactory),
                 new MessageToOpenSearchJson(textExtractor, ZoneId.of("Europe/Paris"), IndexAttachments.YES, IndexHeaders.YES),
                 preInstanciationStage.getSessionProvider(), routingKeyFactory, messageIdFactory,
-                openSearchMailboxConfiguration(), new RecordingMetricFactory()))
+                openSearchMailboxConfiguration(), new RecordingMetricFactory(),
+                ImmutableSet.of()))
             .noPreDeletionHooks()
             .storeQuotaManager()
             .build();
@@ -251,7 +253,7 @@ class OpenSearchIntegrationTest extends AbstractMessageSearchIndexTest {
         // Try to delete the document manually to simulate a not found document.
         client.deleteByQuery(new DeleteByQueryRequest.Builder()
                 .index(indexName.getValue())
-                .query(new MatchAllQuery.Builder().build()._toQuery())
+                .query(new MatchAllQuery.Builder().build().toQuery())
                 .build())
             .block();
         awaitUntilAsserted(mailboxAId, 0);
@@ -276,7 +278,7 @@ class OpenSearchIntegrationTest extends AbstractMessageSearchIndexTest {
                 .setBody(Strings.repeat("0à2345678é", 3200), StandardCharsets.UTF_8)),
             session).getId();
 
-        awaitForOpenSearch(QueryBuilders.matchAll().build()._toQuery(), 14);
+        awaitForOpenSearch(QueryBuilders.matchAll().build().toQuery(), 14);
 
         assertThat(Flux.from(messageManager.search(SearchQuery.of(SearchQuery.address(SearchQuery.AddressType.To, recipient)), session)).toStream())
             .containsExactly(composedMessageId.getUid());
@@ -299,7 +301,34 @@ class OpenSearchIntegrationTest extends AbstractMessageSearchIndexTest {
             .untilAsserted(() -> assertThat(client.search(
                     new SearchRequest.Builder()
                         .index(indexName.getValue())
-                        .query(QueryBuilders.matchAll().build()._toQuery())
+                        .query(QueryBuilders.matchAll().build().toQuery())
+                        .build())
+                .block()
+                .hits().total().value()).isEqualTo(14));
+
+        assertThat(Flux.from(messageManager.search(SearchQuery.of(SearchQuery.address(SearchQuery.AddressType.To, recipient)), session)).toStream())
+            .containsExactly(composedMessageId.getUid());
+    }
+
+    @Test
+    void tooLongSubjectShouldNotMakeIndexingFail() throws Exception {
+        MailboxPath mailboxPath = MailboxPath.forUser(USERNAME, INBOX);
+        MailboxSession session = MailboxSessionUtil.create(USERNAME);
+        MessageManager messageManager = storeMailboxManager.getMailbox(mailboxPath, session);
+
+        String recipient = "benwa@linagora.com";
+        ComposedMessageId composedMessageId = messageManager.appendMessage(MessageManager.AppendCommand.from(
+                Message.Builder.of()
+                    .setTo(recipient)
+                    .setSubject(Strings.repeat("0123456789", 5000))
+                    .setBody("0123456789", StandardCharsets.UTF_8)),
+            session).getId();
+
+        CALMLY_AWAIT.atMost(Durations.TEN_SECONDS)
+            .untilAsserted(() -> assertThat(client.search(
+                    new SearchRequest.Builder()
+                        .index(indexName.getValue())
+                        .query(QueryBuilders.matchAll().build().toQuery())
                         .build())
                 .block()
                 .hits().total().value()).isEqualTo(14));
@@ -321,7 +350,7 @@ class OpenSearchIntegrationTest extends AbstractMessageSearchIndexTest {
                 .setBody(Strings.repeat("0123456789 ", 5000), StandardCharsets.UTF_8)),
             session).getId();
 
-        awaitForOpenSearch(QueryBuilders.matchAll().build()._toQuery(), 14);
+        awaitForOpenSearch(QueryBuilders.matchAll().build().toQuery(), 14);
 
         assertThat(Flux.from(messageManager.search(SearchQuery.of(SearchQuery.bodyContains("0123456789")), session)).toStream())
             .containsExactly(composedMessageId.getUid());
@@ -340,7 +369,7 @@ class OpenSearchIntegrationTest extends AbstractMessageSearchIndexTest {
                 .setBody(Strings.repeat("0123456789 ", 5000) + " matchMe", StandardCharsets.UTF_8)),
             session).getId();
 
-        awaitForOpenSearch(QueryBuilders.matchAll().build()._toQuery(), 14);
+        awaitForOpenSearch(QueryBuilders.matchAll().build().toQuery(), 14);
 
         assertThat(Flux.from(messageManager.search(SearchQuery.of(SearchQuery.bodyContains("matchMe")), session)).toStream())
             .containsExactly(composedMessageId.getUid());
@@ -382,7 +411,7 @@ class OpenSearchIntegrationTest extends AbstractMessageSearchIndexTest {
                 .build(ClassLoaderUtils.getSystemResourceAsSharedStream("eml/mailCustomStringHeader.eml")),
             session).getId();
 
-        awaitForOpenSearch(QueryBuilders.matchAll().build()._toQuery(), 15);
+        awaitForOpenSearch(QueryBuilders.matchAll().build().toQuery(), 15);
 
         assertThat(Flux.from(messageManager.search(SearchQuery.of(SearchQuery.headerExists("Custom-header")), session)).toStream())
             .containsExactly(customDateHeaderMessageId.getUid(), customStringHeaderMessageId.getUid());
@@ -435,7 +464,7 @@ class OpenSearchIntegrationTest extends AbstractMessageSearchIndexTest {
                     .build()),
             session).getId();
 
-        awaitForOpenSearch(QueryBuilders.matchAll().build()._toQuery(), 15);
+        awaitForOpenSearch(QueryBuilders.matchAll().build().toQuery(), 15);
 
         assertThat(Flux.from(messageManager.search(SearchQuery.of(SearchQuery.address(SearchQuery.AddressType.To, "bob@other.tld")), session)).toStream())
             .containsOnly(messageId2.getUid());
@@ -466,7 +495,7 @@ class OpenSearchIntegrationTest extends AbstractMessageSearchIndexTest {
                     .build()),
             session).getId();
 
-        awaitForOpenSearch(QueryBuilders.matchAll().build()._toQuery(), 15);
+        awaitForOpenSearch(QueryBuilders.matchAll().build().toQuery(), 15);
         Thread.sleep(500);
 
         assertThat(Flux.from(messageManager.search(SearchQuery.of(SearchQuery.address(SearchQuery.AddressType.To, "other")), session)).toStream())
@@ -498,7 +527,7 @@ class OpenSearchIntegrationTest extends AbstractMessageSearchIndexTest {
                     .build()),
             session).getId();
 
-        awaitForOpenSearch(QueryBuilders.matchAll().build()._toQuery(), 15);
+        awaitForOpenSearch(QueryBuilders.matchAll().build().toQuery(), 15);
         Thread.sleep(500);
 
         Flux.range(0, 1050)
@@ -506,8 +535,36 @@ class OpenSearchIntegrationTest extends AbstractMessageSearchIndexTest {
             .blockLast();
 
         MultimailboxesSearchQuery query = MultimailboxesSearchQuery.from(SearchQuery.of(SearchQuery.address(SearchQuery.AddressType.To, "other"))).build();
-        assertThat(Flux.from(storeMailboxManager.search(query, session, 10)).collectList().block())
+        assertThat(Flux.from(storeMailboxManager.search(query, session, SearchOptions.limit(Limit.limit(10)))).collectList().block())
             .containsOnly(messageId2.getMessageId());
+    }
+
+    @Test
+    void shouldMatchFileExtension() throws Exception {
+        MailboxPath mailboxPath = MailboxPath.forUser(USERNAME, INBOX);
+        MailboxSession session = MailboxSessionUtil.create(USERNAME);
+        MessageManager messageManager = storeMailboxManager.getMailbox(mailboxPath, session);
+
+        messageManager.appendMessage(
+            MessageManager.AppendCommand.builder().build(
+                Message.Builder
+                    .of()
+                    .setSubject("test")
+                    .setBody("testmail", StandardCharsets.UTF_8)
+                    .addField(new RawField("To", "alice@domain.tld"))
+                    .build()),
+            session).getId();
+
+        ComposedMessageId messageId2 = messageManager.appendMessage(
+            MessageManager.AppendCommand.builder()
+                .build(ClassLoaderUtils.getSystemResourceAsSharedStream("eml/attachments-filename-in-content-type.eml")),
+            session).getId();
+
+        awaitForOpenSearch(QueryBuilders.matchAll().build().toQuery(), 15);
+        Thread.sleep(500);
+
+        assertThat(Flux.from(messageManager.search(SearchQuery.of(SearchQuery.mailContains("txt")), session)).toStream())
+            .containsOnly(messageId2.getUid());
     }
 
     @Disabled("MAILBOX-403 Relaxed the matching constraints for email addresses in text bodies to reduce OpenSearch disk space usage")
@@ -516,99 +573,196 @@ class OpenSearchIntegrationTest extends AbstractMessageSearchIndexTest {
 
     }
 
-    @Disabled("MAILBOX-401 '-' causes address matching to fail")
     @Test
     void localPartShouldBeMatchedWhenHyphen() throws Exception {
         MailboxPath mailboxPath = MailboxPath.forUser(USERNAME, INBOX);
         MailboxSession session = MailboxSessionUtil.create(USERNAME);
         MessageManager messageManager = storeMailboxManager.getMailbox(mailboxPath, session);
 
-        Message.Builder messageBuilder = Message.Builder
-            .of()
-            .setSubject("test")
-            .setBody("testmail", StandardCharsets.UTF_8);
-
         ComposedMessageId messageId1 = messageManager.appendMessage(
             MessageManager.AppendCommand.builder().build(
-                messageBuilder
+                Message.Builder
+                    .of()
+                    .setSubject("test")
+                    .setBody("testmail", StandardCharsets.UTF_8)
                     .addField(new RawField("To", "alice-test@domain.tld"))
                     .build()),
             session).getId();
 
         ComposedMessageId messageId2 = messageManager.appendMessage(
             MessageManager.AppendCommand.builder().build(
-                messageBuilder
+                Message.Builder
+                    .of()
+                    .setSubject("test")
+                    .setBody("testmail", StandardCharsets.UTF_8)
                     .addField(new RawField("To", "bob@other.tld"))
                     .build()),
             session).getId();
 
-        openSearch.awaitForOpenSearch();
+        awaitForOpenSearch(QueryBuilders.matchAll().build().toQuery(), 15);
 
         assertThat(Flux.from(messageManager.search(SearchQuery.of(SearchQuery.address(SearchQuery.AddressType.To, "alice-test")), session)).toStream())
-            .containsOnly(messageId2.getUid());
+            .containsOnly(messageId1.getUid());
     }
 
-    @Disabled("MAILBOX-401 '-' causes address matching to fail")
     @Test
     void addressShouldBeMatchedWhenHyphen() throws Exception {
         MailboxPath mailboxPath = MailboxPath.forUser(USERNAME, INBOX);
         MailboxSession session = MailboxSessionUtil.create(USERNAME);
         MessageManager messageManager = storeMailboxManager.getMailbox(mailboxPath, session);
 
-        Message.Builder messageBuilder = Message.Builder
-            .of()
-            .setSubject("test")
-            .setBody("testmail", StandardCharsets.UTF_8);
-
         ComposedMessageId messageId1 = messageManager.appendMessage(
             MessageManager.AppendCommand.builder().build(
-                messageBuilder
+                Message.Builder
+                    .of()
+                    .setSubject("test")
+                    .setBody("testmail", StandardCharsets.UTF_8)
                     .addField(new RawField("To", "alice-test@domain.tld"))
                     .build()),
             session).getId();
 
         ComposedMessageId messageId2 = messageManager.appendMessage(
             MessageManager.AppendCommand.builder().build(
-                messageBuilder
+                Message.Builder
+                    .of()
+                    .setSubject("test")
+                    .setBody("testmail", StandardCharsets.UTF_8)
                     .addField(new RawField("To", "bob@other.tld"))
                     .build()),
             session).getId();
 
-        openSearch.awaitForOpenSearch();
+        awaitForOpenSearch(QueryBuilders.matchAll().build().toQuery(), 15);
 
         assertThat(Flux.from(messageManager.search(SearchQuery.of(SearchQuery.address(SearchQuery.AddressType.To, "alice-test@domain.tld")), session)).toStream())
             .containsOnly(messageId1.getUid());
+
+        assertThat(Flux.from(messageManager.search(SearchQuery.of(SearchQuery.address(SearchQuery.AddressType.To, "alice-test")), session)).toStream())
+            .containsOnly(messageId1.getUid());
+
+        assertThat(Flux.from(messageManager.search(SearchQuery.of(SearchQuery.address(SearchQuery.AddressType.To, "alice")), session)).toStream())
+            .containsOnly(messageId1.getUid());
     }
 
-    @Disabled("MAILBOX-401 '-' causes address matching to fail")
+    @Test
+    void addressShouldBeMatchedOnSubLocalParts() throws Exception {
+        MailboxPath mailboxPath = MailboxPath.forUser(USERNAME, INBOX);
+        MailboxSession session = MailboxSessionUtil.create(USERNAME);
+        MessageManager messageManager = storeMailboxManager.getMailbox(mailboxPath, session);
+
+        ComposedMessageId messageId1 = messageManager.appendMessage(
+            MessageManager.AppendCommand.builder().build(
+                Message.Builder
+                    .of()
+                    .setSubject("test")
+                    .setBody("testmail", StandardCharsets.UTF_8)
+                    .addField(new RawField("To", "alice.test@domain.tld"))
+                    .build()),
+            session).getId();
+
+        ComposedMessageId messageId2 = messageManager.appendMessage(
+            MessageManager.AppendCommand.builder().build(
+                Message.Builder
+                    .of()
+                    .setSubject("test")
+                    .setBody("testmail", StandardCharsets.UTF_8)
+                    .addField(new RawField("To", "bob@other.tld"))
+                    .build()),
+            session).getId();
+
+        awaitForOpenSearch(QueryBuilders.matchAll().build().toQuery(), 15);
+
+        assertThat(Flux.from(messageManager.search(SearchQuery.of(SearchQuery.address(SearchQuery.AddressType.To, "alice.test@domain.tld")), session)).toStream())
+            .containsOnly(messageId1.getUid());
+
+        assertThat(Flux.from(messageManager.search(SearchQuery.of(SearchQuery.address(SearchQuery.AddressType.To, "alice.test")), session)).toStream())
+            .containsOnly(messageId1.getUid());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "example.com",
+        "nas-backup.example.com",
+        "[nas-backup.example.com]",
+        "nas",
+        "backup",
+    })
+    void mailingListPrefixShouldBePreservedInSearch(String subject) throws Exception {
+        MailboxPath mailboxPath = MailboxPath.forUser(USERNAME, INBOX);
+        MailboxSession session = MailboxSessionUtil.create(USERNAME);
+        MessageManager messageManager = storeMailboxManager.getMailbox(mailboxPath, session);
+
+        ComposedMessageId messageId1 = messageManager.appendMessage(
+            MessageManager.AppendCommand.builder().build(
+                Message.Builder
+                    .of()
+                    .setBody("testmail", StandardCharsets.UTF_8)
+                    .setSubject("[nas-backup.example.com] Backup completed successfully")
+                    .build()),
+            session).getId();
+
+        awaitForOpenSearch(QueryBuilders.matchAll().build().toQuery(), 14);
+
+        assertThat(Flux.from(messageManager.search(SearchQuery.of(SearchQuery.subject(subject)), session)).toStream())
+            .containsOnly(messageId1.getUid());
+    }
+
+
+    @Test
+    void searchDomainInSubject() throws Exception {
+        MailboxPath mailboxPath = MailboxPath.forUser(USERNAME, INBOX);
+        MailboxSession session = MailboxSessionUtil.create(USERNAME);
+        MessageManager messageManager = storeMailboxManager.getMailbox(mailboxPath, session);
+
+        ComposedMessageId messageId1 = messageManager.appendMessage(
+            MessageManager.AppendCommand.builder().build(
+                Message.Builder
+                    .of()
+                    .setBody("testmail", StandardCharsets.UTF_8)
+                    .setSubject("Renew SSL certificate linagora.com")
+                    .build()),
+            session).getId();
+
+        awaitForOpenSearch(QueryBuilders.matchAll().build().toQuery(), 14);
+
+        assertThat(Flux.from(messageManager.search(SearchQuery.of(SearchQuery.subject("certificate")), session)).toStream())
+            .containsOnly(messageId1.getUid());
+        assertThat(Flux.from(messageManager.search(SearchQuery.of(SearchQuery.subject("Renew")), session)).toStream())
+            .containsOnly(messageId1.getUid());
+        assertThat(Flux.from(messageManager.search(SearchQuery.of(SearchQuery.subject("linagora.com")), session)).toStream())
+            .containsOnly(messageId1.getUid());
+    }
+
     @Test
     void domainPartShouldBeMatchedWhenHyphen() throws Exception {
         MailboxPath mailboxPath = MailboxPath.forUser(USERNAME, INBOX);
         MailboxSession session = MailboxSessionUtil.create(USERNAME);
         MessageManager messageManager = storeMailboxManager.getMailbox(mailboxPath, session);
 
-        Message.Builder messageBuilder = Message.Builder
-            .of()
-            .setSubject("test")
-            .setBody("testmail", StandardCharsets.UTF_8);
-
         ComposedMessageId messageId1 = messageManager.appendMessage(
             MessageManager.AppendCommand.builder().build(
-                messageBuilder
+                Message.Builder
+                    .of()
+                    .setSubject("test")
+                    .setBody("testmail", StandardCharsets.UTF_8)
                     .addField(new RawField("To", "alice@domain-test.tld"))
                     .build()),
             session).getId();
 
         ComposedMessageId messageId2 = messageManager.appendMessage(
             MessageManager.AppendCommand.builder().build(
-                messageBuilder
+                Message.Builder
+                    .of()
+                    .setSubject("test")
+                    .setBody("testmail", StandardCharsets.UTF_8)
                     .addField(new RawField("To", "bob@other.tld"))
                     .build()),
             session).getId();
 
-        openSearch.awaitForOpenSearch();
+        awaitForOpenSearch(QueryBuilders.matchAll().build().toQuery(), 15);
 
         assertThat(Flux.from(messageManager.search(SearchQuery.of(SearchQuery.address(SearchQuery.AddressType.To, "domain-test.tld")), session)).toStream())
+            .containsOnly(messageId1.getUid());
+        assertThat(Flux.from(messageManager.search(SearchQuery.of(SearchQuery.address(SearchQuery.AddressType.To, "domain-test")), session)).toStream())
             .containsOnly(messageId1.getUid());
     }
     
@@ -629,7 +783,7 @@ class OpenSearchIntegrationTest extends AbstractMessageSearchIndexTest {
 
         openSearch.awaitForOpenSearch();
 
-        awaitForOpenSearch(QueryBuilders.matchAll().build()._toQuery(), 20);
+        awaitForOpenSearch(QueryBuilders.matchAll().build().toQuery(), 20);
 
         assertThat(Flux.from(
             messageManager.search(SearchQuery.allSortedWith(new SearchQuery.Sort(SearchQuery.Sort.SortClause.BaseSubject)), session)).toStream())
@@ -650,7 +804,7 @@ class OpenSearchIntegrationTest extends AbstractMessageSearchIndexTest {
                 .addField(new RawField("Subject", subject)));
     }
 
-    private void awaitForOpenSearch(Query query, long totalHits) {
+    protected void awaitForOpenSearch(Query query, long totalHits) {
         CALMLY_AWAIT.atMost(Durations.TEN_SECONDS)
                 .untilAsserted(() -> assertThat(client.search(
                         new SearchRequest.Builder()
@@ -663,7 +817,12 @@ class OpenSearchIntegrationTest extends AbstractMessageSearchIndexTest {
 
     private void awaitUntilAsserted(MailboxId mailboxId, long expectedCountResult) {
         CALMLY_AWAIT.atMost(Durations.TEN_SECONDS)
-            .untilAsserted(() -> assertThat(messageSearchIndex.search(session, List.of(mailboxId), SearchQuery.matchAll(), 100L).toStream().count())
+            .untilAsserted(() -> assertThat(messageSearchIndex.search(session, List.of(mailboxId), SearchQuery.matchAll(), SearchOptions.limit(Limit.limit(100))).toStream().count())
                 .isEqualTo(expectedCountResult));
+    }
+
+    @Override
+    protected boolean supportsCollapseThreads() {
+        return true;
     }
 }

@@ -1,0 +1,241 @@
+/****************************************************************
+ * Licensed to the Apache Software Foundation (ASF) under one   *
+ * or more contributor license agreements.  See the NOTICE file *
+ * distributed with this work for additional information        *
+ * regarding copyright ownership.  The ASF licenses this file   *
+ * to you under the Apache License, Version 2.0 (the            *
+ * "License"); you may not use this file except in compliance   *
+ * with the License.  You may obtain a copy of the License at   *
+ *                                                              *
+ *   http://www.apache.org/licenses/LICENSE-2.0                 *
+ *                                                              *
+ * Unless required by applicable law or agreed to in writing,   *
+ * software distributed under the License is distributed on an  *
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY       *
+ * KIND, either express or implied.  See the License for the    *
+ * specific language governing permissions and limitations      *
+ * under the License.                                           *
+ ****************************************************************/
+
+package org.apache.james.mailbox.postgres;
+
+import java.nio.charset.StandardCharsets;
+
+import jakarta.inject.Inject;
+import jakarta.inject.Named;
+import jakarta.mail.Flags;
+
+import org.apache.commons.io.IOUtils;
+import org.apache.commons.lang3.tuple.Pair;
+import org.apache.james.backends.postgres.PostgresConfiguration;
+import org.apache.james.backends.postgres.utils.PostgresExecutor;
+import org.apache.james.blob.api.BlobStore;
+import org.apache.james.core.Username;
+import org.apache.james.events.Event;
+import org.apache.james.events.EventBus;
+import org.apache.james.events.EventListener;
+import org.apache.james.events.Group;
+import org.apache.james.mailbox.events.MailboxEvents;
+import org.apache.james.mailbox.events.MailboxEvents.Expunged;
+import org.apache.james.mailbox.events.MailboxEvents.MailboxDeletion;
+import org.apache.james.mailbox.model.MailboxACL;
+import org.apache.james.mailbox.model.MailboxId;
+import org.apache.james.mailbox.model.MailboxPath;
+import org.apache.james.mailbox.postgres.mail.MessageRepresentation;
+import org.apache.james.mailbox.postgres.mail.dao.PostgresAttachmentDAO;
+import org.apache.james.mailbox.postgres.mail.dao.PostgresMailboxDAO;
+import org.apache.james.mailbox.postgres.mail.dao.PostgresMailboxMessageDAO;
+import org.apache.james.mailbox.postgres.mail.dao.PostgresMessageDAO;
+import org.apache.james.mailbox.postgres.mail.dao.PostgresThreadDAO;
+import org.apache.james.mailbox.store.event.EventFactory;
+import org.apache.james.util.FunctionalUtils;
+import org.apache.james.util.ReactorUtils;
+import org.reactivestreams.Publisher;
+
+import com.google.common.collect.ImmutableSet;
+
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+
+public class DeleteMessageListener implements EventListener.ReactiveGroupEventListener {
+    public static class DeleteMessageListenerGroup extends Group {
+    }
+
+    public static final int LOW_CONCURRENCY = 4;
+    public static final String CONTENT_DELETION = "contentDeletion";
+
+    private final BlobStore blobStore;
+    private final PostgresMessageDAO.Factory messageDAOFactory;
+    private final PostgresMailboxMessageDAO.Factory mailboxMessageDAOFactory;
+    private final PostgresAttachmentDAO.Factory attachmentDAOFactory;
+    private final PostgresThreadDAO.Factory threadDAOFactory;
+    private final PostgresExecutor.Factory executorFactory;
+    private final EventBus contentDeletionEventBus;
+    private final PostgresConfiguration postgresConfiguration;
+
+    @Inject
+    public DeleteMessageListener(BlobStore blobStore,
+                                 PostgresMailboxMessageDAO.Factory mailboxMessageDAOFactory,
+                                 PostgresMessageDAO.Factory messageDAOFactory,
+                                 PostgresAttachmentDAO.Factory attachmentDAOFactory,
+                                 PostgresThreadDAO.Factory threadDAOFactory,
+                                 PostgresExecutor.Factory executorFactory,
+                                 @Named(CONTENT_DELETION) EventBus contentDeletionEventBus,
+                                 PostgresConfiguration postgresConfiguration) {
+        this.messageDAOFactory = messageDAOFactory;
+        this.mailboxMessageDAOFactory = mailboxMessageDAOFactory;
+        this.blobStore = blobStore;
+        this.attachmentDAOFactory = attachmentDAOFactory;
+        this.threadDAOFactory = threadDAOFactory;
+        this.executorFactory = executorFactory;
+        this.contentDeletionEventBus = contentDeletionEventBus;
+        this.postgresConfiguration = postgresConfiguration;
+    }
+
+    @Override
+    public Group getDefaultGroup() {
+        return new DeleteMessageListenerGroup();
+    }
+
+    @Override
+    public boolean isHandling(Event event) {
+        return event instanceof Expunged || event instanceof MailboxDeletion;
+    }
+
+    @Override
+    public Publisher<Void> reactiveEvent(Event event) {
+        if (event instanceof Expunged) {
+            Expunged expunged = (Expunged) event;
+            return handleMessageDeletion(expunged);
+        }
+        if (event instanceof MailboxDeletion) {
+            MailboxDeletion mailboxDeletion = (MailboxDeletion) event;
+            return handleMailboxDeletion(mailboxDeletion);
+        }
+        return Mono.empty();
+    }
+
+    private Mono<Void> handleMailboxDeletion(MailboxDeletion event) {
+        PostgresMessageDAO postgresMessageDAO = messageDAOFactory.create(event.getUsername().getDomainPart());
+        PostgresMailboxMessageDAO postgresMailboxMessageDAO = mailboxMessageDAOFactory.create(event.getUsername().getDomainPart());
+        PostgresAttachmentDAO attachmentDAO = attachmentDAOFactory.create(event.getUsername().getDomainPart());
+        PostgresThreadDAO threadDAO = threadDAOFactory.create(event.getUsername().getDomainPart());
+
+        return postgresMailboxMessageDAO.deleteByMailboxId((PostgresMailboxId) event.getMailboxId())
+            .flatMap(metaData -> handleMessageDeletion(postgresMessageDAO, postgresMailboxMessageDAO, attachmentDAO, threadDAO,
+                    (PostgresMessageId) metaData.getMessageId(), event.getMailboxId(), event.getMailboxPath().getUser(), metaData.getFlags(), event.getMailboxPath(), event.getMailboxACL()),
+                LOW_CONCURRENCY)
+            .then();
+    }
+
+    private Mono<Void> handleMessageDeletion(Expunged event) {
+        PostgresMessageDAO postgresMessageDAO = messageDAOFactory.create(event.getUsername().getDomainPart());
+        PostgresMailboxMessageDAO postgresMailboxMessageDAO = mailboxMessageDAOFactory.create(event.getUsername().getDomainPart());
+        PostgresAttachmentDAO attachmentDAO = attachmentDAOFactory.create(event.getUsername().getDomainPart());
+        PostgresThreadDAO threadDAO = threadDAOFactory.create(event.getUsername().getDomainPart());
+
+        return Flux.fromIterable(event.getExpunged()
+                .values())
+            .flatMap(metaData -> handleMessageDeletion(postgresMessageDAO, postgresMailboxMessageDAO, attachmentDAO, threadDAO,
+                (PostgresMessageId) metaData.getMessageId(), event.getMailboxId(), event.getMailboxPath().getUser(), metaData.getFlags(), event.getMailboxPath()), LOW_CONCURRENCY)
+            .then();
+    }
+
+    private Mono<Void> handleMessageDeletion(PostgresMessageDAO postgresMessageDAO,
+                                             PostgresMailboxMessageDAO postgresMailboxMessageDAO,
+                                             PostgresAttachmentDAO attachmentDAO,
+                                             PostgresThreadDAO threadDAO,
+                                             PostgresMessageId messageId,
+                                             MailboxId mailboxId,
+                                             Username owner,
+                                             Flags flags,
+                                             MailboxPath mailboxPath) {
+        return Mono.zip(postgresMessageDAO.retrieveMessage(messageId), mailboxACL(owner, mailboxId))
+            .flatMap(tuple -> dispatchMessageContentDeletionEvent(mailboxId, owner, tuple.getT2(), flags, tuple.getT1(), mailboxPath)
+                .thenReturn(messageId))
+            .filterWhen(msgId -> isUnreferenced(msgId, postgresMailboxMessageDAO))
+            .flatMap(msgId -> deleteBodyBlob(msgId, postgresMessageDAO)
+                .then(deleteAttachmentIfEnabled(msgId, attachmentDAO))
+                .then(threadDAO.deleteSome(owner, msgId))
+                .then(postgresMessageDAO.deleteByMessageId(msgId)));
+    }
+
+    private Mono<Void> handleMessageDeletion(PostgresMessageDAO postgresMessageDAO,
+                                             PostgresMailboxMessageDAO postgresMailboxMessageDAO,
+                                             PostgresAttachmentDAO attachmentDAO,
+                                             PostgresThreadDAO threadDAO,
+                                             PostgresMessageId messageId,
+                                             MailboxId mailboxId,
+                                             Username owner,
+                                             Flags flags,
+                                             MailboxPath mailboxPath,
+                                             MailboxACL mailboxACL) {
+        return postgresMessageDAO.retrieveMessage(messageId)
+            .flatMap(messageRepresentation -> dispatchMessageContentDeletionEvent(mailboxId, owner, mailboxACL, flags, messageRepresentation, mailboxPath)
+                .thenReturn(messageId))
+            .filterWhen(msgId -> isUnreferenced(msgId, postgresMailboxMessageDAO))
+            .flatMap(msgId -> deleteBodyBlob(msgId, postgresMessageDAO)
+                .then(deleteAttachmentIfEnabled(messageId, attachmentDAO))
+                .then(threadDAO.deleteSome(owner, messageId))
+                .then(postgresMessageDAO.deleteByMessageId(messageId)));
+    }
+
+    private Mono<Void> dispatchMessageContentDeletionEvent(MailboxId mailboxId, Username owner, MailboxACL mailboxACL, Flags flags, MessageRepresentation message, MailboxPath mailboxPath) {
+        return Mono.fromCallable(() -> IOUtils.toString(message.getHeaderContent().getInputStream(), StandardCharsets.UTF_8))
+            .subscribeOn(ReactorUtils.BLOCKING_CALL_WRAPPER)
+            .flatMap(headerContent -> Mono.from(contentDeletionEventBus.dispatch(messageContentDeletionEvent(mailboxId, owner, mailboxACL, flags, message, headerContent, mailboxPath),
+                ImmutableSet.of())));
+    }
+
+    private MailboxEvents.MessageContentDeletionEvent messageContentDeletionEvent(MailboxId mailboxId, Username owner, MailboxACL mailboxACL, Flags flags, MessageRepresentation message, String headerContent, MailboxPath mailboxPath) {
+        return EventFactory.messageContentDeleted()
+            .randomEventId()
+            .user(owner)
+            .mailboxId(mailboxId)
+            .mailboxACL(mailboxACL)
+            .messageId(message.getMessageId())
+            .size(message.getSize())
+            .instant(message.getInternalDate().toInstant())
+            .flags(flags)
+            .hasAttachments(!message.getAttachments().isEmpty())
+            .bodyBlobId(message.getBodyBlobId().asString())
+            .headerContent(headerContent)
+            .mailboxPath(mailboxPath.asString())
+            .build();
+    }
+
+    private Mono<MailboxACL> mailboxACL(Username owner, MailboxId mailboxId) {
+        return new PostgresMailboxDAO(executorFactory.create(owner.getDomainPart()))
+            .getACL(mailboxId)
+            .map(Pair::getLeft);
+    }
+
+    private Mono<Void> deleteBodyBlob(PostgresMessageId id, PostgresMessageDAO postgresMessageDAO) {
+        return postgresMessageDAO.getBodyBlobId(id)
+            .flatMap(blobId -> Mono.from(blobStore.delete(blobStore.getDefaultBucketName(), blobId))
+                .then());
+    }
+
+    private Mono<Boolean> isUnreferenced(PostgresMessageId id, PostgresMailboxMessageDAO postgresMailboxMessageDAO) {
+        return postgresMailboxMessageDAO.existsByMessageId(id)
+            .map(FunctionalUtils.negate());
+    }
+
+    private Mono<Void> deleteAttachment(PostgresMessageId messageId, PostgresAttachmentDAO attachmentDAO) {
+        return deleteAttachmentBlobs(messageId, attachmentDAO)
+            .then(attachmentDAO.deleteByMessageId(messageId));
+    }
+
+    private Mono<Void> deleteAttachmentBlobs(PostgresMessageId messageId, PostgresAttachmentDAO attachmentDAO) {
+        return attachmentDAO.listBlobsByMessageId(messageId)
+            .flatMap(blobId -> Mono.from(blobStore.delete(blobStore.getDefaultBucketName(), blobId)), ReactorUtils.DEFAULT_CONCURRENCY)
+            .then();
+    }
+
+    private Mono<Void> deleteAttachmentIfEnabled(PostgresMessageId messageId, PostgresAttachmentDAO attachmentDAO) {
+        if (postgresConfiguration.isAttachmentStorageEnabled()) {
+            return deleteAttachment(messageId, attachmentDAO);
+        }
+        return Mono.empty();
+    }
+}

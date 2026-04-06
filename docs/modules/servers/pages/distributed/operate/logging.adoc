@@ -1,0 +1,9 @@
+= Distributed James Server &mdash; Logging
+:navtitle: Logging
+
+:xref-base: distributed
+:server-name: Distributed James Server
+:server-tag: distributed
+:docker-compose-code-block-sample: servers:distributed/operate/logging/docker-compose-block.adoc
+:backend-name: cassandra
+include::partial$operate/logging.adoc[]

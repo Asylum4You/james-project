@@ -5,6 +5,7 @@
 This app provides an easily scalable SMTP processing module based on Apache Pulsar for small to large deployments. The idea being that it is easy enough to operate this assembly at a "reasonable" cost in the cloud until the scale is large enough to warrant switching to the fully distributed app.
 
 In order to support such small deployments destined to grow this app relies on :
+
 - Apache pulsar as there are cost-efficient SAAS deployments that make this app easy to deploy
 - A Blobstore (for mail repository) as they are very cost-efficient and available at most providers in the Cloud market.
 - A PostgresSQL database for reference data (domain list, recipient rewrite table and users). PostgreSQL databases as a service is available on multiple cloud platform and for this kind of information entry tiers should allow to operate a reasonable service. 
@@ -77,3 +78,10 @@ Note that you can create a domain via an environment variable. This domain will 
 ----
 --environment DOMAIN=domain.tld
 ----
+
+== Database backend migration
+
+Starting with James 3.9, the scaling-pulsar-smtp application uses the newly introduced Postgres backend instead of the JPA backend.
+
+If you previously deployed the scaling-pulsar-smtp application, you will want to run the https://github.com/apache/james-project/tree/master/server/apps/migration/migration-core-data-jpa-to-pg/sample-configuration[core data JPA to PG migration tool].
+

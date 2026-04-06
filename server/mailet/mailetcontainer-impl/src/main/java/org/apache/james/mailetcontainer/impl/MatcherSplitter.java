@@ -19,12 +19,13 @@
 
 package org.apache.james.mailetcontainer.impl;
 
+import static org.apache.james.mailetcontainer.impl.ProcessorImpl.mdcBase;
+
 import java.io.Closeable;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Locale;
-import java.util.Optional;
 
 import jakarta.mail.MessagingException;
 
@@ -33,7 +34,6 @@ import org.apache.james.mailetcontainer.lib.AbstractStateMailetProcessor.MailetP
 import org.apache.james.metrics.api.MetricFactory;
 import org.apache.james.metrics.api.TimeMetric;
 import org.apache.james.server.core.MailImpl;
-import org.apache.james.util.MDCBuilder;
 import org.apache.mailet.Attribute;
 import org.apache.mailet.AttributeName;
 import org.apache.mailet.AttributeValue;
@@ -41,8 +41,6 @@ import org.apache.mailet.Mail;
 import org.apache.mailet.Matcher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import com.google.common.collect.ImmutableList;
 
 /**
  * A Splitter for use with Camel to split the MailMessage into many pieces if
@@ -63,7 +61,7 @@ public class MatcherSplitter {
         this.metricFactory = metricFactory;
         this.container = container;
         this.matcher = pair.getMatcher();
-        this.onMatchException = Optional.ofNullable(pair.getOnMatchException())
+        this.onMatchException = pair.onMatchException()
             .map(s -> s.trim().toLowerCase(Locale.US))
             .orElse(Mail.ERROR);
     }
@@ -88,17 +86,8 @@ public class MatcherSplitter {
             List<Mail> mails = new ArrayList<>();
             boolean fullMatch = false;
 
-            try (Closeable closeable =
-                     MDCBuilder.create()
-                         .addToContext(MDCBuilder.PROTOCOL, "MAILET")
-                         .addToContext(MDCBuilder.ACTION, "MATCHER")
-                         .addToContext(MDCBuilder.IP, mail.getRemoteAddr())
-                         .addToContext(MDCBuilder.HOST, mail.getRemoteHost())
+            try (Closeable closeable = mdcBase(mail)
                          .addToContext("matcher", matcher.getMatcherInfo())
-                         .addToContext("state", mail.getState())
-                         .addToContext("mail", mail.getName())
-                         .addToContext("recipients", ImmutableList.copyOf(mail.getRecipients()).toString())
-                         .addToContext("sender", mail.getMaybeSender().asString())
                          .build()) {
                 // call the matcher
                 matchedRcpts = matcher.match(mail);

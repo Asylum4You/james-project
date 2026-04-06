@@ -22,8 +22,8 @@ package org.apache.james.backends.cassandra.quota;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import org.apache.james.backends.cassandra.CassandraClusterExtension;
-import org.apache.james.backends.cassandra.components.CassandraModule;
-import org.apache.james.backends.cassandra.components.CassandraMutualizedQuotaModule;
+import org.apache.james.backends.cassandra.components.CassandraDataDefinition;
+import org.apache.james.backends.cassandra.components.CassandraMutualizedQuotaDataDefinition;
 import org.apache.james.backends.cassandra.components.CassandraQuotaLimitDao;
 import org.apache.james.core.quota.QuotaComponent;
 import org.apache.james.core.quota.QuotaLimit;
@@ -38,7 +38,7 @@ public class CassandraQuotaLimitDaoTest {
     private CassandraQuotaLimitDao cassandraQuotaLimitDao;
 
     @RegisterExtension
-    static CassandraClusterExtension cassandraCluster = new CassandraClusterExtension(CassandraModule.aggregateModules(CassandraMutualizedQuotaModule.MODULE));
+    static CassandraClusterExtension cassandraCluster = new CassandraClusterExtension(CassandraDataDefinition.aggregateModules(CassandraMutualizedQuotaDataDefinition.MODULE));
 
     @BeforeEach
     void setup() {
@@ -47,8 +47,8 @@ public class CassandraQuotaLimitDaoTest {
 
     @Test
     void getQuotaLimitsShouldGetSomeQuotaLimitsSuccessfully() {
-        QuotaLimit expectedOne = QuotaLimit.builder().quotaComponent(QuotaComponent.MAILBOX).quotaScope(QuotaScope.DOMAIN).identifier("A").quotaType(QuotaType.COUNT).quotaLimit(200l).build();
-        QuotaLimit expectedTwo = QuotaLimit.builder().quotaComponent(QuotaComponent.MAILBOX).quotaScope(QuotaScope.DOMAIN).identifier("A").quotaType(QuotaType.SIZE).quotaLimit(100l).build();
+        QuotaLimit expectedOne = QuotaLimit.builder().quotaComponent(QuotaComponent.MAILBOX).quotaScope(QuotaScope.DOMAIN).identifier("A").quotaType(QuotaType.COUNT).quotaLimit(200L).build();
+        QuotaLimit expectedTwo = QuotaLimit.builder().quotaComponent(QuotaComponent.MAILBOX).quotaScope(QuotaScope.DOMAIN).identifier("A").quotaType(QuotaType.SIZE).quotaLimit(100L).build();
         cassandraQuotaLimitDao.setQuotaLimit(expectedOne).block();
         cassandraQuotaLimitDao.setQuotaLimit(expectedTwo).block();
 
@@ -58,10 +58,10 @@ public class CassandraQuotaLimitDaoTest {
 
     @Test
     void setQuotaLimitShouldSaveObjectSuccessfully() {
-        QuotaLimit expected = QuotaLimit.builder().quotaComponent(QuotaComponent.MAILBOX).quotaScope(QuotaScope.DOMAIN).identifier("A").quotaType(QuotaType.COUNT).quotaLimit(100l).build();
+        QuotaLimit expected = QuotaLimit.builder().quotaComponent(QuotaComponent.MAILBOX).quotaScope(QuotaScope.DOMAIN).identifier("A").quotaType(QuotaType.COUNT).quotaLimit(100L).build();
         cassandraQuotaLimitDao.setQuotaLimit(expected).block();
 
-        assertThat(cassandraQuotaLimitDao.getQuotaLimit(CassandraQuotaLimitDao.QuotaLimitKey.of(QuotaComponent.MAILBOX, QuotaScope.DOMAIN, "A", QuotaType.COUNT)).block())
+        assertThat(cassandraQuotaLimitDao.getQuotaLimit(QuotaLimit.QuotaLimitKey.of(QuotaComponent.MAILBOX, QuotaScope.DOMAIN, "A", QuotaType.COUNT)).block())
             .isEqualTo(expected);
     }
 
@@ -70,26 +70,26 @@ public class CassandraQuotaLimitDaoTest {
         QuotaLimit emptyQuotaLimitValue = QuotaLimit.builder().quotaComponent(QuotaComponent.MAILBOX).quotaScope(QuotaScope.DOMAIN).identifier("A").quotaType(QuotaType.COUNT).build();
         cassandraQuotaLimitDao.setQuotaLimit(emptyQuotaLimitValue).block();
 
-        assertThat(cassandraQuotaLimitDao.getQuotaLimit(CassandraQuotaLimitDao.QuotaLimitKey.of(QuotaComponent.MAILBOX, QuotaScope.DOMAIN, "A", QuotaType.COUNT)).block())
+        assertThat(cassandraQuotaLimitDao.getQuotaLimit(QuotaLimit.QuotaLimitKey.of(QuotaComponent.MAILBOX, QuotaScope.DOMAIN, "A", QuotaType.COUNT)).block())
             .isEqualTo(emptyQuotaLimitValue);
     }
 
     @Test
     void setQuotaLimitShouldSaveObjectSuccessfullyWhenLimitIsMinusOne() {
-        QuotaLimit expected = QuotaLimit.builder().quotaComponent(QuotaComponent.MAILBOX).quotaScope(QuotaScope.DOMAIN).identifier("A").quotaType(QuotaType.COUNT).quotaLimit(-1l).build();
+        QuotaLimit expected = QuotaLimit.builder().quotaComponent(QuotaComponent.MAILBOX).quotaScope(QuotaScope.DOMAIN).identifier("A").quotaType(QuotaType.COUNT).quotaLimit(-1L).build();
         cassandraQuotaLimitDao.setQuotaLimit(expected).block();
 
-        assertThat(cassandraQuotaLimitDao.getQuotaLimit(CassandraQuotaLimitDao.QuotaLimitKey.of(QuotaComponent.MAILBOX, QuotaScope.DOMAIN, "A", QuotaType.COUNT)).block())
+        assertThat(cassandraQuotaLimitDao.getQuotaLimit(QuotaLimit.QuotaLimitKey.of(QuotaComponent.MAILBOX, QuotaScope.DOMAIN, "A", QuotaType.COUNT)).block())
             .isEqualTo(expected);
     }
 
     @Test
     void deleteQuotaLimitShouldDeleteObjectSuccessfully() {
-        QuotaLimit quotaLimit = QuotaLimit.builder().quotaComponent(QuotaComponent.MAILBOX).quotaScope(QuotaScope.DOMAIN).identifier("A").quotaType(QuotaType.COUNT).quotaLimit(100l).build();
+        QuotaLimit quotaLimit = QuotaLimit.builder().quotaComponent(QuotaComponent.MAILBOX).quotaScope(QuotaScope.DOMAIN).identifier("A").quotaType(QuotaType.COUNT).quotaLimit(100L).build();
         cassandraQuotaLimitDao.setQuotaLimit(quotaLimit).block();
-        cassandraQuotaLimitDao.deleteQuotaLimit(CassandraQuotaLimitDao.QuotaLimitKey.of(QuotaComponent.MAILBOX, QuotaScope.DOMAIN, "A", QuotaType.COUNT)).block();
+        cassandraQuotaLimitDao.deleteQuotaLimit(QuotaLimit.QuotaLimitKey.of(QuotaComponent.MAILBOX, QuotaScope.DOMAIN, "A", QuotaType.COUNT)).block();
 
-        assertThat(cassandraQuotaLimitDao.getQuotaLimit(CassandraQuotaLimitDao.QuotaLimitKey.of(QuotaComponent.MAILBOX, QuotaScope.DOMAIN, "A", QuotaType.COUNT)).block())
+        assertThat(cassandraQuotaLimitDao.getQuotaLimit(QuotaLimit.QuotaLimitKey.of(QuotaComponent.MAILBOX, QuotaScope.DOMAIN, "A", QuotaType.COUNT)).block())
             .isNull();
     }
 

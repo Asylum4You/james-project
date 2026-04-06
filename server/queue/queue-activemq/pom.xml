@@ -23,7 +23,7 @@
     <parent>
         <groupId>org.apache.james</groupId>
         <artifactId>james-server</artifactId>
-        <version>3.9.0-SNAPSHOT</version>
+        <version>3.10.0-SNAPSHOT</version>
         <relativePath>../../pom.xml</relativePath>
     </parent>
 
@@ -33,12 +33,10 @@
     <name>Apache James :: Server :: Mail Queue :: ActiveMQ</name>
 
     <dependencies>
-        <!-- Forcing netty-transport version -->
         <dependency>
             <?SORTPOM IGNORE?>
             <groupId>io.netty</groupId>
             <artifactId>netty-transport</artifactId>
-            <version>4.1.77.Final</version>
             <?SORTPOM RESUME?>
         </dependency>
         <dependency>

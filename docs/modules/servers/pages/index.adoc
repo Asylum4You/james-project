@@ -16,6 +16,7 @@ The available James Servers are:
  * <<basic,James Basic Mail Server>>
  * <<extendable,James Extendable Mail Server>>
  * <<distributed,James Distributed Mail Server>>
+ * <<postgres,James Postgres Mail Server>>
  * <<test,James Test Server>>
 
 If you are just checking out James for the first time, then we highly recommend
@@ -57,7 +58,7 @@ production issues.
 
 When your requirements start to get a little more serious, or you
 start to feel adventurous and want to begin your own email adventure,
-you can consider using the xref:extendable.adoc[*Extendable Server*].
+you can consider using the xref:extendable/index.adoc[*Extendable Server*].
 
 This server is intended for experts who understand the consequences of
 what they are doing. It provides extension mechanisms, configurations,
@@ -71,11 +72,19 @@ any email needs you may have.
 [#distributed]
 == James Distributed Mail Server 
 
-The xref:james-distributed-app:ROOT:index.adoc[*Distributed Server*] is a heavy-duty industrial
+The xref:distributed/index.adoc[*Distributed Server*] is a heavy-duty industrial
 enterprise mail server.
 
 This is the most feature-rich server, but also by far the most complex,
 and is intended for experts only.
+
+
+
+[#postgres]
+== James Postgres Mail Server
+
+The xref:postgres/index.adoc[*Distributed with Postgres Server*] is a one
+variant of the distributed server with Postgres as the database.
 
 
 

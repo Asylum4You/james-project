@@ -19,18 +19,19 @@
 
 package org.apache.james.transport.mailets;
 
-import java.net.InetAddress;
-import java.net.UnknownHostException;
-import java.util.ArrayList;
-import java.util.List;
-
-import jakarta.mail.MessagingException;
-
 import static org.apache.james.transport.mailets.SPF.RESULT_ATTRIBUTE;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+
+import java.net.InetAddress;
+import java.net.UnknownHostException;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+
+import jakarta.mail.MessagingException;
 
 import org.apache.james.core.MailAddress;
 import org.apache.james.dnsservice.api.DNSService;
@@ -60,7 +61,7 @@ public class SPFTest {
     @BeforeAll
     public static void setupMockedSPFDNSService() throws TimeoutException {
         mockedSPFDNSService = mock(org.apache.james.jspf.core.DNSService.class);
-        when(mockedSPFDNSService.getRecords(any(DNSRequest.class)))
+        when(mockedSPFDNSService.getRecordsAsync(any(DNSRequest.class)))
             .thenAnswer(invocation -> {
                 DNSRequest req = invocation.getArgument(0);
                 switch (req.getRecordType()) {
@@ -69,28 +70,36 @@ public class SPFTest {
                         List<String> l = new ArrayList<>();
                         switch (req.getHostname()) {
                             case "some.host.local":
-                                return l;
+                                return CompletableFuture.completedFuture(l);
                             case "spf1.james.apache.org":
                                 // pass
                                 l.add("v=spf1 +all");
-                                return l;
+                                return CompletableFuture.completedFuture(l);
                             case "spf2.james.apache.org":
                                 // fail
                                 l.add("v=spf1 -all");
-                                return l;
+                                return CompletableFuture.completedFuture(l);
+                            case "spf26.james.apache.org":
+                                // fail
+                                l.add("v=spf1 include:spf27.james.apache.org ~all");
+                                return CompletableFuture.completedFuture(l);
+                            case "spf27.james.apache.org":
+                                // fail
+                                l.add("v=spf1 include:spf26.james.apache.org ~all");
+                                return CompletableFuture.completedFuture(l);
                             case "spf3.james.apache.org":
                                 // softfail
                                 l.add("v=spf1 ~all");
-                                return l;
+                                return CompletableFuture.completedFuture(l);
                             case "spf4.james.apache.org":
-                                // permerror
+                                // kpermerror
                                 l.add("v=spf1 badcontent!");
-                                return l;
+                                return CompletableFuture.completedFuture(l);
                             case "spf5.james.apache.org":
                                 // temperror
-                                 throw new TimeoutException("TIMEOUT");
+                                return CompletableFuture.failedFuture(new TimeoutException("TIMEOUT"));
                             default:
-                                throw new RuntimeException("Unknown record " + req.getHostname());
+                                return CompletableFuture.failedFuture(new RuntimeException("Unknown record " + req.getHostname()));
                         }
                     default:
                         throw new UnsupportedOperationException("Unimplemented mock service");
@@ -132,6 +141,15 @@ public class SPFTest {
 
         mailet.service(mail);
         assertThat(AttributeUtils.getValueAndCastFromMail(mail, RESULT_ATTRIBUTE, String.class)).contains("fail");
+    }
+
+    @Test
+    public void testInfiniteLoop() throws MessagingException {
+        FakeMail mail = fakeMail().sender("hello@spf26.james.apache.org").build();
+        Mailet mailet = testMailet();
+
+        mailet.service(mail);
+        assertThat(AttributeUtils.getValueAndCastFromMail(mail, RESULT_ATTRIBUTE, String.class)).contains("permerror");
     }
 
     @Test

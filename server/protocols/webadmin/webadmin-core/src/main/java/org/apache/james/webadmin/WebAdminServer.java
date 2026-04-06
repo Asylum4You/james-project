@@ -40,6 +40,7 @@ import org.apache.james.lifecycle.api.Startable;
 import org.apache.james.metrics.api.MetricFactory;
 import org.apache.james.util.Port;
 import org.apache.james.webadmin.authentication.AuthenticationFilter;
+import org.apache.james.webadmin.jettyserver.EmbeddedJettyFactory;
 import org.apache.james.webadmin.mdc.LoggingRequestFilter;
 import org.apache.james.webadmin.mdc.LoggingResponseFilter;
 import org.apache.james.webadmin.mdc.MDCCleanupFilter;
@@ -49,6 +50,7 @@ import org.apache.james.webadmin.metric.MetricPreFilter;
 import org.apache.james.webadmin.routes.CORSRoute;
 import org.apache.james.webadmin.utils.ErrorResponder;
 import org.apache.james.webadmin.utils.JsonExtractException;
+import org.eclipse.jetty.io.EofException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -57,6 +59,7 @@ import com.google.common.collect.ImmutableList;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 import spark.Service;
+import spark.embeddedserver.EmbeddedServers;
 
 public class WebAdminServer implements Startable {
     private static final Logger LOGGER = LoggerFactory.getLogger(WebAdminServer.class);
@@ -72,6 +75,10 @@ public class WebAdminServer implements Startable {
     private final MetricFactory metricFactory;
     private final LoggingRequestFilter loggingRequestFilter;
 
+    public enum Identifiers {
+        JAMES_JETTY
+    }
+
     @Inject
     protected WebAdminServer(WebAdminConfiguration configuration,
                              @Named("webAdminRoutes") List<Routes> routesList,
@@ -84,6 +91,10 @@ public class WebAdminServer implements Startable {
         this.authenticationFilter = authenticationFilter;
         this.metricFactory = metricFactory;
         this.loggingRequestFilter = loggingRequestFilter;
+
+        EmbeddedServers.add(
+            Identifiers.JAMES_JETTY,
+            new EmbeddedJettyFactory());
         this.service = Service.ignite();
     }
 
@@ -93,7 +104,7 @@ public class WebAdminServer implements Startable {
             .collect(ImmutableList.toImmutableList());
     }
 
-    private static List<PublicRoutes> publicRoutes(List<Routes>  routes) {
+    private static List<PublicRoutes> publicRoutes(List<Routes> routes) {
         return routes.stream()
             .filter(PublicRoutes.class::isInstance)
             .map(PublicRoutes.class::cast)
@@ -101,6 +112,7 @@ public class WebAdminServer implements Startable {
     }
 
     public WebAdminServer start() {
+        service.embeddedServerIdentifier(Identifiers.JAMES_JETTY);
         service.initExceptionHandler(e -> {
             throw new RuntimeException(e);
         });
@@ -177,7 +189,7 @@ public class WebAdminServer implements Startable {
         service.notFound((req, res) -> ErrorResponder.builder()
             .statusCode(NOT_FOUND_404)
             .type(NOT_FOUND)
-            .message("%s %s can not be found", req.requestMethod(), req.pathInfo())
+            .message("%s %s can not be found", req.requestMethod(), req.uri())
             .asString());
 
         service.internalServerError((req, res) -> ErrorResponder.builder()
@@ -187,6 +199,7 @@ public class WebAdminServer implements Startable {
             .asString());
 
         service.exception(JsonExtractException.class, (ex, req, res) -> {
+            LOGGER.info("Invalid JSON body supplied in the user request", ex);
             res.status(BAD_REQUEST_400);
             res.body(ErrorResponder.builder()
                 .statusCode(BAD_REQUEST_400)
@@ -196,6 +209,8 @@ public class WebAdminServer implements Startable {
                 .asString());
         });
 
+        service.exception(EofException.class, (ex, req, res) -> LOGGER.info("Transfer aborted by the client"));
+
         service.exception(IllegalArgumentException.class, (ex, req, res) -> {
             LOGGER.info("Invalid arguments supplied in the user request", ex);
             res.status(BAD_REQUEST_400);
@@ -203,6 +218,17 @@ public class WebAdminServer implements Startable {
                 .statusCode(BAD_REQUEST_400)
                 .type(INVALID_ARGUMENT)
                 .message("Invalid arguments supplied in the user request")
+                .cause(ex)
+                .asString());
+        });
+
+        service.exception(Exception.class, (ex, req, res) -> {
+            LOGGER.error("Unexpected error calling {} {}", req.requestMethod(), req.uri(), ex);
+            res.status(INTERNAL_SERVER_ERROR_500);
+            res.body(ErrorResponder.builder()
+                .statusCode(INTERNAL_SERVER_ERROR_500)
+                .type(SERVER_ERROR)
+                .message("WebAdmin encountered an unexpected internal error")
                 .cause(ex)
                 .asString());
         });

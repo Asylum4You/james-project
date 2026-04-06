@@ -19,9 +19,11 @@
 
 package org.apache.james.jmap.change
 
+import java.util
 import java.util.Optional
 
 import com.fasterxml.jackson.annotation.JsonProperty
+import com.google.common.collect.ImmutableList
 import jakarta.inject.Inject
 import org.apache.james.core.Username
 import org.apache.james.events.Event.EventId
@@ -40,7 +42,7 @@ case class StateChangeEventDTOFactory @Inject()(typeStateFactory: TypeStateFacto
     .toDomainObjectConverter(dto => dto.toDomainObject(typeStateFactory))
     .toDTOConverter((event, aType) => toDTO(event))
     .typeName(classOf[StateChangeEvent].getCanonicalName)
-    .withFactory(EventDTOModule.apply);
+    .withFactory(EventDTOModule.apply)
 
   def toDTO(event: StateChangeEvent): StateChangeEventDTO = StateChangeEventDTO(
     getType = classOf[StateChangeEvent].getCanonicalName,
@@ -66,7 +68,7 @@ case class StateChangeEventDTO(@JsonProperty("type") getType: String,
     map = typeStatesFromMap(typeStateFactory))
 
   private def typeStatesFromMap(typeStateFactory: TypeStateFactory): Map[TypeName, State] =
-    getTypeStates.toScala.map(typeStates => typeStates.asScala.flatMap(element => typeStateFactory.parse(element._1).toOption
+    getTypeStates.toScala.map(typeStates => typeStates.asScala.flatMap(element => typeStateFactory.lenientParse(element._1)
       .flatMap(typeName => typeName.parseState(element._2).toOption.map(state => typeName -> state))).toMap)
       .getOrElse(fallbackToOldFormat())
 
@@ -79,19 +81,24 @@ case class StateChangeEventDTO(@JsonProperty("type") getType: String,
 }
 
 case class JmapEventSerializer @Inject()(stateChangeEventDTOFactory: StateChangeEventDTOFactory) extends EventSerializer {
-  private val genericSerializer: JsonGenericSerializer[StateChangeEvent, StateChangeEventDTO] = JsonGenericSerializer
-    .forModules(stateChangeEventDTOFactory.dtoModule)
+  private val genericSerializer: JsonGenericSerializer[Event, EventDTO] = JsonGenericSerializer
+    .forModules(stateChangeEventDTOFactory.dtoModule.asInstanceOf[EventDTOModule[Event, EventDTO]])
     .withoutNestedType()
 
-  override def toJson(event: Event): String = event match {
-    case stateChangeEvent: StateChangeEvent => genericSerializer.serialize(stateChangeEvent)
-  }
+  override def toJson(event: Event): String = genericSerializer.serialize(event)
 
   override def asEvent(serialized: String): Event = genericSerializer.deserialize(serialized)
 
-  override def toJsonBytes(event: Event): Array[Byte] =  event match {
-    case stateChangeEvent: StateChangeEvent => genericSerializer.serializeToBytes(stateChangeEvent)
-  }
+  override def toJsonBytes(event: Event): Array[Byte] =  genericSerializer.serializeToBytes(event)
 
   override def fromBytes(serialized: Array[Byte]): Event = genericSerializer.deserializeFromBytes(serialized)
+
+  override def toJson(event: util.Collection[Event]): String = {
+    if (event.size() != 1) {
+      throw new IllegalArgumentException("Not supported for multiple events, please serialize separately")
+    }
+    toJson(event.iterator().next())
+  }
+
+  override def asEvents(serialized: String): util.List[Event] = ImmutableList.of(asEvent(serialized))
 }

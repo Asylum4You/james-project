@@ -4,6 +4,71 @@
   "aggregateId":"FilteringRule/bart",
   "rules":[
     {
+      "id":"id-cc",
+      "name":"a name",
+      "conditionGroup": {
+        "conditionCombiner": "AND",
+        "conditions": [
+          {
+            "field": "cc",
+            "comparator": "start-with",
+            "value": "A value to match 5"
+          },
+          {
+            "field": "sentDate",
+            "comparator": "isOlderThan",
+            "value": "15d"
+          },
+          {
+            "field": "sentDate",
+            "comparator": "isNewerThan",
+            "value": "30d"
+          },
+          {
+            "field": "savedDate",
+            "comparator": "isNewerThan",
+            "value": "45d"
+          },
+          {
+            "field": "internalDate",
+            "comparator": "isNewerThan",
+            "value": "2d"
+          },
+          {
+            "field": "flag",
+            "comparator": "isSet",
+            "value": "$seen"
+          },
+          {
+            "field": "flag",
+            "comparator": "isUnset",
+            "value": "$recent"
+          },
+          {
+            "field": "flag",
+            "comparator": "isSet",
+            "value": "custom"
+          }
+        ]
+      },
+      "action": {
+        "appendIn": {
+          "mailboxIds":["id-01"]
+        },
+        "moveTo": {
+          "mailboxName": "Trash"
+        },
+        "important":true,
+        "keyworkds":["abc"],
+        "reject":true,
+        "seen":true,
+        "forwardTo": {
+          "addresses": ["abc@example.com"],
+          "keepACopy": true
+        }
+      }
+    },
+    {
       "id":"id-from",
       "name":"a name",
       "conditionGroup": {
@@ -19,6 +84,9 @@
       "action": {
         "appendIn": {
           "mailboxIds":["id-01"]
+        },
+        "moveTo": {
+          "mailboxName": "Trash"
         },
         "important":true,
         "keyworkds":["abc"],
@@ -47,6 +115,9 @@
         "appendIn": {
           "mailboxIds":["id-01"]
         },
+        "moveTo": {
+          "mailboxName": "Trash"
+        },
         "important":true,
         "keyworkds":["abc"],
         "reject":true,
@@ -74,6 +145,9 @@
         "appendIn": {
           "mailboxIds":["id-01"]
         },
+        "moveTo": {
+          "mailboxName": "Trash"
+        },
         "important":true,
         "keyworkds":["abc"],
         "reject":true,
@@ -100,6 +174,9 @@
       "action": {
         "appendIn": {
           "mailboxIds":["id-01"]
+        },
+        "moveTo": {
+          "mailboxName": "Trash"
         },
         "important":true,
         "keyworkds":["abc"],

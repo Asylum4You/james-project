@@ -26,7 +26,7 @@
     <parent>
         <groupId>org.apache.james</groupId>
         <artifactId>james-project</artifactId>
-        <version>3.9.0-SNAPSHOT</version>
+        <version>3.10.0-SNAPSHOT</version>
     </parent>
 
     <artifactId>james-server</artifactId>
@@ -38,7 +38,6 @@
     <inceptionYear>2002</inceptionYear>
 
     <modules>
-        <module>apps/cassandra-app</module>
         <module>apps/cli</module>
         <module>apps/cli-integration-tests</module>
         <module>apps/distributed-app</module>
@@ -46,6 +45,8 @@
         <module>apps/jpa-app</module>
         <module>apps/jpa-smtp-app</module>
         <module>apps/memory-app</module>
+        <module>apps/migration/core-data-jpa-to-pg</module>
+        <module>apps/postgres-app</module>
         <module>apps/scaling-pulsar-smtp</module>
         <module>apps/spring-app</module>
         <module>apps/webadmin-cli</module>
@@ -67,10 +68,12 @@
         <module>data/data-file</module>
         <module>data/data-jmap</module>
         <module>data/data-jmap-cassandra</module>
+        <module>data/data-jmap-postgres</module>
         <module>data/data-jpa</module>
         <module>data/data-ldap</module>
         <module>data/data-library</module>
         <module>data/data-memory</module>
+        <module>data/data-postgres</module>
 
         <module>dns-service/dnsservice-api</module>
         <module>dns-service/dnsservice-dnsjava</module>
@@ -79,6 +82,7 @@
 
         <module>mailet/dkim</module>
         <module>mailet/integration-testing</module>
+        <module>mailet/ldap</module>
         <module>mailet/mailetcontainer-api</module>
         <module>mailet/mailetcontainer-impl</module>
         <module>mailet/mailets</module>
@@ -104,6 +108,7 @@
         <module>protocols/protocols-pop3</module>
         <module>protocols/protocols-pop3-distributed</module>
         <module>protocols/protocols-smtp</module>
+        <module>protocols/protocols-smtp-dkim</module>
         <module>protocols/webadmin</module>
         <module>protocols/webadmin-integration-test</module>
 
@@ -118,6 +123,7 @@
         <module>task/task-distributed</module>
         <module>task/task-json</module>
         <module>task/task-memory</module>
+        <module>task/task-postgres</module>
 
         <module>testing</module>
 

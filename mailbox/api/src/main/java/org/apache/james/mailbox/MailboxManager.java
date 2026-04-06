@@ -35,6 +35,7 @@ import org.apache.james.mailbox.model.MailboxPath;
 import org.apache.james.mailbox.model.MessageId;
 import org.apache.james.mailbox.model.MessageRange;
 import org.apache.james.mailbox.model.MultimailboxesSearchQuery;
+import org.apache.james.mailbox.model.SearchOptions;
 import org.apache.james.mailbox.model.ThreadId;
 import org.apache.james.mailbox.model.search.MailboxQuery;
 import org.reactivestreams.Publisher;
@@ -111,7 +112,8 @@ public interface MailboxManager extends RequestAware, RightManager, MailboxAnnot
         Text,
         FullText,
         Attachment,
-        AttachmentFileName
+        AttachmentFileName,
+        HighlightSearch
     }
     
     EnumSet<SearchCapabilities> getSupportedSearchCapabilities();
@@ -356,6 +358,16 @@ public interface MailboxManager extends RequestAware, RightManager, MailboxAnnot
             .flatMapIterable(Function.identity());
     }
 
+    default Publisher<MessageRange> moveMessagesReactive(List<MessageRange> sets, MailboxId from, MailboxId to, MailboxSession session) {
+        return Flux.fromIterable(sets)
+            .concatMap(set -> moveMessagesReactive(set, from, to, session));
+    }
+
+    default Publisher<MessageRange> copyMessagesReactive(List<MessageRange> sets, MailboxId from, MailboxId to, MailboxSession session) {
+        return Flux.fromIterable(sets)
+            .concatMap(set -> copyMessagesReactive(set, from, to, session));
+    }
+
     enum MailboxSearchFetchType {
         Minimal,
         Counters
@@ -382,8 +394,10 @@ public interface MailboxManager extends RequestAware, RightManager, MailboxAnnot
      *            not null
      * @param session
      *            the context for this call, not null
+     * @param searchOptions
+     *            options for the search
      */
-    Publisher<MessageId> search(MultimailboxesSearchQuery expression, MailboxSession session, long limit);
+    Publisher<MessageId> search(MultimailboxesSearchQuery expression, MailboxSession session, SearchOptions searchOptions);
 
     /**
      * Returns the list of MessageId of messages belonging to that Thread

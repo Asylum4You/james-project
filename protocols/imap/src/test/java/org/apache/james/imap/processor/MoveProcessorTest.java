@@ -28,6 +28,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
+import java.util.List;
 import java.util.Optional;
 
 import org.apache.james.core.Username;
@@ -41,6 +42,7 @@ import org.apache.james.imap.api.message.response.StatusResponseFactory;
 import org.apache.james.imap.api.process.ImapProcessor;
 import org.apache.james.imap.api.process.SelectedMailbox;
 import org.apache.james.imap.encode.FakeImapSession;
+import org.apache.james.imap.main.PathConverter;
 import org.apache.james.imap.message.request.MoveRequest;
 import org.apache.james.mailbox.MailboxManager;
 import org.apache.james.mailbox.MailboxManager.MailboxCapabilities;
@@ -88,7 +90,7 @@ public class MoveProcessorTest {
         mailboxSession = MailboxSessionUtil.create(USERNAME);
 
         when(mockMailboxManager.hasCapability(eq(MailboxCapabilities.Move))).thenReturn(true);
-        testee = new MoveProcessor(mockMailboxManager, mockStatusResponseFactory, new RecordingMetricFactory());
+        testee = new MoveProcessor(mockMailboxManager, mockStatusResponseFactory, new RecordingMetricFactory(), PathConverter.Factory.DEFAULT);
         verify(mockMailboxManager).hasCapability(MailboxCapabilities.Move);
 
         imapSession.authenticated();
@@ -103,7 +105,7 @@ public class MoveProcessorTest {
     @Test
     void getImplementedCapabilitiesShouldNotContainMoveWhenUnSupportedByMailboxManager() {
         when(mockMailboxManager.hasCapability(eq(MailboxCapabilities.Move))).thenReturn(false);
-        assertThat(new MoveProcessor(mockMailboxManager, mockStatusResponseFactory, new RecordingMetricFactory())
+        assertThat(new MoveProcessor(mockMailboxManager, mockStatusResponseFactory, new RecordingMetricFactory(), PathConverter.Factory.DEFAULT)
                 .getImplementedCapabilities(null)).isEmpty();
     }
 
@@ -125,7 +127,7 @@ public class MoveProcessorTest {
         when(targetMessageManager.getMailboxEntity()).thenReturn(mailbox);
         StatusResponse okResponse = mock(StatusResponse.class);
         when(mockStatusResponseFactory.taggedOk(any(Tag.class), any(ImapCommand.class), any(HumanReadableText.class), any(StatusResponse.ResponseCode.class))).thenReturn(okResponse);
-        when(mockMailboxManager.moveMessagesReactive(eq(MessageRange.range(MessageUid.of(4), MessageUid.of(6))), any(MailboxId.class), any(MailboxId.class), eq(mailboxSession)))
+        when(mockMailboxManager.moveMessagesReactive(eq(List.of(MessageRange.range(MessageUid.of(4), MessageUid.of(6)))), any(MailboxId.class), any(MailboxId.class), eq(mailboxSession)))
             .thenReturn(Flux.just(MessageRange.range(MessageUid.of(4), MessageUid.of(6))));
 
         testee.process(moveRequest, mockResponder, imapSession);
@@ -134,7 +136,7 @@ public class MoveProcessorTest {
         verify(mockMailboxManager).manageProcessing(any(), any());
         verify(mockMailboxManager).mailboxExists(INBOX, mailboxSession);
         verify(mockMailboxManager).getMailboxReactive(INBOX, mailboxSession);
-        verify(mockMailboxManager).moveMessagesReactive(eq(MessageRange.range(MessageUid.of(4), MessageUid.of(6))), any(MailboxId.class), any(MailboxId.class), eq(mailboxSession));
+        verify(mockMailboxManager).moveMessagesReactive(eq(List.of(MessageRange.range(MessageUid.of(4), MessageUid.of(6)))), any(MailboxId.class), any(MailboxId.class), eq(mailboxSession));
         verify(targetMessageManager).getMailboxEntity();
         verify(mockResponder).respond(okResponse);
     }

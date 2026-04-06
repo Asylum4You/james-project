@@ -29,6 +29,7 @@ import jakarta.inject.Inject;
 import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage;
 
+import org.apache.commons.lang3.tuple.Pair;
 import org.apache.james.lifecycle.api.LifecycleUtil;
 import org.apache.james.mailrepository.api.MailKey;
 import org.apache.james.mailrepository.api.MailRepository;
@@ -73,8 +74,12 @@ public class MailRepositoryStoreService {
     }
 
     public Optional<List<MailKeyDTO>> listMails(MailRepositoryPath path, Offset offset, Limit limit) throws MailRepositoryStore.MailRepositoryStoreException, MessagingException {
+        return listMails(path, offset, limit, MailRepository.Condition.ALL);
+    }
+
+    public Optional<List<MailKeyDTO>> listMails(MailRepositoryPath path, Offset offset, Limit limit, MailRepository.Condition condition) throws MailRepositoryStore.MailRepositoryStoreException, MessagingException {
         Optional<Stream<MailKeyDTO>> maybeMails = Optional.of(getRepositories(path)
-            .flatMap(Throwing.function((MailRepository repository) -> Iterators.toStream(repository.list())).sneakyThrow())
+            .flatMap(Throwing.function((MailRepository repository) -> Iterators.toStream(repository.list(condition))).sneakyThrow())
             .map(MailKeyDTO::new)
             .skip(offset.getOffset()));
 
@@ -110,6 +115,40 @@ public class MailRepositoryStoreService {
     public void deleteMail(MailRepositoryPath path, MailKey mailKey) throws MailRepositoryStore.MailRepositoryStoreException, MessagingException {
         getRepositories(path)
             .forEach(Throwing.consumer((MailRepository repository) -> repository.remove(mailKey)).sneakyThrow());
+    }
+
+    public boolean repositoryExists(MailRepositoryPath path) throws MailRepositoryStore.MailRepositoryStoreException {
+        return mailRepositoryStore.getByPath(path).findAny().isPresent();
+    }
+
+    public void moveMail(MailRepositoryPath sourcePath, MailRepositoryPath targetPath, MailKey mailKey) throws MailRepositoryStore.MailRepositoryStoreException, MessagingException {
+        MailRepository source = getRepositories(sourcePath).findFirst()
+            .orElseThrow(() -> new MailRepositoryStore.MailRepositoryStoreException("No repository found for path: " + sourcePath.asString()));
+        MailRepository target = getRepositories(targetPath).findFirst()
+            .orElseThrow(() -> new MailRepositoryStore.MailRepositoryStoreException("No repository found for path: " + targetPath.asString()));
+
+        moveMail(source, target, mailKey);
+    }
+
+    public void moveAllMails(MailRepositoryPath sourcePath, MailRepositoryPath targetPath) throws MailRepositoryStore.MailRepositoryStoreException, MessagingException {
+        MailRepository target = getRepositories(targetPath).findFirst()
+            .orElseThrow(() -> new MailRepositoryStore.MailRepositoryStoreException("No repository found for path: " + targetPath.asString()));
+
+        getRepositories(sourcePath)
+            .flatMap(Throwing.function(repo -> Iterators.toStream(repo.list()).map(key -> Pair.of(repo, key))))
+            .forEach(Throwing.<Pair<MailRepository, MailKey>>consumer(pair -> moveMail(pair.getKey(), target, pair.getValue())).sneakyThrow());
+    }
+
+    private void moveMail(MailRepository source, MailRepository target, MailKey key) throws MessagingException {
+        Optional.ofNullable(source.retrieve(key))
+            .ifPresent(Throwing.consumer(mail -> {
+                try {
+                    target.store(mail);
+                    source.remove(key);
+                } finally {
+                    LifecycleUtil.dispose(mail);
+                }
+            }));
     }
 
     public Task createClearMailRepositoryTask(MailRepositoryPath path) throws MailRepositoryStore.MailRepositoryStoreException, MessagingException {

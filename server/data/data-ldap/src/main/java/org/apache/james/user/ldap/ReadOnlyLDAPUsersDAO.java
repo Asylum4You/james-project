@@ -19,10 +19,6 @@
 
 package org.apache.james.user.ldap;
 
-import java.net.URI;
-import java.security.KeyManagementException;
-import java.security.NoSuchAlgorithmException;
-import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Iterator;
@@ -32,11 +28,6 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Stream;
 
-import javax.net.SocketFactory;
-import javax.net.ssl.SSLContext;
-import javax.net.ssl.SSLSocketFactory;
-import javax.net.ssl.TrustManager;
-import javax.net.ssl.X509TrustManager;
 
 import jakarta.annotation.PreDestroy;
 import jakarta.inject.Inject;
@@ -47,6 +38,7 @@ import org.apache.commons.configuration2.tree.ImmutableNode;
 import org.apache.james.core.Domain;
 import org.apache.james.core.Username;
 import org.apache.james.lifecycle.api.Configurable;
+import org.apache.james.metrics.api.GaugeRegistry;
 import org.apache.james.user.api.UsersRepositoryException;
 import org.apache.james.user.api.model.User;
 import org.apache.james.user.lib.UsersDAO;
@@ -54,17 +46,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.github.fge.lambdas.Throwing;
-import com.github.fge.lambdas.functions.ThrowingFunction;
 import com.google.common.base.Preconditions;
-import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.unboundid.ldap.sdk.Attribute;
-import com.unboundid.ldap.sdk.BindRequest;
 import com.unboundid.ldap.sdk.DN;
 import com.unboundid.ldap.sdk.Entry;
-import com.unboundid.ldap.sdk.FailoverServerSet;
 import com.unboundid.ldap.sdk.Filter;
-import com.unboundid.ldap.sdk.LDAPConnectionOptions;
 import com.unboundid.ldap.sdk.LDAPConnectionPool;
 import com.unboundid.ldap.sdk.LDAPException;
 import com.unboundid.ldap.sdk.LDAPSearchException;
@@ -72,55 +59,32 @@ import com.unboundid.ldap.sdk.SearchRequest;
 import com.unboundid.ldap.sdk.SearchResult;
 import com.unboundid.ldap.sdk.SearchResultEntry;
 import com.unboundid.ldap.sdk.SearchScope;
-import com.unboundid.ldap.sdk.ServerSet;
-import com.unboundid.ldap.sdk.SimpleBindRequest;
-import com.unboundid.ldap.sdk.SingleServerSet;
+
+import reactor.core.publisher.Flux;
+import reactor.core.scheduler.Schedulers;
 
 public class ReadOnlyLDAPUsersDAO implements UsersDAO, Configurable {
     private static final Logger LOGGER = LoggerFactory.getLogger(ReadOnlyLDAPUsersDAO.class);
 
-    private static final TrustManager DUMMY_TRUST_MANAGER = new X509TrustManager() {
-        @Override
-        public X509Certificate[] getAcceptedIssuers() {
-            return new X509Certificate[0];
-        }
-
-        @Override
-        public void checkClientTrusted(X509Certificate[] chain, String authType) {
-            // Always trust
-        }
-
-        @Override
-        public void checkServerTrusted(X509Certificate[] chain, String authType) {
-            // Always trust
-        }
-    };
-
-    private LdapRepositoryConfiguration ldapConfiguration;
+    private final GaugeRegistry gaugeRegistry;
+    private final LdapRepositoryConfiguration ldapConfiguration;
     private LDAPConnectionPool ldapConnectionPool;
     private Optional<Filter> userExtraFilter;
     private Filter objectClassFilter;
     private Filter listingFilter;
 
     @Inject
-    public ReadOnlyLDAPUsersDAO() {
-
+    public ReadOnlyLDAPUsersDAO(GaugeRegistry gaugeRegistry,
+                                LDAPConnectionPool ldapConnectionPool,
+                                LdapRepositoryConfiguration configuration) {
+        this.gaugeRegistry = gaugeRegistry;
+        this.ldapConnectionPool = ldapConnectionPool;
+        this.ldapConfiguration = configuration;
     }
 
-    /**
-     * Extracts the parameters required by the repository instance from the
-     * James server configuration data. The fields extracted include
-     *
-     * @param configuration
-     *            An encapsulation of the James server configuration data.
-     */
     @Override
-    public void configure(HierarchicalConfiguration<ImmutableNode> configuration) throws ConfigurationException {
-        configure(LdapRepositoryConfiguration.from(configuration));
-    }
+    public void configure(HierarchicalConfiguration<ImmutableNode> config) throws ConfigurationException {
 
-    public void configure(LdapRepositoryConfiguration configuration) {
-        ldapConfiguration = configuration;
     }
 
     /**
@@ -140,21 +104,6 @@ public class ReadOnlyLDAPUsersDAO implements UsersDAO, Configurable {
                 + ldapConfiguration.getConnectionTimeout() + '\n' + "readTimeout: " + ldapConfiguration.getReadTimeout());
         }
 
-        LDAPConnectionOptions connectionOptions = new LDAPConnectionOptions();
-        connectionOptions.setConnectTimeoutMillis(ldapConfiguration.getConnectionTimeout());
-        connectionOptions.setResponseTimeoutMillis(ldapConfiguration.getReadTimeout());
-
-        BindRequest bindRequest = new SimpleBindRequest(ldapConfiguration.getPrincipal(), ldapConfiguration.getCredentials());
-
-        List<ServerSet> serverSets = ldapConfiguration.getLdapHosts()
-            .stream()
-            .map(toSingleServerSet(connectionOptions, bindRequest))
-            .collect(ImmutableList.toImmutableList());
-
-        FailoverServerSet failoverServerSet = new FailoverServerSet(serverSets);
-        ldapConnectionPool = new LDAPConnectionPool(failoverServerSet, bindRequest, 4);
-        ldapConnectionPool.setRetryFailedOperationsDueToInvalidConnections(true);
-
         userExtraFilter = Optional.ofNullable(ldapConfiguration.getFilter())
             .map(Throwing.function(Filter::create).sneakyThrow());
         objectClassFilter = Filter.createEqualityFilter("objectClass", ldapConfiguration.getUserObjectClass());
@@ -164,23 +113,9 @@ public class ReadOnlyLDAPUsersDAO implements UsersDAO, Configurable {
         if (!ldapConfiguration.getPerDomainBaseDN().isEmpty()) {
             Preconditions.checkState(ldapConfiguration.supportsVirtualHosting(), "'virtualHosting' is needed for per domain DNs");
         }
-    }
 
-    private SocketFactory supportLDAPS(URI uri) throws KeyManagementException, NoSuchAlgorithmException {
-        if (uri.getScheme().equals("ldaps")) {
-            if (ldapConfiguration.isTrustAllCerts()) {
-                SSLContext context = SSLContext.getInstance("TLSv1.2");
-                context.init(null, new TrustManager[]{DUMMY_TRUST_MANAGER}, null);
-                return context.getSocketFactory();
-            }
-            return SSLSocketFactory.getDefault();
-        } else {
-            return null;
-        }
-    }
-
-    private ThrowingFunction<URI, SingleServerSet> toSingleServerSet(LDAPConnectionOptions connectionOptions, BindRequest bindRequest) {
-        return Throwing.function(uri -> new SingleServerSet(uri.getHost(), uri.getPort(), supportLDAPS(uri), connectionOptions, bindRequest, null));
+        gaugeRegistry.register("ldap-connection-available-count", () -> ldapConnectionPool.getConnectionPoolStatistics().getNumAvailableConnections());
+        gaugeRegistry.register("ldap-created-connection-count", () -> ldapConnectionPool.getConnectionPoolStatistics().getNumSuccessfulConnectionAttempts());
     }
 
     @PreDestroy
@@ -305,7 +240,7 @@ public class ReadOnlyLDAPUsersDAO implements UsersDAO, Configurable {
         SearchResult searchResult = ldapConnectionPool.search(userBase(retrievalName),
             SearchScope.SUB,
             createFilter(retrievalName.asString(), evaluateLdapUserRetrievalAttribute(retrievalName, resolveLocalPartAttribute)),
-            getReturnedAttributes());
+            ldapConfiguration.getReturnedAttributes());
 
         SearchResultEntry result = searchResult.getSearchEntries()
             .stream()
@@ -326,14 +261,6 @@ public class ReadOnlyLDAPUsersDAO implements UsersDAO, Configurable {
         return Optional.empty();
     }
 
-    private String[] getReturnedAttributes() {
-        if (ldapConfiguration.getUsernameAttribute().isPresent()) {
-            return new String[]{ldapConfiguration.getUserIdAttribute(), ldapConfiguration.getUsernameAttribute().get()};
-        } else {
-            return new String[]{ldapConfiguration.getUserIdAttribute()};
-        }
-    }
-
     private String evaluateLdapUserRetrievalAttribute(Username retrievalName, Optional<String> resolveLocalPartAttribute) {
         if (retrievalName.asString().contains("@")) {
             return ldapConfiguration.getUserIdAttribute();
@@ -347,7 +274,14 @@ public class ReadOnlyLDAPUsersDAO implements UsersDAO, Configurable {
         String usernameAttribute = ldapConfiguration.getUsernameAttribute().orElse(ldapConfiguration.getUserIdAttribute());
         Optional<String> userName = Optional.ofNullable(userAttributes.getAttributeValue(usernameAttribute));
         return userName
-            .map(Username::of)
+            .flatMap(name -> {
+                try {
+                    return Optional.of(Username.of(name));
+                } catch (Exception e) {
+                    LOGGER.warn("Invalid username in the LDAP: {}", name, e);
+                    return Optional.empty();
+                }
+            })
             .map(username -> new ReadOnlyLDAPUser(username, userDN, ldapConnectionPool));
     }
 
@@ -406,6 +340,49 @@ public class ReadOnlyLDAPUsersDAO implements UsersDAO, Configurable {
         }
     }
 
+
+    @Override
+    public Flux<Username> listUsersOfADomainReactive(Domain domain, boolean supportsVirtualHosting) {
+        return Flux.fromStream(() -> {
+                try {
+                    return getUsernamesForDomain(domain);
+                } catch (LDAPException e) {
+                    throw new RuntimeException(e);
+                }
+            })
+            .subscribeOn(Schedulers.boundedElastic());
+    }
+
+    private Stream<Username> getUsernamesForDomain(Domain domain) throws LDAPException {
+        if (!ldapConfiguration.getRestriction().isActivated()) {
+            return getUnrestrictedUsernamesForDomain(domain);
+        }
+        return buildUserCollection(getValidUserDNs()).stream()
+            .map(ReadOnlyLDAPUser::getUserName)
+            .filter(username -> username.getDomainPart().map(domain::equals).orElse(!ldapConfiguration.supportsVirtualHosting()))
+            .distinct();
+    }
+
+    private Stream<Username> getUnrestrictedUsernamesForDomain(Domain domain) throws LDAPException {
+        String usernameAttribute = ldapConfiguration.getUsernameAttribute().orElse(ldapConfiguration.getUserIdAttribute());
+        Filter domainFilter = Filter.createSubstringFilter(usernameAttribute, null, null, "@" + domain.asString());
+        SearchRequest searchRequest = new SearchRequest(userBase(domain), SearchScope.SUB,
+            Filter.createANDFilter(listingFilter, domainFilter), usernameAttribute);
+        return ldapConnectionPool.search(searchRequest)
+            .getSearchEntries().stream()
+            .flatMap(entry -> Optional.ofNullable(entry.getAttribute(usernameAttribute)).stream())
+            .map(Attribute::getValue)
+            .flatMap(name -> {
+                try {
+                    return Stream.of(Username.of(name));
+                } catch (Exception e) {
+                    LOGGER.warn("Invalid username in the LDAP: {}", name, e);
+                    return Stream.empty();
+                }
+            })
+            .filter(username -> username.getDomainPart().map(domain::equals).orElse(!ldapConfiguration.supportsVirtualHosting()))
+            .distinct();
+    }
 
     private Collection<DN> getValidUserDNs() throws LDAPException {
         Set<DN> userDNs = getAllUsersDNFromLDAP();

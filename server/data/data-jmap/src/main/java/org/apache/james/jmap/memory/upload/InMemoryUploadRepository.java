@@ -22,14 +22,17 @@ package org.apache.james.jmap.memory.upload;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import jakarta.inject.Inject;
 
 import org.apache.commons.lang3.tuple.ImmutablePair;
-import org.apache.james.blob.api.BlobStore;
+import org.apache.james.blob.api.BlobId;
+import org.apache.james.blob.api.BlobStoreDAO;
 import org.apache.james.blob.api.BucketName;
 import org.apache.james.core.Username;
 import org.apache.james.jmap.api.model.Upload;
@@ -47,18 +50,20 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 public class InMemoryUploadRepository implements UploadRepository {
+    private static final BucketName UPLOAD_BUCKET = BucketName.of("jmap-uploads");
 
     private final Map<UploadId, ImmutablePair<Username, UploadMetaData>> uploadStore;
-
-    private final BlobStore blobStore;
+    private final BlobId.Factory blobIdFactory;
+    private final BlobStoreDAO blobStoreDAO;
     private final BucketName bucketName;
 
     private final Clock clock;
 
     @Inject
-    public InMemoryUploadRepository(BlobStore blobStore, Clock clock) {
-        this.blobStore = blobStore;
-        this.bucketName = blobStore.getDefaultBucketName();
+    public InMemoryUploadRepository(BlobId.Factory blobIdFactory, BlobStoreDAO blobStoreDAO, Clock clock) {
+        this.blobIdFactory = blobIdFactory;
+        this.blobStoreDAO = blobStoreDAO;
+        this.bucketName = UPLOAD_BUCKET;
         this.clock = clock;
         this.uploadStore = new HashMap<>();
     }
@@ -69,15 +74,17 @@ public class InMemoryUploadRepository implements UploadRepository {
         Preconditions.checkNotNull(contentType);
         Preconditions.checkNotNull(user);
 
+        UploadId uploadId = UploadId.random();
+        BlobId blobId = blobIdFactory.of(uploadId.asString());
+
         return Mono.fromCallable(() -> new CountingInputStream(data))
-            .flatMap(dataAsByte -> Mono.from(blobStore.save(bucketName, dataAsByte, BlobStore.StoragePolicy.LOW_COST))
-                .map(blobId -> {
-                    UploadId uploadId = UploadId.random();
+            .flatMap(dataAsByte -> Mono.from(blobStoreDAO.save(bucketName, blobId, dataAsByte))
+                    .thenReturn(dataAsByte))
+                .map(dataAsByte -> {
                     Instant uploadDate = clock.instant();
                     uploadStore.put(uploadId, new ImmutablePair<>(user, UploadMetaData.from(uploadId, contentType, dataAsByte.getCount(), blobId, uploadDate)));
                     return UploadMetaData.from(uploadId, contentType, dataAsByte.getCount(), blobId, uploadDate);
-                })
-            );
+                });
     }
 
     @Override
@@ -109,8 +116,18 @@ public class InMemoryUploadRepository implements UploadRepository {
             .map(pair -> pair.right);
     }
 
+    @Override
+    public Publisher<Void> deleteByUploadDateBefore(Duration expireDuration) {
+        Instant expirationTime = clock.instant().minus(expireDuration);
+        return Flux.fromIterable(List.copyOf(uploadStore.values()))
+            .filter(pair -> pair.right.uploadDate().isBefore(expirationTime))
+            .flatMap(pair -> Mono.from(blobStoreDAO.delete(bucketName, pair.right.blobId()))
+                .then(Mono.fromRunnable(() -> uploadStore.remove(pair.right.uploadId()))))
+            .then();
+    }
+
     private Mono<Upload> retrieveUpload(UploadMetaData uploadMetaData) {
-        return Mono.from(blobStore.readBytes(bucketName, uploadMetaData.blobId()))
+        return Mono.from(blobStoreDAO.readBytes(bucketName, uploadMetaData.blobId()))
             .map(content -> Upload.from(uploadMetaData, () -> new ByteArrayInputStream(content)));
     }
 }

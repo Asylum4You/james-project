@@ -19,8 +19,6 @@
 
 package org.apache.james.user.ldap;
 
-import static org.apache.james.user.ldap.DockerLdapSingleton.ADMIN_PASSWORD;
-import static org.apache.james.user.ldap.DockerLdapSingleton.DOMAIN;
 import static org.apache.james.user.ldap.ReadOnlyUsersLDAPRepositoryTest.ldapRepositoryConfiguration;
 import static org.apache.james.user.ldap.ReadOnlyUsersLDAPRepositoryTest.ldapRepositoryConfigurationWithVirtualHosting;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -29,6 +27,7 @@ import static org.mockito.Mockito.mock;
 import org.apache.commons.configuration2.HierarchicalConfiguration;
 import org.apache.commons.configuration2.tree.ImmutableNode;
 import org.apache.james.domainlist.api.DomainList;
+import org.apache.james.metrics.api.NoopGaugeRegistry;
 import org.apache.james.user.api.UsersRepositoryException;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -109,9 +108,10 @@ class ReadOnlyUsersLDAPRepositoryEmptyListTest {
         }
     }
 
-    private ReadOnlyUsersLDAPRepository startUsersRepository(HierarchicalConfiguration<ImmutableNode> ldapRepositoryConfiguration) throws Exception {
-        ReadOnlyUsersLDAPRepository ldapRepository = new ReadOnlyUsersLDAPRepository(domainList);
-        ldapRepository.configure(ldapRepositoryConfiguration);
+    private ReadOnlyUsersLDAPRepository startUsersRepository(HierarchicalConfiguration<ImmutableNode> configuration) throws Exception {
+        ReadOnlyUsersLDAPRepository ldapRepository = new ReadOnlyUsersLDAPRepository(domainList, new NoopGaugeRegistry(),
+            LdapRepositoryConfiguration.from(configuration));
+        ldapRepository.configure(configuration);
         ldapRepository.init();
         return ldapRepository;
     }

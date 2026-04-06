@@ -31,14 +31,19 @@ import java.util.List;
 import jakarta.inject.Inject;
 
 import org.apache.james.backends.cassandra.utils.CassandraAsyncExecutor;
+import org.apache.james.backends.cassandra.utils.ProfileLocator;
 import org.apache.james.core.Domain;
 import org.apache.james.dnsservice.api.DNSService;
 import org.apache.james.domainlist.api.DomainListException;
 import org.apache.james.domainlist.lib.AbstractDomainList;
+import org.apache.james.util.ReactorUtils;
 
 import com.datastax.oss.driver.api.core.CqlSession;
+import com.datastax.oss.driver.api.core.config.DriverExecutionProfile;
 import com.datastax.oss.driver.api.core.cql.PreparedStatement;
 import com.datastax.oss.driver.api.core.type.codec.TypeCodecs;
+
+import reactor.core.publisher.Mono;
 
 public class CassandraDomainList extends AbstractDomainList {
     private final CassandraAsyncExecutor executor;
@@ -46,6 +51,8 @@ public class CassandraDomainList extends AbstractDomainList {
     private final PreparedStatement readStatement;
     private final PreparedStatement insertStatement;
     private final PreparedStatement removeStatement;
+    private final DriverExecutionProfile readProfile;
+    private final DriverExecutionProfile writeProfile;
 
     @Inject
     public CassandraDomainList(DNSService dnsService, CqlSession session) {
@@ -69,11 +76,13 @@ public class CassandraDomainList extends AbstractDomainList {
             .whereColumn(DOMAIN).isEqualTo(bindMarker(DOMAIN))
             .ifExists()
             .build());
+        this.readProfile = ProfileLocator.READ.locateProfile(session, "DOMAIN");
+        this.writeProfile = ProfileLocator.WRITE.locateProfile(session, "DOMAIN");
     }
 
     @Override
     protected List<Domain> getDomainListInternal() throws DomainListException {
-        return executor.executeRows(readAllStatement.bind())
+        return executor.executeRows(readAllStatement.bind().setExecutionProfile(readProfile))
             .map(row -> Domain.of(row.get(0, TypeCodecs.TEXT)))
             .collectList()
             .block();
@@ -82,15 +91,26 @@ public class CassandraDomainList extends AbstractDomainList {
     @Override
     protected boolean containsDomainInternal(Domain domain) throws DomainListException {
         return executor.executeSingleRowOptional(readStatement.bind()
-                .set(DOMAIN, domain.asString(), TypeCodecs.TEXT))
+                .set(DOMAIN, domain.asString(), TypeCodecs.TEXT)
+                .setExecutionProfile(readProfile))
             .block()
             .isPresent();
     }
 
     @Override
+    public Mono<Boolean> containsDomainReactive(Domain domain) {
+        return executor.executeSingleRowOptional(readStatement.bind()
+            .set(DOMAIN, domain.asString(), TypeCodecs.TEXT)
+            .setExecutionProfile(readProfile))
+            .handle(ReactorUtils.publishIfPresent())
+            .hasElement();
+    }
+
+    @Override
     public void addDomain(Domain domain) throws DomainListException {
         boolean executed = executor.executeReturnApplied(insertStatement.bind()
-                .set(DOMAIN, domain.asString(), TypeCodecs.TEXT))
+                .set(DOMAIN, domain.asString(), TypeCodecs.TEXT)
+                .setExecutionProfile(writeProfile))
             .block();
         if (!executed) {
             throw new DomainListException(domain.name() + " already exists.");
@@ -100,11 +120,11 @@ public class CassandraDomainList extends AbstractDomainList {
     @Override
     public void doRemoveDomain(Domain domain) throws DomainListException {
         boolean executed = executor.executeReturnApplied(removeStatement.bind()
-                .set(DOMAIN, domain.asString(), TypeCodecs.TEXT))
+                .set(DOMAIN, domain.asString(), TypeCodecs.TEXT)
+                .setExecutionProfile(writeProfile))
             .block();
         if (!executed) {
             throw new DomainListException(domain.name() + " was not found");
         }
     }
-
 }

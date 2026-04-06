@@ -21,7 +21,6 @@ package org.apache.james.mailet.constructor;
 
 import jakarta.mail.MessagingException;
 
-import org.apache.mailet.Experimental;
 import org.apache.mailet.Mail;
 import org.apache.mailet.Mailet;
 import org.apache.mailet.MailetConfig;
@@ -43,11 +42,6 @@ public class ConstructorMailet implements Mailet {
 
     @Override
     public void destroy() {
-    }
-
-    @Override
-    public MailetConfig getMailetConfig() {
-        return null;
     }
 
     @Override

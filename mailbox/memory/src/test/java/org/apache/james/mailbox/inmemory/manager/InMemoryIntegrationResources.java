@@ -63,7 +63,7 @@ import org.apache.james.mailbox.store.event.MailboxAnnotationListener;
 import org.apache.james.mailbox.store.extractor.DefaultTextExtractor;
 import org.apache.james.mailbox.store.mail.NaiveThreadIdGuessingAlgorithm;
 import org.apache.james.mailbox.store.mail.ThreadIdGuessingAlgorithm;
-import org.apache.james.mailbox.store.mail.model.impl.MessageParser;
+import org.apache.james.mailbox.store.mail.model.impl.MessageParserImpl;
 import org.apache.james.mailbox.store.quota.CurrentQuotaCalculator;
 import org.apache.james.mailbox.store.quota.DefaultUserQuotaRootResolver;
 import org.apache.james.mailbox.store.quota.ListeningCurrentQuotaUpdater;
@@ -119,10 +119,10 @@ public class InMemoryIntegrationResources implements IntegrationResources<StoreM
         }
 
         interface RequireMessageParser {
-            RequireSearchIndex messageParser(MessageParser messageParser);
+            RequireSearchIndex messageParser(MessageParserImpl messageParser);
 
             default RequireSearchIndex defaultMessageParser() {
-                return messageParser(new MessageParser());
+                return messageParser(new MessageParserImpl());
             }
         }
 
@@ -175,6 +175,8 @@ public class InMemoryIntegrationResources implements IntegrationResources<StoreM
         }
 
         interface FinalStage {
+            FinalStage updatableClock(UpdatableTickingClock updatableTickingClock);
+
             InMemoryIntegrationResources build();
         }
     }
@@ -206,7 +208,8 @@ public class InMemoryIntegrationResources implements IntegrationResources<StoreM
         private Optional<Integer> limitAnnotationCount;
         private Optional<Function<BaseQuotaComponentsStage, QuotaManager>> quotaManager;
         private Optional<Integer> limitAnnotationSize;
-        private Optional<MessageParser> messageParser;
+        private Optional<MessageParserImpl> messageParser;
+        private Optional<UpdatableTickingClock> updatableTickingClock;
         private Optional<Function<MailboxManagerSearchIndexStage, MessageSearchIndex>> searchIndexFactory;
         private ImmutableSet.Builder<Function<MailboxManagerPreInstanciationStage, PreDeletionHook>> preDeletionHooksFactories;
         private ImmutableList.Builder<EventListener.GroupEventListener> listenersToBeRegistered;
@@ -220,12 +223,13 @@ public class InMemoryIntegrationResources implements IntegrationResources<StoreM
             this.searchIndexFactory = Optional.empty();
             this.messageParser = Optional.empty();
             this.quotaManager = Optional.empty();
+            this.updatableTickingClock = Optional.empty();
             this.preDeletionHooksFactories = ImmutableSet.builder();
             this.listenersToBeRegistered = ImmutableList.builder();
         }
 
         @Override
-        public Builder messageParser(MessageParser messageParser) {
+        public Builder messageParser(MessageParserImpl messageParser) {
             this.messageParser = Optional.of(messageParser);
             return this;
         }
@@ -284,6 +288,12 @@ public class InMemoryIntegrationResources implements IntegrationResources<StoreM
         }
 
         @Override
+        public Stages.FinalStage updatableClock(UpdatableTickingClock updatableTickingClock) {
+            this.updatableTickingClock = Optional.of(updatableTickingClock);
+            return this;
+        }
+
+        @Override
         public InMemoryIntegrationResources build() {
             Preconditions.checkState(authenticator.isPresent());
             Preconditions.checkState(authorizator.isPresent());
@@ -294,7 +304,7 @@ public class InMemoryIntegrationResources implements IntegrationResources<StoreM
             Preconditions.checkState(searchIndexFactory.isPresent());
             Preconditions.checkState(messageParser.isPresent());
 
-            UpdatableTickingClock clock = new UpdatableTickingClock(Instant.now());
+            UpdatableTickingClock clock = updatableTickingClock.orElse(new UpdatableTickingClock(Instant.now()));
             InMemoryMailboxSessionMapperFactory mailboxSessionMapperFactory = new InMemoryMailboxSessionMapperFactory(clock);
 
             EventBus eventBus = this.eventBus.get();

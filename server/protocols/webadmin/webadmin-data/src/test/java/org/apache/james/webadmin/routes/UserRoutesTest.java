@@ -127,7 +127,7 @@ class UserRoutesTest {
             this.recipientRewriteTable.setDomainList(domainList);
             this.recipientRewriteTable.setConfiguration(RecipientRewriteTableConfiguration.DEFAULT_ENABLED);
             this.aliasReverseResolver = new AliasReverseResolverImpl(recipientRewriteTable);
-            this.canSendFrom = new CanSendFromImpl(recipientRewriteTable, aliasReverseResolver);
+            this.canSendFrom = new CanSendFromImpl(aliasReverseResolver);
             UserEntityValidator validator = UserEntityValidator.aggregate(
                 new DefaultUserEntityValidator(this.usersRepository),
                 new RecipientRewriteTableUserEntityValidator(recipientRewriteTable));
@@ -172,7 +172,8 @@ class UserRoutesTest {
 
         private WebAdminServer startServer(UsersRepository usersRepository) {
             WebAdminServer server = WebAdminUtils.createWebAdminServer(new UserRoutes(new UserService(usersRepository), canSendFrom, new JsonTransformer(),
-                    delegationStore))
+                    delegationStore,
+                    ImmutableMap.of()))
                 .start();
 
             RestAssured.requestSpecification = WebAdminUtils.buildRequestSpecification(server)

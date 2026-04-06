@@ -25,6 +25,8 @@ import org.reactivestreams.Publisher;
 
 import com.google.common.io.ByteSource;
 
+import reactor.util.function.Tuple2;
+
 public interface BlobStore {
     String DEFAULT_BUCKET_NAME_QUALIFIER = "defaultBucket";
 
@@ -34,11 +36,22 @@ public interface BlobStore {
         HIGH_PERFORMANCE
     }
 
+    @FunctionalInterface
+    interface BlobIdProvider<T> {
+        Publisher<Tuple2<BlobId, T>> apply(T stream);
+    }
+
     Publisher<BlobId> save(BucketName bucketName, byte[] data, StoragePolicy storagePolicy);
 
     Publisher<BlobId> save(BucketName bucketName, InputStream data, StoragePolicy storagePolicy);
 
     Publisher<BlobId> save(BucketName bucketName, ByteSource data, StoragePolicy storagePolicy);
+
+    Publisher<BlobId> save(BucketName bucketName, byte[] data, BlobIdProvider<byte[]> blobIdProvider, StoragePolicy storagePolicy);
+
+    Publisher<BlobId> save(BucketName bucketName, InputStream data, BlobIdProvider<InputStream> blobIdProvider, StoragePolicy storagePolicy);
+
+    Publisher<BlobId> save(BucketName bucketName, ByteSource data, BlobIdProvider<ByteSource> blobIdProvider, StoragePolicy storagePolicy);
 
     default Publisher<BlobId> save(BucketName bucketName, String data, StoragePolicy storagePolicy) {
         return save(bucketName, data.getBytes(StandardCharsets.UTF_8), storagePolicy);

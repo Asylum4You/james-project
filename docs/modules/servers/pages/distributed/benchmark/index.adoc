@@ -1,0 +1,7 @@
+= Distributed James Server &mdash; Performance testing
+:navtitle: Performance testing the Distributed server
+
+:xref-base: distributed
+:server-name: Distributed James Server
+
+include::partial$benchmark/index.adoc[]

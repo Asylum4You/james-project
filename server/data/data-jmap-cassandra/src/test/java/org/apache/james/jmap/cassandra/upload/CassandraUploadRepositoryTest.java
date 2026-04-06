@@ -22,13 +22,14 @@ package org.apache.james.jmap.cassandra.upload;
 import java.time.Clock;
 
 import org.apache.james.backends.cassandra.CassandraClusterExtension;
-import org.apache.james.blob.api.BucketName;
-import org.apache.james.blob.api.HashBlobId;
+import org.apache.james.blob.api.BlobId;
+import org.apache.james.blob.api.BlobStoreDAO;
+import org.apache.james.blob.api.PlainBlobId;
 import org.apache.james.blob.memory.MemoryBlobStoreDAO;
 import org.apache.james.jmap.api.model.UploadId;
 import org.apache.james.jmap.api.upload.UploadRepository;
 import org.apache.james.jmap.api.upload.UploadRepositoryContract;
-import org.apache.james.server.blob.deduplication.DeDuplicationBlobStore;
+import org.apache.james.utils.UpdatableTickingClock;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.extension.RegisterExtension;
@@ -37,15 +38,18 @@ import com.datastax.oss.driver.api.core.uuid.Uuids;
 
 class CassandraUploadRepositoryTest implements UploadRepositoryContract {
     @RegisterExtension
-    static CassandraClusterExtension cassandra = new CassandraClusterExtension(UploadModule.MODULE);
+    static CassandraClusterExtension cassandra = new CassandraClusterExtension(UploadDataDefinition.MODULE);
+    private BlobStoreDAO blobStoreDAO;
     private CassandraUploadRepository testee;
+    private UpdatableTickingClock clock;
 
     @BeforeEach
     void setUp() {
-        Clock clock = Clock.systemUTC();
+        clock = new UpdatableTickingClock(Clock.systemUTC().instant());
+        BlobId.Factory blobIdFactory = new PlainBlobId.Factory();
+        blobStoreDAO = new MemoryBlobStoreDAO();
         testee = new CassandraUploadRepository(new UploadDAO(cassandra.getCassandraCluster().getConf(),
-            new HashBlobId.Factory()), new DeDuplicationBlobStore(new MemoryBlobStoreDAO(), BucketName.of("default"), new HashBlobId.Factory()),
-            clock);
+            blobIdFactory), blobIdFactory, blobStoreDAO, clock);
     }
 
     @Override
@@ -69,5 +73,15 @@ class CassandraUploadRepositoryTest implements UploadRepositoryContract {
     @Override
     public void deleteShouldReturnFalseWhenRowDoesNotExist() {
         UploadRepositoryContract.super.deleteShouldReturnFalseWhenRowDoesNotExist();
+    }
+
+    @Override
+    public UpdatableTickingClock clock() {
+        return clock;
+    }
+
+    @Override
+    public BlobStoreDAO blobStoreDAO() {
+        return blobStoreDAO;
     }
 }

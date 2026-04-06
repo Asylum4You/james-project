@@ -1,0 +1,6 @@
+= Distributed James Server &mdash; mailetcontainer.xml
+:navtitle: mailetcontainer.xml
+
+:sample-configuration-prefix-url: https://github.com/apache/james-project/blob/master/server/apps/distributed-app/sample-configuration
+:pages-path: distributed
+include::partial$configure/mailetcontainer.adoc[]

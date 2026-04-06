@@ -40,6 +40,7 @@ import org.apache.james.imap.api.message.response.StatusResponse;
 import org.apache.james.imap.api.message.response.StatusResponseFactory;
 import org.apache.james.imap.api.process.ImapProcessor;
 import org.apache.james.imap.encode.FakeImapSession;
+import org.apache.james.imap.main.PathConverter;
 import org.apache.james.imap.message.request.SetMetadataRequest;
 import org.apache.james.mailbox.MailboxManager;
 import org.apache.james.mailbox.MailboxSession;
@@ -103,7 +104,7 @@ class SetMetadataProcessorTest {
     void setUp() {
         MockitoAnnotations.initMocks(this);
         initAndMockData();
-        processor = new SetMetadataProcessor(mockMailboxManager, mockStatusResponseFactory, new RecordingMetricFactory());
+        processor = new SetMetadataProcessor(mockMailboxManager, mockStatusResponseFactory, new RecordingMetricFactory(), PathConverter.Factory.DEFAULT);
     }
 
     @Test
@@ -162,6 +163,20 @@ class SetMetadataProcessorTest {
         verify(mockStatusResponseFactory, times(1)).taggedNo(any(Tag.class), any(ImapCommand.class), humanTextCaptor.capture());
 
         assertThat(humanTextCaptor.getAllValues().get(FIRST_ELEMENT_INDEX).getKey()).isEqualTo(HumanReadableText.MAILBOX_ANNOTATION_KEY);
+    }
 
+    @Test
+    void processShouldResponseNoWithReadOnlyMessageWhenManagerThrowsReadOnlyAnnotationException() {
+        MailboxAnnotationKey readOnlyKey = new MailboxAnnotationKey("/private/key");
+        when(mockMailboxManager.updateAnnotationsReactive(eq(inbox), eq(mockMailboxSession), eq(mailboxAnnotations)))
+            .thenReturn(Mono.error(new AnnotationException("annotation is read-only: " + readOnlyKey.asString())));
+
+        processor.process(request, mockResponder, imapSession);
+
+        verify(mockStatusResponseFactory, times(1)).taggedNo(any(Tag.class), any(ImapCommand.class), humanTextCaptor.capture());
+
+        HumanReadableText humanReadableText = humanTextCaptor.getAllValues().get(FIRST_ELEMENT_INDEX);
+        assertThat(humanReadableText.getKey()).isEqualTo(HumanReadableText.MAILBOX_ANNOTATION_KEY);
+        assertThat(humanReadableText.getDefaultValue()).contains("read-only").contains(readOnlyKey.asString());
     }
 }

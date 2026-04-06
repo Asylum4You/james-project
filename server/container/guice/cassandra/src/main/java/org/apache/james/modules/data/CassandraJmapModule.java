@@ -19,11 +19,14 @@
 
 package org.apache.james.modules.data;
 
+import static org.apache.james.mailbox.cassandra.DeleteMessageListener.CONTENT_DELETION;
+
 import java.io.FileNotFoundException;
 
 import org.apache.commons.configuration2.ex.ConfigurationException;
-import org.apache.james.backends.cassandra.components.CassandraModule;
+import org.apache.james.backends.cassandra.components.CassandraDataDefinition;
 import org.apache.james.core.healthcheck.HealthCheck;
+import org.apache.james.events.EventListener;
 import org.apache.james.eventsourcing.Event;
 import org.apache.james.eventsourcing.eventstore.EventStore;
 import org.apache.james.eventsourcing.eventstore.dto.EventDTO;
@@ -35,29 +38,32 @@ import org.apache.james.jmap.api.filtering.impl.EventSourcingFilteringManagement
 import org.apache.james.jmap.api.filtering.impl.FilterUsernameChangeTaskStep;
 import org.apache.james.jmap.api.identity.CustomIdentityDAO;
 import org.apache.james.jmap.api.identity.IdentityUserDeletionTaskStep;
+import org.apache.james.jmap.api.projections.DefaultEmailQueryViewManager;
 import org.apache.james.jmap.api.projections.EmailQueryView;
+import org.apache.james.jmap.api.projections.EmailQueryViewManager;
 import org.apache.james.jmap.api.projections.MessageFastViewProjection;
+import org.apache.james.jmap.api.projections.MessageFastViewProjectionDeletionListener;
 import org.apache.james.jmap.api.projections.MessageFastViewProjectionHealthCheck;
 import org.apache.james.jmap.api.pushsubscription.PushDeleteUserDataTaskStep;
 import org.apache.james.jmap.api.pushsubscription.PushSubscriptionRepository;
 import org.apache.james.jmap.api.upload.UploadRepository;
 import org.apache.james.jmap.api.upload.UploadUsageRepository;
-import org.apache.james.jmap.cassandra.change.CassandraEmailChangeModule;
-import org.apache.james.jmap.cassandra.change.CassandraMailboxChangeModule;
+import org.apache.james.jmap.cassandra.change.CassandraEmailChangeDataDefinition;
+import org.apache.james.jmap.cassandra.change.CassandraMailboxChangeDataDefinition;
 import org.apache.james.jmap.cassandra.filtering.CassandraFilteringProjection;
-import org.apache.james.jmap.cassandra.filtering.CassandraFilteringProjectionModule;
+import org.apache.james.jmap.cassandra.filtering.CassandraFilteringProjectionDataDefinition;
 import org.apache.james.jmap.cassandra.identity.CassandraCustomIdentityDAO;
-import org.apache.james.jmap.cassandra.identity.CassandraCustomIdentityModule;
+import org.apache.james.jmap.cassandra.identity.CassandraCustomIdentityDataDefinition;
 import org.apache.james.jmap.cassandra.projections.CassandraEmailQueryView;
-import org.apache.james.jmap.cassandra.projections.CassandraEmailQueryViewModule;
+import org.apache.james.jmap.cassandra.projections.CassandraEmailQueryViewDataDefinition;
 import org.apache.james.jmap.cassandra.projections.CassandraMessageFastViewProjection;
-import org.apache.james.jmap.cassandra.projections.CassandraMessageFastViewProjectionModule;
-import org.apache.james.jmap.cassandra.pushsubscription.CassandraPushSubscriptionModule;
+import org.apache.james.jmap.cassandra.projections.CassandraMessageFastViewProjectionDataDefinition;
+import org.apache.james.jmap.cassandra.pushsubscription.CassandraPushSubscriptionDataDefinition;
 import org.apache.james.jmap.cassandra.pushsubscription.CassandraPushSubscriptionRepository;
 import org.apache.james.jmap.cassandra.upload.CassandraUploadRepository;
 import org.apache.james.jmap.cassandra.upload.CassandraUploadUsageRepository;
 import org.apache.james.jmap.cassandra.upload.UploadDAO;
-import org.apache.james.jmap.cassandra.upload.UploadModule;
+import org.apache.james.jmap.cassandra.upload.UploadDataDefinition;
 import org.apache.james.user.api.DeleteUserDataTaskStep;
 import org.apache.james.user.api.UsernameChangeTaskStep;
 import org.apache.james.utils.PropertiesProvider;
@@ -68,6 +74,7 @@ import com.google.inject.Scopes;
 import com.google.inject.Singleton;
 import com.google.inject.TypeLiteral;
 import com.google.inject.multibindings.Multibinder;
+import com.google.inject.name.Names;
 
 public class CassandraJmapModule extends AbstractModule {
     @Override
@@ -95,21 +102,26 @@ public class CassandraJmapModule extends AbstractModule {
 
         bind(CassandraEmailQueryView.class).in(Scopes.SINGLETON);
         bind(EmailQueryView.class).to(CassandraEmailQueryView.class);
+        bind(DefaultEmailQueryViewManager.class).in(Scopes.SINGLETON);
+        bind(EmailQueryViewManager.class).to(DefaultEmailQueryViewManager.class);
 
-        Multibinder<CassandraModule> cassandraDataDefinitions = Multibinder.newSetBinder(binder(), CassandraModule.class);
-        cassandraDataDefinitions.addBinding().toInstance(CassandraMessageFastViewProjectionModule.MODULE);
-        cassandraDataDefinitions.addBinding().toInstance(CassandraEmailQueryViewModule.MODULE);
-        cassandraDataDefinitions.addBinding().toInstance(CassandraMailboxChangeModule.MODULE);
-        cassandraDataDefinitions.addBinding().toInstance(CassandraEmailChangeModule.MODULE);
-        cassandraDataDefinitions.addBinding().toInstance(UploadModule.MODULE);
-        cassandraDataDefinitions.addBinding().toInstance(CassandraPushSubscriptionModule.MODULE);
-        cassandraDataDefinitions.addBinding().toInstance(CassandraFilteringProjectionModule.MODULE);
-        cassandraDataDefinitions.addBinding().toInstance(CassandraCustomIdentityModule.MODULE());
+        Multibinder<CassandraDataDefinition> cassandraDataDefinitions = Multibinder.newSetBinder(binder(), CassandraDataDefinition.class);
+        cassandraDataDefinitions.addBinding().toInstance(CassandraMessageFastViewProjectionDataDefinition.MODULE);
+        cassandraDataDefinitions.addBinding().toInstance(CassandraEmailQueryViewDataDefinition.MODULE);
+        cassandraDataDefinitions.addBinding().toInstance(CassandraMailboxChangeDataDefinition.MODULE);
+        cassandraDataDefinitions.addBinding().toInstance(CassandraEmailChangeDataDefinition.MODULE);
+        cassandraDataDefinitions.addBinding().toInstance(UploadDataDefinition.MODULE);
+        cassandraDataDefinitions.addBinding().toInstance(CassandraPushSubscriptionDataDefinition.MODULE);
+        cassandraDataDefinitions.addBinding().toInstance(CassandraFilteringProjectionDataDefinition.MODULE);
+        cassandraDataDefinitions.addBinding().toInstance(CassandraCustomIdentityDataDefinition.MODULE());
 
         Multibinder<EventDTOModule<? extends Event, ? extends EventDTO>> eventDTOModuleBinder = Multibinder.newSetBinder(binder(), new TypeLiteral<>() {});
         eventDTOModuleBinder.addBinding().toInstance(FilteringRuleSetDefineDTOModules.FILTERING_RULE_SET_DEFINED);
         eventDTOModuleBinder.addBinding().toInstance(FilteringRuleSetDefineDTOModules.FILTERING_INCREMENT);
 
+        Multibinder.newSetBinder(binder(), EventListener.ReactiveGroupEventListener.class, Names.named(CONTENT_DELETION))
+            .addBinding()
+            .to(MessageFastViewProjectionDeletionListener.class);
 
         Multibinder.newSetBinder(binder(), UsernameChangeTaskStep.class)
             .addBinding()

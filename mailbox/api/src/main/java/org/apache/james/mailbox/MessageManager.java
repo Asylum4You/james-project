@@ -38,7 +38,6 @@ import jakarta.mail.Flags;
 import jakarta.mail.internet.SharedInputStream;
 
 import org.apache.commons.io.IOUtils;
-import org.apache.james.mailbox.MailboxManager.MessageCapabilities;
 import org.apache.james.mailbox.MessageManager.MailboxMetaData.RecentMode;
 import org.apache.james.mailbox.exception.MailboxException;
 import org.apache.james.mailbox.exception.UnsupportedCriteriaException;
@@ -162,6 +161,13 @@ public interface MessageManager {
 
     default Publisher<Map<MessageUid, Flags>> setFlagsReactive(Flags flags, FlagsUpdateMode flagsUpdateMode, MessageRange set, MailboxSession mailboxSession) {
         return Mono.fromCallable(() -> setFlags(flags, flagsUpdateMode, set, mailboxSession));
+    }
+
+    default Publisher<Map<MessageUid, Flags>> setFlagsReactive(Flags flags, FlagsUpdateMode flagsUpdateMode, List<MessageRange> sets, MailboxSession mailboxSession) {
+        return Flux.fromIterable(sets)
+            .concatMap(set -> Mono.from(setFlagsReactive(flags, flagsUpdateMode, set, mailboxSession)))
+            .flatMapIterable(Map::entrySet)
+            .collectMap(Map.Entry::getKey, Map.Entry::getValue);
     }
 
     class AppendResult {
@@ -441,7 +447,6 @@ public interface MessageManager {
      */
     Mailbox getMailboxEntity() throws MailboxException;
 
-    EnumSet<MessageCapabilities> getSupportedMessageCapabilities();
 
     /**
      * Gets the id of the referenced mailbox

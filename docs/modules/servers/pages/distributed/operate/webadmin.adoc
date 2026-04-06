@@ -1,0 +1,221 @@
+= Distributed James Server &mdash; WebAdmin REST administration API
+:navtitle: WebAdmin REST administration API
+
+:server-name: Distributed James Server
+:xref-base: distributed
+:backend-name: Cassandra
+:admin-mail-queues-extend: servers:distributed/operate/webadmin/admin-mail-queues-extend.adoc
+:admin-messages-extend: servers:distributed/operate/webadmin/admin-messages-extend.adoc
+:admin-mailboxes-extend: servers:distributed/operate/webadmin/admin-mailboxes-extend.adoc
+include::partial$operate/webadmin.adoc[]
+
+== Cassandra extra operations
+
+Some webadmin features to manage some extra operations on Cassandra
+tables, like solving inconsistencies on projection tables. Such
+inconsistencies can be for example created by a fail of the DAO to add a
+mapping into
+’mappings_sources`, while it was successful regarding the`rrt` table.
+
+=== Operations on mappings sources
+
+You can do a series of action on `mappings_sources` projection table :
+
+....
+curl -XPOST /cassandra/mappings?action={action}
+....
+
+Will return the taskId corresponding to the related task. Actions
+supported so far are :
+
+* SolveInconsistencies : cleans up first all the mappings in
+`mappings_sources` index and then repopulate it correctly. In the
+meantime, listing sources of a mapping might create temporary
+inconsistencies during the process.
+
+For example :
+
+....
+curl -XPOST /cassandra/mappings?action=SolveInconsistencies
+....
+
+link:#_endpoints_returning_a_task[More details about endpoints returning
+a task].
+
+Response codes :
+
+* 201: the taskId of the created task
+* 400: Invalid action argument for performing operation on mappings data
+
+=== Cassandra Schema upgrades
+
+Cassandra upgrades implies the creation of a new table. Thus restarting
+James is needed, as new tables are created on restart.
+
+Once done, we ship code that tries to read from new tables, and if not
+possible backs up to old tables. You can thus safely run without running
+additional migrations.
+
+On the fly migration can be enabled. However, one might want to force
+the migration in a controlled fashion, and update automatically current
+schema version used (assess in the database old versions is no more
+used, as the corresponding tables are empty). Note that this process is
+safe: we ensure the service is not running concurrently on this James
+instance, that it does not bump version upon partial failures, that race
+condition in version upgrades will be idempotent, etc…
+
+These schema updates can be triggered by webadmin using the Cassandra
+backend.
+
+Note that currently the progress can be tracked by logs.
+
+* link:#_retrieving_current_cassandra_schema_version_[Retrieving current
+Cassandra schema version]
+* link:#_retrieving_latest_available_cassandra_schema_version_[Retrieving
+latest available Cassandra schema version]
+* link:#_upgrading_to_a_specific_version_[Upgrading to a specific version]
+* link:#_upgrading_to_the_latest_version_[Upgrading to the latest version]
+
+==== Retrieving current Cassandra schema version
+
+....
+curl -XGET http://ip:port/cassandra/version
+....
+
+Will return:
+
+....
+{"version": 2}
+....
+
+Where the number corresponds to the current schema version of the
+database you are using.
+
+Response codes:
+
+* 200: Success
+
+==== Retrieving latest available Cassandra schema version
+
+....
+curl -XGET http://ip:port/cassandra/version/latest
+....
+
+Will return:
+
+....
+{"version": 3}
+....
+
+Where the number corresponds to the latest available schema version of
+the database you are using. This means you can be migrating to this
+schema version.
+
+Response codes:
+
+* 200: Success
+
+==== Upgrading to a specific version
+
+....
+curl -XPOST -H "Content-Type: application/json http://ip:port/cassandra/version/upgrade -d '3'
+....
+
+Will schedule the run of the migrations you need to reach schema version
+3.
+
+link:#_endpoints_returning_a_task[More details about endpoints returning
+a task].
+
+Response codes:
+
+* 200: Success. The scheduled task `taskId` is returned.
+* 400: The version is invalid. The version should be a strictly positive
+number.
+* 410: Error while planning this migration. This resource is gone away.
+Reason is mentionned in the body.
+
+Note that several calls to this endpoint will be run in a sequential
+pattern.
+
+If the server restarts during the migration, the migration is silently
+aborted.
+
+The scheduled task will have the following type `cassandra-migration`
+and the following `additionalInformation`:
+
+....
+{"targetVersion":3}
+....
+
+==== Upgrading to the latest version
+
+....
+curl -XPOST http://ip:port/cassandra/version/upgrade/latest
+....
+
+Will schedule the run of the migrations you need to reach the latest
+schema version.
+
+link:#_endpoints_returning_a_task[More details about endpoints returning
+a task].
+
+Response codes:
+
+* 200: Success. The scheduled task `taskId` is returned.
+* 410: Error while planning this migration. This resource is gone away.
+Reason is mentionned in the body.
+
+Note that several calls to this endpoint will be run in a sequential
+pattern.
+
+If the server restarts during the migration, the migration is silently
+aborted.
+
+The scheduled task will have the following type `cassandra-migration`
+and the following `additionalInformation`:
+
+....
+{"toVersion":2}
+....
+
+=== Correcting ghost mailbox
+
+This is a temporary workaround for the *Ghost mailbox* bug encountered
+using the Cassandra backend, as described in MAILBOX-322.
+
+You can use the mailbox merging feature in order to merge the old
+``ghosted'' mailbox with the new one.
+
+....
+curl -XPOST http://ip:port/cassandra/mailbox/merging \
+  -d '{"mergeOrigin":"{id1}", "mergeDestination":"{id2}"}' \
+  -H "Content-Type: application/json"
+....
+
+Will scedule a task for :
+
+* Delete references to `id1` mailbox
+* Move it’s messages into `id2` mailbox
+* Union the rights of both mailboxes
+
+link:#_endpoints_returning_a_task[More details about endpoints returning
+a task].
+
+Response codes:
+
+* 201: Task generation succeeded. Corresponding task id is returned.
+* 400: Unable to parse the body.
+
+The scheduled task will have the following type `mailbox-merging` and
+the following `additionalInformation`:
+
+....
+{
+  "oldMailboxId":"5641376-02ed-47bd-bcc7-76ff6262d92a",
+  "newMailboxId":"4555159-52ae-895f-ccb7-586a4412fb50",
+  "totalMessageCount": 1,
+  "messageMovedCount": 1,
+  "messageFailedCount": 0
+}
+....

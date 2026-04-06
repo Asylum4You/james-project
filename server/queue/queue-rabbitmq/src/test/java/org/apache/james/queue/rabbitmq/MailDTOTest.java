@@ -28,7 +28,7 @@ import java.util.Date;
 
 import jakarta.mail.MessagingException;
 
-import org.apache.james.blob.api.HashBlobId;
+import org.apache.james.blob.api.PlainBlobId;
 import org.apache.james.blob.mail.MimeMessagePartsId;
 import org.apache.james.server.core.MailImpl;
 import org.apache.mailet.Attribute;
@@ -47,7 +47,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 
 class MailDTOTest {
     static final EnqueueId EN_QUEUE_ID = EnqueueId.ofSerialized("110e8400-e29b-11d4-a716-446655440000");
-    static final HashBlobId.Factory BLOB_ID_FACTORY = new HashBlobId.Factory();
+    static final PlainBlobId.Factory BLOB_ID_FACTORY = new PlainBlobId.Factory();
     static final Date LAST_UPDATED = Date.from(Instant.parse("2016-09-08T14:25:52.000Z"));
 
     private ObjectMapper objectMapper;
@@ -114,8 +114,8 @@ class MailDTOTest {
                 .state("state")
                 .build(),
             MimeMessagePartsId.builder()
-                .headerBlobId(BLOB_ID_FACTORY.from("210e7136-ede3-44eb-9495-3ed816d6e23b"))
-                .bodyBlobId(BLOB_ID_FACTORY.from("ef46c026-7819-4048-b562-3a37469191ed"))
+                .headerBlobId(BLOB_ID_FACTORY.parse("210e7136-ede3-44eb-9495-3ed816d6e23b"))
+                .bodyBlobId(BLOB_ID_FACTORY.parse("ef46c026-7819-4048-b562-3a37469191ed"))
                 .build()));
     }
 
@@ -130,8 +130,8 @@ class MailDTOTest {
                 EN_QUEUE_ID,
                 mail,
                 MimeMessagePartsId.builder()
-                    .headerBlobId(BLOB_ID_FACTORY.from("210e7136-ede3-44eb-9495-3ed816d6e23b"))
-                    .bodyBlobId(BLOB_ID_FACTORY.from("ef46c026-7819-4048-b562-3a37469191ed"))
+                    .headerBlobId(BLOB_ID_FACTORY.parse("210e7136-ede3-44eb-9495-3ed816d6e23b"))
+                    .bodyBlobId(BLOB_ID_FACTORY.parse("ef46c026-7819-4048-b562-3a37469191ed"))
                     .build()));
     }
 }

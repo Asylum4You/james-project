@@ -21,24 +21,32 @@ package org.apache.james.smtpserver.netty;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Predicate;
+import java.util.stream.Stream;
 
 import jakarta.inject.Inject;
 
 import org.apache.commons.configuration2.HierarchicalConfiguration;
 import org.apache.commons.configuration2.tree.ImmutableNode;
+import org.apache.james.core.ConnectionDescription;
+import org.apache.james.core.ConnectionDescriptionSupplier;
+import org.apache.james.core.Disconnector;
+import org.apache.james.core.Username;
 import org.apache.james.dnsservice.api.DNSService;
 import org.apache.james.filesystem.api.FileSystem;
 import org.apache.james.metrics.api.MetricFactory;
 import org.apache.james.protocols.lib.handler.ProtocolHandlerLoader;
 import org.apache.james.protocols.lib.netty.AbstractConfigurableAsyncServer;
 import org.apache.james.protocols.lib.netty.AbstractServerFactory;
+import org.apache.james.protocols.netty.Encryption;
 
-public class SMTPServerFactory extends AbstractServerFactory {
+public class SMTPServerFactory extends AbstractServerFactory implements Disconnector, ConnectionDescriptionSupplier {
 
     protected final DNSService dns;
     protected final ProtocolHandlerLoader loader;
     protected final FileSystem fileSystem;
     protected final SmtpMetricsImpl smtpMetrics;
+    protected Encryption.Factory encryptionFactory;
 
     @Inject
     public SMTPServerFactory(DNSService dns, ProtocolHandlerLoader loader, FileSystem fileSystem,
@@ -47,6 +55,11 @@ public class SMTPServerFactory extends AbstractServerFactory {
         this.loader = loader;
         this.fileSystem = fileSystem;
         this.smtpMetrics = new SmtpMetricsImpl(metricFactory);
+    }
+
+    @Inject
+    public void setEncryptionFactory(Encryption.Factory encryptionFactory) {
+        this.encryptionFactory = encryptionFactory;
     }
 
     protected SMTPServer createServer() {
@@ -64,6 +77,7 @@ public class SMTPServerFactory extends AbstractServerFactory {
             server.setDnsService(dns);
             server.setProtocolHandlerLoader(loader);
             server.setFileSystem(fileSystem);
+            server.setEncryptionFactory(encryptionFactory);
             server.configure(serverConfig);
             servers.add(server);
         }
@@ -71,4 +85,19 @@ public class SMTPServerFactory extends AbstractServerFactory {
         return servers;
     }
 
+    @Override
+    public void disconnect(Predicate<Username> username) {
+        getServers()
+            .stream()
+            .map(server -> (SMTPServer) server)
+            .forEach(smtpServer -> smtpServer.disconnect(username));
+    }
+
+    @Override
+    public Stream<ConnectionDescription> describeConnections() {
+        return getServers()
+            .stream()
+            .map(server -> (SMTPServer) server)
+            .flatMap(SMTPServer::describeConnections);
+    }
 }

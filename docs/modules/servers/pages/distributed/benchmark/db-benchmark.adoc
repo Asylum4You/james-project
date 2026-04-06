@@ -1,0 +1,100 @@
+= Distributed James Server -- Database benchmarks
+:navtitle: Database benchmarks
+
+:backend-name: cassandra
+:backend-name-cap: Cassandra
+:server-name: Distributed James Server
+:backend-database-extend-sample: Apache Cassandra 4 as main database: 3 nodes, each node has 8 OVH vCores CPU and 30 GB memory limit (OVH b2-30 instance).
+
+include::partial$benchmark/db-benchmark.adoc[]
+
+=== Benchmark Cassandra
+
+==== Benchmark methodology
+===== Benchmark tool
+
+We use https://cassandra.apache.org/doc/latest/cassandra/tools/cassandra_stress.html[cassandra-stress tool] - an official
+tool of Cassandra for stress loading tests.
+
+The cassandra-stress tool is a Java-based stress testing utility for basic benchmarking and load testing a Cassandra cluster.
+Data modeling choices can greatly affect application performance. Significant load testing over several trials is the best method for discovering issues with a particular data model. The cassandra-stress tool is an effective tool for populating a cluster and stress testing CQL tables and queries. Use cassandra-stress to:
+
+- Quickly determine how a schema performs.
+- Understand how your database scales.
+- Optimize your data model and settings.
+- Determine production capacity.
+
+There are several operation types:
+
+- write-only, read-only, and mixed workloads of standard data
+- write-only and read-only workloads for counter columns
+- user configured workloads, running custom queries on custom schemas
+
+===== How to benchmark
+
+Here we are using a simple case to test and compare Cassandra performance between different setup environments.
+
+[source,yaml]
+----
+keyspace: stresscql
+
+keyspace_definition: |
+  CREATE KEYSPACE stresscql WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 3};
+
+table: mixed_workload
+
+table_definition: |
+  CREATE TABLE mixed_workload (
+    key uuid PRIMARY KEY,
+    a blob,
+    b blob
+  ) WITH COMPACT STORAGE
+
+columnspec:
+  - name: a
+    size: uniform(1..10000)
+  - name: b
+    size: uniform(1..100000)
+
+insert:
+  partitions: fixed(1)
+
+queries:
+   read:
+      cql: select * from mixed_workload where key = ?
+      fields: samerow
+----
+
+Create the yaml file as above and copy to a Cassandra node.
+
+Insert some sample data:
+
+[source,bash]
+----
+cassandra-stress user profile=mixed_workload.yml n=100000 "ops(insert=1)" cl=ONE -mode native cql3 user=<user> password=<password> -node <IP> -rate threads=8 -graph file=./graph_insert.xml title=Benchmark revision=insert_ONE
+----
+
+Read intensive scenario:
+
+[source,bash]
+----
+cassandra-stress user profile=mixed_workload.yml n=100000 "ops(insert=1,read=4)" cl=ONE -mode native cql3 user=<user> password=<password> -node <IP> -rate threads=8 -graph file=./graph_mixed.xml title=Benchmark revision=mixed_ONE
+----
+
+In there:
+
+- n=100000: The number of insert batches, not number of individual insert operations.
+- rate threads=8: The number of concurrent threads. If not specified it will start with 4 threads and increase until server reaches a limit.
+- ops(insert=1,read=4): This will execute insert and read queries in the ratio 1:4.
+- graph: Export results to graph in html format.
+
+==== Sample benchmark result
+image::cassandra_stress_test_result_1.png[]
+
+image::cassandra_stress_test_result_2.png[]
+
+==== References
+https://www.datastax.com/blog/improved-cassandra-21-stress-tool-benchmark-any-schema-part-1[Datastax - Cassandra stress tool]
+
+https://www.instaclustr.com/deep-diving-cassandra-stress-part-3-using-yaml-profiles/[Deep Diving cassandra-stress – Part 3 (Using YAML Profiles)]
+

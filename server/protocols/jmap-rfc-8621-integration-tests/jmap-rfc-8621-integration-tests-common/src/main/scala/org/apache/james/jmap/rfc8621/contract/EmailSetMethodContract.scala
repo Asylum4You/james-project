@@ -19,20 +19,20 @@
 package org.apache.james.jmap.rfc8621.contract
 
 import java.io.ByteArrayInputStream
-import java.nio.charset.StandardCharsets
+import java.nio.charset.{Charset, StandardCharsets}
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
-import java.util.Date
 import java.util.concurrent.TimeUnit
+import java.util.{Date, UUID}
 
 import io.netty.handler.codec.http.HttpHeaderNames.ACCEPT
 import io.restassured.RestAssured.{`given`, `with`, requestSpecification}
 import io.restassured.builder.ResponseSpecBuilder
 import io.restassured.http.ContentType.JSON
 import jakarta.mail.Flags
+import net.javacrumbs.jsonunit.JsonMatchers.jsonEquals
 import net.javacrumbs.jsonunit.assertj.JsonAssertions.assertThatJson
 import net.javacrumbs.jsonunit.core.Option
-import net.javacrumbs.jsonunit.core.internal.Options
 import org.apache.http.HttpStatus.{SC_CREATED, SC_OK}
 import org.apache.james.GuiceJamesServer
 import org.apache.james.core.quota.QuotaCountLimit
@@ -44,6 +44,7 @@ import org.apache.james.jmap.http.UserCredential
 import org.apache.james.jmap.rfc8621.contract.DownloadContract.accountId
 import org.apache.james.jmap.rfc8621.contract.Fixture.{ACCEPT_RFC8621_VERSION_HEADER, ACCOUNT_ID, ANDRE, ANDRE_ACCOUNT_ID, ANDRE_PASSWORD, BOB, BOB_PASSWORD, DOMAIN, authScheme, baseRequestSpecBuilder}
 import org.apache.james.jmap.rfc8621.contract.probe.DelegationProbe
+import org.apache.james.jmap.rfc8621.contract.tags.CategoryTags
 import org.apache.james.jmap.{JmapGuiceProbe, MessageIdProbe}
 import org.apache.james.mailbox.MessageManager.AppendCommand
 import org.apache.james.mailbox.model.MailboxACL.Right
@@ -58,8 +59,8 @@ import org.assertj.core.api.Assertions.assertThat
 import org.awaitility.Awaitility
 import org.awaitility.Durations.ONE_HUNDRED_MILLISECONDS
 import org.hamcrest.Matchers
-import org.hamcrest.Matchers.{equalTo, not}
-import org.junit.jupiter.api.{BeforeEach, Test}
+import org.hamcrest.Matchers.{equalTo, hasKey, not, notNullValue}
+import org.junit.jupiter.api.{BeforeEach, Tag, Test}
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
 import play.api.libs.json.{JsNumber, JsString, Json}
@@ -1589,6 +1590,34 @@ trait EmailSetMethodContract {
     val bobPath = MailboxPath.inbox(BOB)
     val mailboxId = server.getProbe(classOf[MailboxProbeImpl]).createMailbox(bobPath)
 
+    val uploadResponse1: String = `given`
+      .basePath("")
+      .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
+      .contentType("text/plain")
+      .body("0123456789\\r\\n".repeat(500 * 1024))
+    .when
+      .post(s"/upload/$ACCOUNT_ID")
+    .`then`
+      .statusCode(SC_CREATED)
+      .extract
+      .body
+      .asString()
+
+    val uploadResponse2: String = `given`
+      .basePath("")
+      .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
+      .contentType("text/plain")
+      .body("0123456789\\r\\n".repeat(500 * 1024))
+    .when
+      .post(s"/upload/$ACCOUNT_ID")
+    .`then`
+      .statusCode(SC_CREATED)
+      .extract
+      .body
+      .asString()
+    val blobId1: String = Json.parse(uploadResponse1).\("blobId").get.asInstanceOf[JsString].value
+    val blobId2: String = Json.parse(uploadResponse2).\("blobId").get.asInstanceOf[JsString].value
+
     val request =
       s"""{
          |  "using": ["urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail"],
@@ -1607,9 +1636,27 @@ trait EmailSetMethodContract {
          |              "type": "text/html"
          |            }
          |          ],
+         |          "attachments": [
+         |            {
+         |              "blobId": "$blobId1",
+         |              "type":"text/plain",
+         |              "charset":"UTF-8",
+         |              "disposition": "attachment",
+         |              "language": ["fr", "en"],
+         |              "location": "http://125.26.23.36/content"
+         |            },
+         |            {
+         |              "blobId": "$blobId2",
+         |              "type":"text/plain",
+         |              "charset":"UTF-8",
+         |              "disposition": "attachment",
+         |              "language": ["fr", "en"],
+         |              "location": "http://125.26.23.36/content"
+         |            }
+         |          ],
          |          "bodyValues": {
          |            "a49d": {
-         |              "value": "${"0123456789\\r\\n".repeat(1024 * 1024)}",
+         |              "value": "0123456789",
          |              "isTruncated": false,
          |              "isEncodingProblem": false
          |            }
@@ -2427,7 +2474,7 @@ trait EmailSetMethodContract {
            |      "blobId": "${messageId}_4",
            |      "size": 11,
            |      "type": "text/plain",
-           |      "charset": "ascii",
+           |      "charset": "ASCII",
            |      "disposition": "attachment"
            |    }
            |  ]
@@ -2799,6 +2846,500 @@ trait EmailSetMethodContract {
            |    }
            |  }
            |}]""".stripMargin)
+  }
+
+  @Test
+  @Tag(CategoryTags.BASIC_FEATURE)
+  def creationShouldSupportTextBodyUsingBlobId(server: GuiceJamesServer): Unit = {
+    val bobPath = MailboxPath.inbox(BOB)
+    val mailboxId = server.getProbe(classOf[MailboxProbeImpl]).createMailbox(bobPath)
+    val textBody: String = UUID.randomUUID().toString
+    val payload = textBody.getBytes(StandardCharsets.UTF_8)
+
+    val blobId: String = `given`
+      .basePath("")
+      .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
+      .contentType("text/plain")
+      .body(payload)
+    .when
+      .post(s"/upload/$ACCOUNT_ID")
+    .`then`
+      .statusCode(SC_CREATED)
+      .extract
+      .path("blobId")
+
+    val request =
+      s"""{
+         |  "using": ["urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail"],
+         |  "methodCalls": [
+         |    ["Email/set", {
+         |      "accountId": "$ACCOUNT_ID",
+         |      "create": {
+         |        "aaaaaa": {
+         |          "mailboxIds": {
+         |             "${mailboxId.serialize}": true
+         |          },
+         |          "subject": "World domination",
+         |          "textBody": [
+         |            {
+         |              "blobId": "$blobId",
+         |              "type": "text/plain"
+         |            }
+         |          ]
+         |        }
+         |      }
+         |    }, "c1"],
+         |    ["Email/get",
+         |      {
+         |        "accountId": "$ACCOUNT_ID",
+         |        "ids": ["#aaaaaa"],
+         |        "properties": ["mailboxIds", "subject", "preview", "textBody", "bodyValues"],
+         |        "fetchTextBodyValues": true
+         |      },
+         |    "c2"]
+         |  ]
+         |}""".stripMargin
+
+    `given`
+      .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
+      .body(request)
+    .when
+      .post
+    .`then`
+      .statusCode(SC_OK)
+      .contentType(JSON)
+      .body("methodResponses[0][1].created.aaaaaa", notNullValue())
+      .body("methodResponses[1][1].list[0].preview", equalTo(textBody))
+      .body("methodResponses[1][1].list[0].textBody",
+        jsonEquals(
+          s"""[
+             |    {
+             |        "partId": "$${json-unit.ignore}",
+             |        "blobId": "$${json-unit.ignore}",
+             |        "size": ${payload.size},
+             |        "type": "text/plain",
+             |        "charset": "UTF-8"
+             |    }
+             |]""".stripMargin))
+  }
+
+  @Test
+  def creationShouldSupportHtmlBodyUsingBlobId(server: GuiceJamesServer): Unit = {
+    val bobPath = MailboxPath.inbox(BOB)
+    val mailboxId = server.getProbe(classOf[MailboxProbeImpl]).createMailbox(bobPath)
+    val htmlBody: String = "<!DOCTYPE html><html><head><title></title></head><body><div>I have the most <b>brilliant</b> plan. Let me tell you all about it. What we do is, we</div></body></html>"
+
+    val blobId: String = `given`
+      .basePath("")
+      .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
+      .contentType("text/html")
+      .body(htmlBody)
+    .when
+      .post(s"/upload/$ACCOUNT_ID")
+    .`then`
+      .statusCode(SC_CREATED)
+      .extract
+      .path("blobId")
+
+    val request =
+      s"""{
+         |  "using": ["urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail"],
+         |  "methodCalls": [
+         |    ["Email/set", {
+         |      "accountId": "$ACCOUNT_ID",
+         |      "create": {
+         |        "aaaaaa": {
+         |          "mailboxIds": {
+         |             "${mailboxId.serialize}": true
+         |          },
+         |          "subject": "World domination",
+         |          "htmlBody": [
+         |            {
+         |              "blobId": "$blobId",
+         |              "type": "text/html"
+         |            }
+         |          ]
+         |        }
+         |      }
+         |    }, "c1"],
+         |    ["Email/get",
+         |      {
+         |        "accountId": "$ACCOUNT_ID",
+         |        "ids": ["#aaaaaa"],
+         |        "properties": ["mailboxIds", "subject", "preview", "htmlBody", "bodyValues"],
+         |        "fetchTextBodyValues": true
+         |      },
+         |    "c2"]
+         |  ]
+         |}""".stripMargin
+
+    `given`
+      .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
+      .body(request)
+    .when
+      .post
+    .`then`
+      .statusCode(SC_OK)
+      .contentType(JSON)
+      .body("methodResponses[0][1].created.aaaaaa", notNullValue())
+      .body("methodResponses[1][1].list[0].preview", equalTo("I have the most brilliant plan. Let me tell you all about it. What we do is, we"))
+      .body("methodResponses[1][1].list[0].htmlBody",
+        jsonEquals(
+          s"""[
+             |    {
+             |        "partId": "$${json-unit.ignore}",
+             |        "blobId": "$${json-unit.ignore}",
+             |        "size": 166,
+             |        "type": "text/html",
+             |        "charset": "UTF-8"
+             |    }
+             |]""".stripMargin))
+  }
+
+  @Test
+  def emailCreationShouldFailWhenHtmlBodyUsesUnsupportedBlobContentType(server: GuiceJamesServer): Unit = {
+    val bobPath = MailboxPath.inbox(BOB)
+    val mailboxId = server.getProbe(classOf[MailboxProbeImpl]).createMailbox(bobPath)
+    val htmlBody: String = "<!DOCTYPE html><html><head><title></title></head><body><div>I have the most <b>brilliant</b> plan. Let me tell you all about it. What we do is, we</div></body></html>"
+
+    val unSupportContentType = "application/javascript"
+
+    val blobId: String = `given`
+      .basePath("")
+      .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
+      .contentType(unSupportContentType)
+      .body(htmlBody)
+    .when
+      .post(s"/upload/$ACCOUNT_ID")
+    .`then`
+      .statusCode(SC_CREATED)
+      .extract
+      .path("blobId")
+
+    val request =
+      s"""{
+         |  "using": ["urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail"],
+         |  "methodCalls": [
+         |    ["Email/set", {
+         |      "accountId": "$ACCOUNT_ID",
+         |      "create": {
+         |        "aaaaaa": {
+         |          "mailboxIds": {
+         |             "${mailboxId.serialize}": true
+         |          },
+         |          "subject": "World domination",
+         |          "htmlBody": [
+         |            {
+         |              "blobId": "$blobId",
+         |              "type": "text/html"
+         |            }
+         |          ]
+         |        }
+         |      }
+         |    }, "c1"]
+         |  ]
+         |}""".stripMargin
+
+    `given`
+      .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
+      .body(request)
+    .when
+      .post
+    .`then`
+      .statusCode(SC_OK)
+      .contentType(JSON)
+      .body("methodResponses[0][1].notCreated", hasKey("aaaaaa"))
+      .body("methodResponses[0][1].notCreated.aaaaaa",
+        jsonEquals(
+          s"""{
+             |    "type": "invalidArguments",
+             |    "description": "Blob: Unsupported content type. Expecting text/plain or text/html"
+             |}""".stripMargin))
+  }
+
+  @Test
+  def emailCreationShouldFailWhenHtmlBodyUsesNotFoundBlobId(server: GuiceJamesServer): Unit = {
+    val bobPath = MailboxPath.inbox(BOB)
+    val mailboxId = server.getProbe(classOf[MailboxProbeImpl]).createMailbox(bobPath)
+
+    val blobIdOfAndre: String = given(baseRequestSpecBuilder(server)
+      .setAuth(authScheme(UserCredential(ANDRE, ANDRE_PASSWORD)))
+      .addHeader(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
+      .build)
+      .basePath("")
+      .contentType("text/plain")
+      .body(UUID.randomUUID().toString)
+    .when
+      .post(s"/upload/$ANDRE_ACCOUNT_ID")
+    .`then`
+      .statusCode(SC_CREATED)
+      .extract
+      .path("blobId")
+
+    `given`
+      .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
+      .body(s"""{
+               |  "using": ["urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail"],
+               |  "methodCalls": [
+               |    ["Email/set", {
+               |      "accountId": "$ACCOUNT_ID",
+               |      "create": {
+               |        "aaaaaa": {
+               |          "mailboxIds": {
+               |             "${mailboxId.serialize}": true
+               |          },
+               |          "subject": "World domination",
+               |          "htmlBody": [
+               |            {
+               |              "blobId": "$blobIdOfAndre",
+               |              "type": "text/html"
+               |            }
+               |          ]
+               |        }
+               |      }
+               |    }, "c1"]
+               |  ]
+               |}""".stripMargin)
+    .when
+      .post
+    .`then`
+      .statusCode(SC_OK)
+      .contentType(JSON)
+      .body("methodResponses[0][1].notCreated", hasKey("aaaaaa"))
+      .body("methodResponses[0][1].notCreated.aaaaaa",
+        jsonEquals(
+          s"""{
+             |    "type": "invalidArguments",
+             |    "description": "Blob not found: $blobIdOfAndre",
+             |    "properties": [
+             |        "blobId"
+             |    ]
+             |}""".stripMargin))
+  }
+
+  @Test
+  def emailCreationShouldFailWhenHtmlBodyUsesNotUploadBlobId(server: GuiceJamesServer): Unit = {
+    val bobPath = MailboxPath.inbox(BOB)
+    val mailboxId = server.getProbe(classOf[MailboxProbeImpl]).createMailbox(bobPath)
+    val attachedMessageId: MessageId = server.getProbe(classOf[MailboxProbeImpl])
+      .appendMessage(BOB.asString, bobPath, AppendCommand.from(Message.Builder
+        .of
+        .setSubject("test")
+        .setSender(ANDRE.asString())
+        .setFrom(ANDRE.asString())
+        .setSubject("I'm happy to be attached")
+        .setBody("testmail", StandardCharsets.UTF_8)
+        .build))
+      .getMessageId
+
+    val notUploadBlobId: String = attachedMessageId.serialize()
+
+    `given`
+      .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
+      .body(s"""{
+               |  "using": ["urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail"],
+               |  "methodCalls": [
+               |    ["Email/set", {
+               |      "accountId": "$ACCOUNT_ID",
+               |      "create": {
+               |        "aaaaaa": {
+               |          "mailboxIds": {
+               |             "${mailboxId.serialize}": true
+               |          },
+               |          "subject": "World domination",
+               |          "htmlBody": [
+               |            {
+               |              "blobId": "$notUploadBlobId",
+               |              "type": "text/html"
+               |            }
+               |          ]
+               |        }
+               |      }
+               |    }, "c1"]
+               |  ]
+               |}""".stripMargin)
+    .when
+      .post
+    .`then`
+      .statusCode(SC_OK)
+      .contentType(JSON)
+      .body("methodResponses[0][1].notCreated", hasKey("aaaaaa"))
+      .body("methodResponses[0][1].notCreated.aaaaaa",
+        jsonEquals(
+          s"""{
+             |    "type": "invalidArguments",
+             |    "description": "Blob resolution failed or blob type is invalid"
+             |}""".stripMargin))
+  }
+
+  @Test
+  def emailCreationShouldFailWhenHtmlBodyPresentBothBlobIdAndPartId(server: GuiceJamesServer): Unit = {
+    val bobPath = MailboxPath.inbox(BOB)
+    val mailboxId = server.getProbe(classOf[MailboxProbeImpl]).createMailbox(bobPath)
+    val textBody: String = UUID.randomUUID().toString
+    val payload = textBody.getBytes(StandardCharsets.UTF_8)
+
+    val blobId: String = `given`
+      .basePath("")
+      .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
+      .contentType("text/plain")
+      .body(payload)
+    .when
+      .post(s"/upload/$ACCOUNT_ID")
+    .`then`
+      .statusCode(SC_CREATED)
+      .extract
+      .path("blobId")
+
+    `given`
+      .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
+      .body(
+        s"""{
+           |  "using": ["urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail"],
+           |  "methodCalls": [
+           |    ["Email/set", {
+           |      "accountId": "$ACCOUNT_ID",
+           |      "create": {
+           |        "aaaaaa": {
+           |          "mailboxIds": {
+           |             "${mailboxId.serialize}": true
+           |          },
+           |          "subject": "World domination",
+           |          "textBody": [
+           |            {
+           |              "blobId": "$blobId",
+           |              "partId": "a49d",
+           |              "type": "text/plain"
+           |            }
+           |          ],
+           |          "bodyValues": {
+           |            "a49d": {
+           |              "value": "$textBody",
+           |              "isTruncated": false,
+           |              "isEncodingProblem": false
+           |            }
+           |          }
+           |        }
+           |      }
+           |    }, "c1"]
+           |  ]
+           |}""".stripMargin)
+    .when
+      .post
+    .`then`
+      .statusCode(SC_OK)
+      .contentType(JSON)
+      .body("methodResponses[0][1].notCreated", hasKey("aaaaaa"))
+      .body("methodResponses[0][1].notCreated.aaaaaa",
+        jsonEquals(
+          s"""{
+             |    "type": "invalidArguments",
+             |    "description": "Expecting only one of partId or blobId to be defined"
+             |}""".stripMargin))
+  }
+
+  @Test
+  def emailCreationShouldFailWhenHtmlBodyAbsentBothBlobIdAndPartId(server: GuiceJamesServer): Unit = {
+    val bobPath = MailboxPath.inbox(BOB)
+    val mailboxId = server.getProbe(classOf[MailboxProbeImpl]).createMailbox(bobPath)
+    `given`
+      .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
+      .body(s"""{
+               |  "using": ["urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail"],
+               |  "methodCalls": [
+               |    ["Email/set", {
+               |      "accountId": "$ACCOUNT_ID",
+               |      "create": {
+               |        "aaaaaa": {
+               |          "mailboxIds": {
+               |             "${mailboxId.serialize}": true
+               |          },
+               |          "subject": "World domination",
+               |          "textBody": [
+               |            {
+               |              "type": "text/plain"
+               |            }
+               |          ]
+               |        }
+               |      }
+               |    }, "c1"]
+               |  ]
+               |}""".stripMargin)
+    .when
+      .post
+    .`then`
+      .statusCode(SC_OK)
+      .contentType(JSON)
+      .body("methodResponses[0][1].notCreated", hasKey("aaaaaa"))
+      .body("methodResponses[0][1].notCreated.aaaaaa",
+        jsonEquals(
+          s"""{
+             |    "type": "invalidArguments",
+             |    "description": "Expecting either partId or blobId to be defined"
+             |}""".stripMargin))
+  }
+
+  @Test
+  def shouldPreserveCharsetOfBlobWhenEmailBodyWithBlobId(server: GuiceJamesServer): Unit = {
+    val bobPath = MailboxPath.inbox(BOB)
+    val mailboxId = server.getProbe(classOf[MailboxProbeImpl]).createMailbox(bobPath)
+    val textBody: String = "Café"
+    val payload = textBody.getBytes(Charset.forName("Windows-1252"))
+
+    val blobId: String = `given`
+      .basePath("")
+      .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
+      .contentType("text/plain; charset=Windows-1252")
+      .body(payload)
+    .when
+      .post(s"/upload/$ACCOUNT_ID")
+    .`then`
+      .statusCode(SC_CREATED)
+      .extract
+      .path("blobId")
+
+    val request =
+      s"""{
+         |  "using": ["urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail"],
+         |  "methodCalls": [
+         |    ["Email/set", {
+         |      "accountId": "$ACCOUNT_ID",
+         |      "create": {
+         |        "aaaaaa": {
+         |          "mailboxIds": {
+         |             "${mailboxId.serialize}": true
+         |          },
+         |          "subject": "World domination",
+         |          "textBody": [
+         |            {
+         |              "blobId": "$blobId",
+         |              "type": "text/plain"
+         |            }
+         |          ]
+         |        }
+         |      }
+         |    }, "c1"],
+         |    ["Email/get",
+         |      {
+         |        "accountId": "$ACCOUNT_ID",
+         |        "ids": ["#aaaaaa"],
+         |        "properties": ["mailboxIds", "subject", "preview"],
+         |        "fetchTextBodyValues": true
+         |      },
+         |    "c2"]
+         |  ]
+         |}""".stripMargin
+
+    `given`
+      .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
+      .body(request)
+    .when
+      .post
+    .`then`
+      .statusCode(SC_OK)
+      .contentType(JSON)
+      .body("methodResponses[0][1].created.aaaaaa", notNullValue())
+      .body("methodResponses[1][1].list[0].preview", equalTo(textBody))
   }
 
   @Test
@@ -3406,8 +3947,9 @@ trait EmailSetMethodContract {
            |}""".stripMargin)
   }
 
+  @deprecated("specificHeaders should be set on EmailBodyPart as RFC8621")
   @Test
-  def bodyPartShouldSupportSpecificHeaders(server: GuiceJamesServer): Unit = {
+  def emailBodyValueShouldSupportSpecificHeaders(server: GuiceJamesServer): Unit = {
     val bobPath = MailboxPath.inbox(BOB)
     val mailboxId = server.getProbe(classOf[MailboxProbeImpl]).createMailbox(bobPath)
     val payload = "123456789\r\n".getBytes(StandardCharsets.UTF_8)
@@ -3508,6 +4050,166 @@ trait EmailSetMethodContract {
            |    "type": "multipart/alternative"
            |  }
            |}""".stripMargin)
+  }
+
+  @Test
+  def shouldSupportSpecificHeadersInEmailBodyPart(server: GuiceJamesServer): Unit = {
+    val bobPath = MailboxPath.inbox(BOB)
+    val mailboxId = server.getProbe(classOf[MailboxProbeImpl]).createMailbox(bobPath)
+    val htmlBody: String = "<!DOCTYPE html><html><head><title></title></head><body><div>I have the most <b>brilliant</b> plan. Let me tell you all about it. What we do is, we</div></body></html>"
+
+    val request =
+      s"""{
+         |  "using": ["urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail"],
+         |  "methodCalls": [
+         |    ["Email/set", {
+         |      "accountId": "$ACCOUNT_ID",
+         |      "create": {
+         |        "aaaaaa": {
+         |          "mailboxIds": {
+         |             "${mailboxId.serialize}": true
+         |          },
+         |          "subject": "World domination",
+         |          "htmlBody": [
+         |            {
+         |              "partId": "a49d",
+         |              "type": "text/html",
+         |              "header:Specific:asText": "MATCHME"
+         |            }
+         |          ],
+         |          "bodyValues": {
+         |            "a49d": {
+         |              "value": "$htmlBody",
+         |              "isTruncated": false,
+         |              "isEncodingProblem": false
+         |            }
+         |          }
+         |        }
+         |      }
+         |    }, "c1"],
+         |    ["Email/get",
+         |      {
+         |        "accountId": "$ACCOUNT_ID",
+         |        "ids": ["#aaaaaa"],
+         |        "properties": ["bodyStructure"],
+         |        "bodyProperties": ["type", "disposition", "cid", "subParts", "header:Specific:asText"]
+         |      },
+         |    "c2"]
+         |  ]
+         |}""".stripMargin
+
+    val response = `given`
+      .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
+      .body(request)
+    .when
+      .post
+    .`then`
+      .statusCode(SC_OK)
+      .contentType(JSON)
+      .extract
+      .body
+      .asString
+
+    val responseAsJson = Json.parse(response)
+      .\("methodResponses")
+      .\(0).\(1)
+      .\("created")
+      .\("aaaaaa")
+
+    val messageId = responseAsJson
+      .\("id")
+      .get.asInstanceOf[JsString].value
+    val size = responseAsJson
+      .\("size")
+      .get.asInstanceOf[JsNumber].value
+
+    assertThatJson(response)
+      .inPath("methodResponses[0][1].created.aaaaaa")
+      .isEqualTo(
+        s"""{
+           | "id": "$messageId",
+           | "blobId": "$messageId",
+           | "threadId": "$messageId",
+           | "size": $size
+           |}""".stripMargin)
+
+    assertThatJson(response)
+      .inPath(s"methodResponses[1][1].list[0]")
+      .isEqualTo(
+        s"""{
+           |  "id": "$messageId",
+           |  "bodyStructure": {
+           |    "subParts": [
+           |      {
+           |        "header:Specific:asText": "MATCHME",
+           |        "type": "text/plain"
+           |      },
+           |      {
+           |        "header:Specific:asText": "MATCHME",
+           |        "type": "text/html"
+           |      }
+           |    ],
+           |    "header:Specific:asText": null,
+           |    "type": "multipart/alternative"
+           |  }
+           |}""".stripMargin)
+  }
+
+  @Test
+  def shouldFailIfSpecificHeadersSetInBothEmailBodyPartAndEmailBodyValue(server: GuiceJamesServer): Unit = {
+    val bobPath = MailboxPath.inbox(BOB)
+    val mailboxId = server.getProbe(classOf[MailboxProbeImpl]).createMailbox(bobPath)
+    val htmlBody: String = "<!DOCTYPE html><html><head><title></title></head><body><div>I have the most <b>brilliant</b> plan. Let me tell you all about it. What we do is, we</div></body></html>"
+
+    val request =
+      s"""{
+         |  "using": ["urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail"],
+         |  "methodCalls": [
+         |    ["Email/set", {
+         |      "accountId": "$ACCOUNT_ID",
+         |      "create": {
+         |        "aaaaaa": {
+         |          "mailboxIds": {
+         |             "${mailboxId.serialize}": true
+         |          },
+         |          "subject": "World domination",
+         |          "htmlBody": [
+         |            {
+         |              "partId": "a49d",
+         |              "type": "text/html",
+         |              "header:Specific:asText": "MATCHME"
+         |            }
+         |          ],
+         |          "bodyValues": {
+         |            "a49d": {
+         |              "value": "$htmlBody",
+         |              "isTruncated": false,
+         |              "isEncodingProblem": false,
+         |              "header:Specific:asText": "MATCHME2"
+         |            }
+         |          }
+         |        }
+         |      }
+         |    }, "c1"]
+         |  ]
+         |}""".stripMargin
+
+    `given`
+      .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
+      .body(request)
+    .when
+      .post
+    .`then`
+      .statusCode(SC_OK)
+      .contentType(JSON)
+      .body("methodResponses[0][1].notCreated",
+        jsonEquals(
+          """{
+            |    "aaaaaa": {
+            |        "type": "invalidArguments",
+            |        "description": "Could not set specific headers on both EmailBodyPart and EmailBodyValue"
+            |    }
+            |}""".stripMargin))
   }
 
   @Test
@@ -3891,7 +4593,7 @@ trait EmailSetMethodContract {
            |          "id": "$messageId",
            |          "bodyStructure": {
            |            "type": "multipart/alternative",
-           |            "charset": "us-ascii",
+           |            "charset": "US-ASCII",
            |            "subParts": [
            |              {
            |                "type": "text/plain",
@@ -4290,7 +4992,7 @@ trait EmailSetMethodContract {
            |}""".stripMargin)
 
     assertThatJson(response)
-      .inPath(s"methodResponses[1][1].list[0]")
+      .inPath("methodResponses[1][1].list[0]")
       .isEqualTo(
         s"""{
            |  "id": "$messageId",
@@ -4304,7 +5006,7 @@ trait EmailSetMethodContract {
            |      "blobId": "${messageId}_4",
            |      "size": 155,
            |      "type": "message/rfc822",
-           |      "charset": "us-ascii",
+           |      "charset": "US-ASCII",
            |      "disposition": "attachment"
            |    }
            |  ]
@@ -5793,23 +6495,20 @@ trait EmailSetMethodContract {
   def emailSetDestroyShouldDestroyEmailWhenMovedIntoAnotherMailbox(server: GuiceJamesServer): Unit = {
     val mailboxProbe = server.getProbe(classOf[MailboxProbeImpl])
 
-    val andreMailbox: String = "andrecustom"
-    val andrePath = MailboxPath.forUser(ANDRE, andreMailbox)
-    val bobPath = MailboxPath.inbox(BOB)
-    mailboxProbe.createMailbox(andrePath)
-    val mailboxId: MailboxId = mailboxProbe.createMailbox(bobPath)
+    val mailbox: String = "custom"
+    val anotherMailbox: String = "anotherCustom"
+    mailboxProbe.createMailbox(MailboxPath.forUser(BOB, mailbox))
+    val anotherMailboxId = mailboxProbe.createMailbox(MailboxPath.forUser(BOB, anotherMailbox))
 
     val messageId: MessageId = mailboxProbe
-      .appendMessage(ANDRE.asString, andrePath,
+      .appendMessage(BOB.asString, MailboxPath.forUser(BOB, mailbox),
         AppendCommand.from(
           buildTestMessage))
       .getMessageId
 
-    server.getProbe(classOf[ACLProbeImpl])
-      .replaceRights(andrePath, BOB.asString, new MailboxACL.Rfc4314Rights(Right.Insert))
-
+    // Move message from mailbox to anotherMailbox
     server.getProbe(classOf[JmapGuiceProbe])
-      .setInMailboxes(messageId, BOB, mailboxId)
+      .setInMailboxes(messageId, BOB, anotherMailboxId)
 
     val request =
       s"""{
@@ -5924,6 +6623,65 @@ trait EmailSetMethodContract {
       s"""{
          |  "id": "${messageId.serialize}",
          |  "mailboxIds": {"${mailboxId2.serialize}":true, "${mailboxId3.serialize}":true}
+         |}""".stripMargin)
+  }
+
+  @Test
+  def updateShouldSupportMixingMoveAndFlagUpdate(server: GuiceJamesServer): Unit = {
+    val mailboxProbe = server.getProbe(classOf[MailboxProbeImpl])
+    val mailboxId1: MailboxId = mailboxProbe.createMailbox(MailboxPath.inbox(BOB))
+    val mailboxId2: MailboxId = mailboxProbe.createMailbox(MailboxPath.forUser(BOB, "other"))
+    val mailboxId3: MailboxId = mailboxProbe.createMailbox(MailboxPath.forUser(BOB, "yet-another"))
+
+    val messageId: MessageId = mailboxProbe
+      .appendMessage(BOB.asString, MailboxPath.inbox(BOB),
+        AppendCommand.from(
+          buildTestMessage))
+      .getMessageId
+
+    val request =
+      s"""{
+         |  "using": ["urn:ietf:params:jmap:core","urn:ietf:params:jmap:mail"],
+         |  "methodCalls": [
+         |    ["Email/set", {
+         |      "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+         |      "update": {
+         |        "${messageId.serialize}": {
+         |          "mailboxIds": {
+         |            "${mailboxId1.serialize}": true,
+         |            "${mailboxId2.serialize}": true
+         |          },
+         |          "keywords/music": true
+         |        }
+         |      }
+         |    }, "c1"],
+         |     ["Email/get", {
+         |      "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+         |      "ids": ["${messageId.serialize}"],
+         |      "properties": ["mailboxIds", "keywords"]
+         |    }, "c3"]
+         |  ]
+         |}""".stripMargin
+
+    val response = `given`
+      .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
+      .body(request)
+    .when
+      .post
+    .`then`
+      .statusCode(SC_OK)
+      .contentType(JSON)
+      .extract
+      .body
+      .asString
+
+    assertThatJson(response)
+      .inPath("methodResponses[1][1].list[0]")
+      .isEqualTo(
+      s"""{
+         |  "id": "${messageId.serialize}",
+         |  "mailboxIds": {"${mailboxId1.serialize}":true, "${mailboxId2.serialize}":true},
+         |  "keywords" : {"music": true }
          |}""".stripMargin)
   }
 
@@ -7155,7 +7913,7 @@ trait EmailSetMethodContract {
       .asString
 
     assertThatJson(response)
-      .withOptions(new Options(Option.IGNORING_ARRAY_ORDER))
+      .withOptions(Option.IGNORING_ARRAY_ORDER)
       .whenIgnoringPaths("methodResponses[1][1].oldState",
         "methodResponses[1][1].newState")
       .inPath("methodResponses[1][1]")
@@ -7224,7 +7982,7 @@ trait EmailSetMethodContract {
       .asString
 
     assertThatJson(response)
-      .withOptions(new Options(Option.IGNORING_ARRAY_ORDER))
+      .withOptions(Option.IGNORING_ARRAY_ORDER)
       .whenIgnoringPaths("methodResponses[1][1].oldState", "methodResponses[1][1].newState")
       .inPath("methodResponses[1][1]")
       .isEqualTo(

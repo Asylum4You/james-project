@@ -1,0 +1,7 @@
+= Distributed James Server &mdash; SMTP Hooks
+:navtitle: SMTP Hooks
+
+:sample-configuration-prefix-url: https://github.com/apache/james-project/blob/master/server/apps/distributed-app/sample-configuration
+:pages-path: distributed
+:server-name: Distributed James Server
+include::partial$configure/smtp-hooks.adoc[]

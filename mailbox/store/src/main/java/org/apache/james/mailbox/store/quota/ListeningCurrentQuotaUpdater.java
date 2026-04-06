@@ -19,6 +19,7 @@
 package org.apache.james.mailbox.store.quota;
 
 import java.time.Instant;
+import java.util.List;
 
 import jakarta.inject.Inject;
 
@@ -30,12 +31,12 @@ import org.apache.james.events.EventBus;
 import org.apache.james.events.EventListener;
 import org.apache.james.events.Group;
 import org.apache.james.events.RegistrationKey;
-import org.apache.james.mailbox.events.MailboxEvents;
 import org.apache.james.mailbox.events.MailboxEvents.Added;
 import org.apache.james.mailbox.events.MailboxEvents.Expunged;
-import org.apache.james.mailbox.events.MailboxEvents.MailboxAdded;
 import org.apache.james.mailbox.events.MailboxEvents.MailboxDeletion;
 import org.apache.james.mailbox.events.MailboxEvents.MetaDataHoldingEvent;
+import org.apache.james.mailbox.events.MessageMoveEvent;
+import org.apache.james.mailbox.model.MailboxId;
 import org.apache.james.mailbox.model.QuotaOperation;
 import org.apache.james.mailbox.model.QuotaRoot;
 import org.apache.james.mailbox.quota.CurrentQuotaManager;
@@ -76,10 +77,7 @@ public class ListeningCurrentQuotaUpdater implements EventListener.ReactiveGroup
 
     @Override
     public boolean isHandling(Event event) {
-        return event instanceof Added
-            || event instanceof Expunged
-            || event instanceof MailboxDeletion
-            || event instanceof MailboxAdded;
+        return event instanceof Added || event instanceof Expunged || event instanceof MailboxDeletion;
     }
 
     @Override
@@ -95,11 +93,39 @@ public class ListeningCurrentQuotaUpdater implements EventListener.ReactiveGroup
         } else if (event instanceof MailboxDeletion) {
             MailboxDeletion mailboxDeletionEvent = (MailboxDeletion) event;
             return handleMailboxDeletionEvent(mailboxDeletionEvent);
-        } else if (event instanceof MailboxAdded) {
-            MailboxEvents.MailboxAdded mailboxAdded = (MailboxEvents.MailboxAdded) event;
-            return handleMailboxAddedEvent(mailboxAdded);
         }
         return Mono.empty();
+    }
+
+    @Override
+    public Publisher<Void> reactiveEvent(List<Event> event) {
+        Mono<Boolean> isAMove = event.stream()
+            .filter(MessageMoveEvent.class::isInstance)
+            .map(MessageMoveEvent.class::cast)
+            .findAny()
+            .map(move -> {
+                boolean moveAsSingleMailbox = move.getMessageMoves().addedMailboxIds().size() == move.getMessageMoves().removedMailboxIds().size()
+                    && move.getMessageMoves().addedMailboxIds().size() == 1;
+                if (moveAsSingleMailbox) {
+                    return bothMailboxesBelongToSameRoot(move);
+                }
+                return Mono.just(false);
+            }).orElse(Mono.just(false));
+
+        return isAMove.flatMap(b -> {
+            if (b) {
+                return Mono.empty();
+            }
+            return Mono.from(ReactiveGroupEventListener.super.reactiveEvent(event));
+        });
+    }
+
+    private Mono<Boolean> bothMailboxesBelongToSameRoot(MessageMoveEvent move) {
+        MailboxId mailboxId1 = move.getMessageMoves().addedMailboxIds().iterator().next();
+        MailboxId mailboxId2 = move.getMessageMoves().removedMailboxIds().iterator().next();
+        return Mono.from(quotaRootResolver.getQuotaRootReactive(mailboxId1))
+            .zipWith(Mono.from(quotaRootResolver.getQuotaRootReactive(mailboxId2)))
+            .map(roots -> roots.getT1().equals(roots.getT2()));
     }
 
     private Mono<Void> handleExpungedEvent(Expunged expunged, QuotaRoot quotaRoot) {
@@ -157,16 +183,4 @@ public class ListeningCurrentQuotaUpdater implements EventListener.ReactiveGroup
         return Mono.empty();
     }
 
-    private Mono<Void> handleMailboxAddedEvent(MailboxAdded mailboxAdded) {
-        return provisionCurrentQuota(mailboxAdded);
-    }
-
-    private Mono<Void> provisionCurrentQuota(MailboxAdded mailboxAdded) {
-        return Mono.from(quotaRootResolver.getQuotaRootReactive(mailboxAdded.getMailboxPath()))
-            .flatMap(quotaRoot -> Mono.from(currentQuotaManager.getCurrentQuotas(quotaRoot))
-                .map(any -> quotaRoot)
-                .switchIfEmpty(Mono.defer(() -> Mono.from(currentQuotaManager.setCurrentQuotas(new QuotaOperation(quotaRoot, QuotaCountUsage.count(0), QuotaSizeUsage.ZERO)))
-                    .thenReturn(quotaRoot))))
-            .then();
-    }
 }

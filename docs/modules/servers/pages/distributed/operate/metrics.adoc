@@ -1,0 +1,7 @@
+= Distributed James Server &mdash; Metrics
+:navtitle: Metrics
+
+:other-metrics: Cassandra Java driver metrics
+:xref-base: distributed
+:server-name: Distributed James Server
+include::partial$operate/metrics.adoc[]

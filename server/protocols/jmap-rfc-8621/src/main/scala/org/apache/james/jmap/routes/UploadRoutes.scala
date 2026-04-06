@@ -26,8 +26,8 @@ import java.util.stream
 import java.util.stream.Stream
 
 import io.netty.handler.codec.http.HttpHeaderNames.{CONTENT_LENGTH, CONTENT_TYPE}
+import io.netty.handler.codec.http.HttpMethod
 import io.netty.handler.codec.http.HttpResponseStatus.{BAD_REQUEST, CREATED, FORBIDDEN, INTERNAL_SERVER_ERROR, UNAUTHORIZED}
-import io.netty.handler.codec.http.{HttpMethod, HttpResponseStatus}
 import jakarta.inject.{Inject, Named}
 import org.apache.commons.fileupload.util.LimitedInputStream
 import org.apache.james.jmap.HttpConstants.JSON_CONTENT_TYPE
@@ -42,7 +42,7 @@ import org.apache.james.jmap.http.rfc8621.InjectionKeys
 import org.apache.james.jmap.json.{ResponseSerializer, UploadSerializer}
 import org.apache.james.jmap.mail.BlobId
 import org.apache.james.jmap.method.AccountNotFoundException
-import org.apache.james.jmap.routes.UploadRoutes.LOGGER
+import org.apache.james.jmap.routes.UploadRoutes.{LOGGER, asBlobId}
 import org.apache.james.jmap.{Endpoint, JMAPRoute, JMAPRoutes}
 import org.apache.james.mailbox.MailboxSession
 import org.apache.james.mailbox.model.ContentType
@@ -57,6 +57,9 @@ case class TooBigUploadException() extends RuntimeException
 
 object UploadRoutes {
   val LOGGER: Logger = LoggerFactory.getLogger(classOf[UploadRoutes])
+
+  def asBlobId(uploadId: UploadId): BlobId =
+    BlobId.of(s"uploads-${uploadId.asString()}").get
 }
 
 case class UploadResponse(accountId: AccountId,
@@ -91,27 +94,21 @@ class UploadRoutes @Inject()(@Named(InjectionKeys.RFC_8621) val authenticator: A
         .onErrorResume {
           case e: UnauthorizedException =>
             LOGGER.warn("Unauthorized", e)
-            respondDetails(e.addHeaders(response),
-              ProblemDetails(status = UNAUTHORIZED, detail = e.getMessage),
-              UNAUTHORIZED)
+            respondDetails(e.addHeaders(response), ProblemDetails(status = UNAUTHORIZED, detail = e.getMessage))
           case _: TooBigUploadException =>
-            respondDetails(response,
-              ProblemDetails(status = BAD_REQUEST, detail = "Attempt to upload exceed max size"),
-              BAD_REQUEST)
+            respondDetails(response, ProblemDetails(status = BAD_REQUEST, detail = "Attempt to upload exceed max size"))
           case _: ForbiddenException | _: AccountNotFoundException =>
-            respondDetails(response,
-              ProblemDetails(status = FORBIDDEN, detail = "Upload to other accounts is forbidden"),
-              FORBIDDEN)
+            respondDetails(response, ProblemDetails(status = FORBIDDEN, detail = "Upload to other accounts is forbidden"))
           case e =>
-            LOGGER.error("Unexpected error upon uploads", e)
-            respondDetails(response,
-              ProblemDetails(status = INTERNAL_SERVER_ERROR, detail = e.getMessage),
-              INTERNAL_SERVER_ERROR)
+            LOGGER.error("Unexpected error upon upload {}", request.uri(), e)
+            respondDetails(response, ProblemDetails(status = INTERNAL_SERVER_ERROR, detail = e.getMessage))
         }
         .asJava()
         .subscribeOn(ReactorUtils.BLOCKING_CALL_WRAPPER)
         .`then`()
-      case _ => response.status(BAD_REQUEST).send
+      case _ =>
+        LOGGER.info("Upload was missing compulsory Content-Type header")
+        respondDetails(response, ProblemDetails(status = BAD_REQUEST, detail = "Upload is missing compulsory Content-Type header")).asJava()
     }
   }
 
@@ -166,9 +163,7 @@ class UploadRoutes @Inject()(@Named(InjectionKeys.RFC_8621) val authenticator: A
         size = uploadMetaData.size,
         accountId = accountId)
 
-  private def asBlobId(uploadId: UploadId): BlobId = BlobId.of(s"uploads-${uploadId.asString()}" ).get
-
-  private def respondDetails(httpServerResponse: HttpServerResponse, details: ProblemDetails, statusCode: HttpResponseStatus = BAD_REQUEST): SMono[Void] =
+  private def respondDetails(httpServerResponse: HttpServerResponse, details: ProblemDetails): SMono[Void] =
     SMono.fromCallable(() => ResponseSerializer.serialize(details).toString)
       .map(_.getBytes(StandardCharsets.UTF_8))
       .flatMap(bytes =>

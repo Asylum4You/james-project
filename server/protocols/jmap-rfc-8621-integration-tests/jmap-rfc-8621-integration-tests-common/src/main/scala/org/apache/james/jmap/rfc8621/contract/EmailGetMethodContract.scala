@@ -32,7 +32,6 @@ import jakarta.mail.Flags
 import net.javacrumbs.jsonunit.assertj.JsonAssertions.assertThatJson
 import net.javacrumbs.jsonunit.core.Option
 import net.javacrumbs.jsonunit.core.Option.IGNORING_ARRAY_ORDER
-import net.javacrumbs.jsonunit.core.internal.Options
 import org.apache.http.HttpStatus.SC_OK
 import org.apache.james.GuiceJamesServer
 import org.apache.james.jmap.JmapGuiceProbe
@@ -44,6 +43,7 @@ import org.apache.james.jmap.http.UserCredential
 import org.apache.james.jmap.rfc8621.contract.EmailGetMethodContract.createTestMessage
 import org.apache.james.jmap.rfc8621.contract.Fixture.{ACCEPT_RFC8621_VERSION_HEADER, ALICE, ANDRE, ANDRE_ACCOUNT_ID, ANDRE_PASSWORD, BOB, BOB_PASSWORD, DOMAIN, authScheme, baseRequestSpecBuilder}
 import org.apache.james.jmap.rfc8621.contract.probe.DelegationProbe
+import org.apache.james.junit.categories.BasicFeature
 import org.apache.james.mailbox.MessageManager.AppendCommand
 import org.apache.james.mailbox.model.MailboxACL.Right
 import org.apache.james.mailbox.model.{ComposedMessageId, MailboxACL, MailboxId, MailboxPath, MessageId}
@@ -55,6 +55,7 @@ import org.apache.james.util.ClassLoaderUtils
 import org.apache.james.utils.DataProbeImpl
 import org.assertj.core.api.Assertions.assertThat
 import org.awaitility.Awaitility
+import org.junit.experimental.categories.Category
 import org.junit.jupiter.api.{BeforeEach, Test}
 import play.api.libs.json.Json
 
@@ -2304,7 +2305,7 @@ trait EmailGetMethodContract {
       .asString
 
     assertThatJson(response)
-      .withOptions(new Options(IGNORING_ARRAY_ORDER))
+      .withOptions(IGNORING_ARRAY_ORDER)
       .whenIgnoringPaths("methodResponses[0][1].state")
       .isEqualTo(
       s"""{
@@ -2458,7 +2459,7 @@ trait EmailGetMethodContract {
          |                                "blobId": "${messageId.serialize}_2",
          |                                "size": 8,
          |                                "type": "text/plain",
-         |                                "charset": "utf-8"
+         |                                "charset": "UTF-8"
          |                            }
          |                        ],
          |                        "attachments": [
@@ -2477,7 +2478,7 @@ trait EmailGetMethodContract {
          |                                "size": 398,
          |                                "name": "text2",
          |                                "type": "application/vnd.ms-publisher",
-         |                                "charset": "us-ascii",
+         |                                "charset": "US-ASCII",
          |                                "disposition": "attachment"
          |                            },
          |                            {
@@ -2496,7 +2497,7 @@ trait EmailGetMethodContract {
          |                                "blobId": "${messageId.serialize}_2",
          |                                "size": 8,
          |                                "type": "text/plain",
-         |                                "charset": "utf-8"
+         |                                "charset": "UTF-8"
          |                            }
          |                        ],
          |                        "bodyValues": {},
@@ -3303,7 +3304,7 @@ trait EmailGetMethodContract {
          |        "type": "text/plain"
          |      },
          |      {
-         |        "size": 2093,
+         |        "size": 2094,
          |        "partId": "3",
          |        "blobId": "${messageId.serialize()}_3",
          |        "type": "message/rfc822"
@@ -3929,7 +3930,7 @@ trait EmailGetMethodContract {
          |                            ],
          |                            "size": 1880,
          |                            "type": "multipart/mixed",
-         |                            "charset": "us-ascii",
+         |                            "charset": "US-ASCII",
          |                            "subParts": [
          |                                {
          |                                    "partId": "2",
@@ -3946,7 +3947,7 @@ trait EmailGetMethodContract {
          |                                    ],
          |                                    "size": 8,
          |                                    "type": "text/plain",
-         |                                    "charset": "utf-8"
+         |                                    "charset": "UTF-8"
          |                                },
          |                                {
          |                                    "partId": "3",
@@ -3991,7 +3992,7 @@ trait EmailGetMethodContract {
          |                                    "size": 398,
          |                                    "name": "text2",
          |                                    "type": "application/vnd.ms-publisher",
-         |                                    "charset": "us-ascii",
+         |                                    "charset": "US-ASCII",
          |                                    "disposition": "attachment"
          |                                },
          |                                {
@@ -4124,7 +4125,7 @@ trait EmailGetMethodContract {
          |                            ],
          |                            "size": 891,
          |                            "type": "multipart/mixed",
-         |                            "charset": "us-ascii",
+         |                            "charset": "US-ASCII",
          |                            "subParts": [
          |                                {
          |                                    "partId": "2",
@@ -4136,7 +4137,7 @@ trait EmailGetMethodContract {
          |                                    ],
          |                                    "size": 398,
          |                                    "type": "multipart/alternative",
-         |                                    "charset": "us-ascii",
+         |                                    "charset": "US-ASCII",
          |                                    "subParts": [
          |                                        {
          |                                            "partId": "3",
@@ -4198,7 +4199,7 @@ trait EmailGetMethodContract {
          |                                    "size": 19,
          |                                    "name": "avertissement.txt",
          |                                    "type": "text/plain",
-         |                                    "charset": "iso-8859-1",
+         |                                    "charset": "ISO-8859-1",
          |                                    "disposition": "inline",
          |                                    "cid": "14672787885774e5c4d4cee471352039@linagora.com"
          |                                }
@@ -4267,7 +4268,7 @@ trait EmailGetMethodContract {
          |                                "blobId": "${messageId.serialize}_2",
          |                                "size": 8,
          |                                "type": "text/plain",
-         |                                "charset": "utf-8"
+         |                                "charset": "UTF-8"
          |                            }
          |                        ]
          |                    }
@@ -4335,7 +4336,7 @@ trait EmailGetMethodContract {
          |                                "charset": "ISO-8859-1"
          |                            },
          |                            {
-         |                                "charset": "iso-8859-1",
+         |                                "charset": "ISO-8859-1",
          |                                "disposition": "inline",
          |                                "size": 19,
          |                                "partId": "5",
@@ -4410,7 +4411,7 @@ trait EmailGetMethodContract {
          |                                "charset": "ISO-8859-1"
          |                            },
          |                            {
-         |                                "charset": "iso-8859-1",
+         |                                "charset": "ISO-8859-1",
          |                                "disposition": "inline",
          |                                "size": 19,
          |                                "partId": "5",
@@ -4679,7 +4680,7 @@ trait EmailGetMethodContract {
          |                        "id": "${messageId.serialize}",
          |                         "attachments": [
          |                            {
-         |                                "charset": "us-ascii",
+         |                                "charset": "US-ASCII",
          |                                "disposition": "attachment",
          |                                "size": 102,
          |                                "partId": "3",
@@ -4688,7 +4689,7 @@ trait EmailGetMethodContract {
          |                                "name":"yyy.txt"
          |                            },
          |                            {
-         |                                "charset": "us-ascii",
+         |                                "charset": "US-ASCII",
          |                                "disposition": "attachment",
          |                                "size": 102,
          |                                "partId": "4",
@@ -4699,7 +4700,7 @@ trait EmailGetMethodContract {
          |                        ],
          |                        "bodyValues": {
          |                            "2": {
-         |                                "value": "Main test message...\\n",
+         |                                "value": "Main test message...\\r\\n",
          |                                "isEncodingProblem": false,
          |                                "isTruncated": false
          |                            }
@@ -4801,7 +4802,7 @@ trait EmailGetMethodContract {
          |					"sentAt": "$${json-unit.ignore}",
          |					"hasAttachment": true,
          |					"attachments": [{
-         |							"charset": "us-ascii",
+         |							"charset": "US-ASCII",
          |							"disposition": "attachment",
          |							"size": 102,
          |							"partId": "3",
@@ -4810,7 +4811,7 @@ trait EmailGetMethodContract {
          |							"type": "application/json"
          |						},
          |						{
-         |							"charset": "us-ascii",
+         |							"charset": "US-ASCII",
          |							"disposition": "attachment",
          |							"size": 102,
          |							"partId": "4",
@@ -4820,7 +4821,7 @@ trait EmailGetMethodContract {
          |						}
          |					],
          |					"subject": "My subject",
-         |					"size": 970
+         |					"size": 1011
          |				}]
          |			},
          |			"c1"
@@ -4829,6 +4830,121 @@ trait EmailGetMethodContract {
          |}""".stripMargin)
   }
 
+  @Test
+  def inlinedAttachmentMailShouldNotBeCountedAsHasAttachmentWhenEmailFullView(server: GuiceJamesServer): Unit = {
+    val path = MailboxPath.inbox(BOB)
+    val mailboxId = server.getProbe(classOf[MailboxProbeImpl]).createMailbox(path)
+    val messageId: MessageId = server.getProbe(classOf[MailboxProbeImpl])
+      .appendMessage(BOB.asString, path, AppendCommand.from(
+        ClassLoaderUtils.getSystemResourceAsSharedStream("eml/simple-inlined-attachment.eml")))
+      .getMessageId
+
+    val request =
+      s"""{
+         |	"using": [
+         |		"urn:ietf:params:jmap:core",
+         |		"urn:ietf:params:jmap:mail"
+         |	],
+         |	"methodCalls": [
+         |		[
+         |			"Email/get",
+         |			{
+         |				"accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+         |				"ids": ["${messageId.serialize}"],
+         |				"properties": [
+         |					"id",
+         |					"subject",
+         |					"from",
+         |					"to",
+         |					"cc",
+         |					"bcc",
+         |					"keywords",
+         |					"size",
+         |					"receivedAt",
+         |					"sentAt",
+         |					"preview",
+         |					"hasAttachment",
+         |					"attachments",
+         |					"replyTo",
+         |					"mailboxIds"
+         |				],
+         |				"fetchTextBodyValues": true
+         |			},
+         |			"c1"
+         |		]
+         |	]
+         |}""".stripMargin
+    val response = `given`
+      .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
+      .body(request)
+    .when
+      .post
+    .`then`
+      .statusCode(SC_OK)
+      .contentType(JSON)
+      .extract
+      .body
+      .asString
+
+    assertThatJson(response)
+      .whenIgnoringPaths("methodResponses[0][1].state")
+      .isEqualTo(
+      s"""{
+         |    "sessionState": "${SESSION_STATE.value}",
+         |    "methodResponses": [
+         |        [
+         |            "Email/get",
+         |            {
+         |                "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+         |                "state": "33ac468f-7903-4f68-ac3e-8120505b5c3d",
+         |                "list": [
+         |                    {
+         |                        "id": "${messageId.serialize}",
+         |                        "keywords": {},
+         |                        "mailboxIds": {
+         |                            "${mailboxId.serialize}": true
+         |                        },
+         |                        "size": 7609,
+         |                        "receivedAt": "$${json-unit.ignore}",
+         |                        "to": [
+         |                            {
+         |                                "name": "Alice",
+         |                                "email": "alice@domain.tld"
+         |                            }
+         |                        ],
+         |                        "from": [
+         |                            {
+         |                                "name": "Bob",
+         |                                "email": "bob@domain.tld"
+         |                            }
+         |                        ],
+         |                        "subject": "inlined attachment",
+         |                        "sentAt": "$${json-unit.ignore}",
+         |                        "attachments": [
+         |                            {
+         |                                "partId": "5",
+         |                                "blobId": "${messageId.serialize}_5",
+         |                                "size": 4334,
+         |                                "name": "Screenshot 2025-05-06 at 09.50.27.png",
+         |                                "type": "image/png",
+         |                                "charset": "BASE64",
+         |                                "disposition": "inline",
+         |                                "cid": "e612b3e0-2a24-11f0-aacf-77a69744ec20"
+         |                            }
+         |                        ],
+         |                        "hasAttachment": false,
+         |                        "preview": "start[Screenshot 2025-05-06 at 09]end"
+         |                    }
+         |                ],
+         |                "notFound": []
+         |            },
+         |            "c1"
+         |        ]
+         |    ]
+         |}""".stripMargin)
+  }
+
+  @Category(Array(classOf[BasicFeature]))
   @Test
   def shouldUseFastViewWithAttachmentMetadataWhenSupportedBodyProperties(server: GuiceJamesServer): Unit = {
     val path = MailboxPath.inbox(BOB)
@@ -4918,7 +5034,7 @@ trait EmailGetMethodContract {
          |					"sentAt": "$${json-unit.ignore}",
          |					"hasAttachment": true,
          |					"attachments": [{
-         |							"charset": "us-ascii",
+         |							"charset": "US-ASCII",
          |							"headers": [{
          |									"name": "Content-Type",
          |									"value": " application/json; charset=us-ascii"
@@ -4940,7 +5056,7 @@ trait EmailGetMethodContract {
          |							"type": "application/json"
          |						},
          |						{
-         |							"charset": "us-ascii",
+         |							"charset": "US-ASCII",
          |							"headers": [{
          |									"name": "Content-Type",
          |									"value": " application/json; charset=us-ascii"
@@ -4963,13 +5079,130 @@ trait EmailGetMethodContract {
          |						}
          |					],
          |					"subject": "My subject",
-         |					"size": 970
+         |					"size": 1011
          |				}]
          |			},
          |			"c1"
          |		]
          |	]
          |}""".stripMargin)
+  }
+
+  @Test
+  def shouldUseFastViewWithAttachmentMetadataWhenSupportedBodyPropertiesAtAttachmentReadLevel(server: GuiceJamesServer): Unit = {
+    val path = MailboxPath.inbox(BOB)
+    val mailboxId = server.getProbe(classOf[MailboxProbeImpl]).createMailbox(path)
+    val messageId: MessageId = server.getProbe(classOf[MailboxProbeImpl])
+      .appendMessage(BOB.asString, path, AppendCommand.from(
+        ClassLoaderUtils.getSystemResourceAsSharedStream("eml/inlined-mixed.eml")))
+      .getMessageId
+
+    val request =
+      s"""{
+         |	"using": [
+         |		"urn:ietf:params:jmap:core",
+         |		"urn:ietf:params:jmap:mail"
+         |	],
+         |	"methodCalls": [
+         |		[
+         |			"Email/get",
+         |			{
+         |				"accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+         |				"ids": ["${messageId.serialize}"],
+         |				"properties": [
+         |					"id",
+         |					"subject",
+         |					"from",
+         |					"to",
+         |					"cc",
+         |					"bcc",
+         |					"keywords",
+         |					"size",
+         |					"receivedAt",
+         |					"sentAt",
+         |					"preview",
+         |					"hasAttachment",
+         |					"attachments",
+         |					"replyTo",
+         |					"mailboxIds"
+         |				],
+         |				"fetchTextBodyValues": true,
+         |				"bodyProperties": ["size", "name", "type", "charset", "disposition", "cid"]
+         |			},
+         |			"c1"
+         |		]
+         |	]
+         |}""".stripMargin
+
+    Awaitility.await().atMost(Duration.ofSeconds(5))
+      .untilAsserted(() => {
+        val response = `given`
+          .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
+          .body(request)
+        .when
+          .post
+        .`then`
+          .statusCode(SC_OK)
+          .contentType(JSON)
+          .extract
+          .body
+          .asString
+
+        assertThatJson(response)
+          .whenIgnoringPaths("methodResponses[0][1].state", "methodResponses[0][1].list[0].attachments[0].blobId", "methodResponses[0][1].list[0].attachments[1].blobId")
+          .isEqualTo(
+            s"""{
+               |	"sessionState": "${SESSION_STATE.value}",
+               |	"methodResponses": [
+               |		[
+               |			"Email/get",
+               |			{
+               |				"accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+               |				"notFound": [],
+               |				"list": [{
+               |					"preview": "Main test message...",
+               |					"to": [{
+               |						"name": "Alice",
+               |						"email": "alice@domain.tld"
+               |					}],
+               |					"id": "${messageId.serialize}",
+               |					"mailboxIds": {
+               |						"${mailboxId.serialize}": true
+               |					},
+               |					"from": [{
+               |						"name": "Bob",
+               |						"email": "bob@domain.tld"
+               |					}],
+               |					"keywords": {
+               |
+               |					},
+               |					"receivedAt": "$${json-unit.ignore}",
+               |					"sentAt": "$${json-unit.ignore}",
+               |					"hasAttachment": true,
+               |					"attachments": [{
+               |							"charset": "US-ASCII",
+               |							"disposition": "attachment",
+               |							"size": 102,
+               |							"name": "yyy.txt",
+               |							"type": "application/json"
+               |						},
+               |						{
+               |							"charset": "US-ASCII",
+               |							"disposition": "attachment",
+               |							"size": 102,
+               |							"name": "xxx.txt",
+               |							"type": "application/json"
+               |						}
+               |					],
+               |					"subject": "My subject",
+               |					"size": 1011
+               |				}]
+               |			},
+               |			"c1"
+               |		]
+               |	]
+               |}""".stripMargin)
+      })
   }
 
   @Test
@@ -5032,7 +5265,88 @@ trait EmailGetMethodContract {
 
     val blob = `given`
       .basePath("")
+      .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER).log().all()
+    .when
+      .get(s"/download/29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6/$blobId")
+    .`then`
+      .statusCode(SC_OK)
+      .contentType("application/json")
+      .extract
+      .body
+      .asString
+
+    val expectedBlob: String =
+      """[
+        |    {
+        |        "Id": "2xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        |    }
+        |]""".stripMargin
+
+    assertThat(new ByteArrayInputStream(blob.getBytes(StandardCharsets.UTF_8)))
+      .hasContent(expectedBlob)
+  }
+
+  @Test
+  def shouldBeAbleToDownloadAttachmentBaseOnFastViewWithAttachmentsMetadataResultWithReadLevelFll(server: GuiceJamesServer): Unit = {
+    val path = MailboxPath.inbox(BOB)
+    server.getProbe(classOf[MailboxProbeImpl]).createMailbox(path)
+    val messageId: MessageId = server.getProbe(classOf[MailboxProbeImpl])
+      .appendMessage(BOB.asString, path, AppendCommand.from(
+        ClassLoaderUtils.getSystemResourceAsSharedStream("eml/inlined-single-attachment.eml")))
+      .getMessageId
+
+    val request =
+      s"""{
+         |	"using": [
+         |		"urn:ietf:params:jmap:core",
+         |		"urn:ietf:params:jmap:mail"
+         |	],
+         |	"methodCalls": [
+         |		[
+         |			"Email/get",
+         |			{
+         |				"accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+         |				"ids": ["${messageId.serialize}"],
+         |				"properties": [
+         |					"id",
+         |					"subject",
+         |					"from",
+         |					"to",
+         |					"cc",
+         |					"bcc",
+         |					"keywords",
+         |					"size",
+         |					"receivedAt",
+         |					"sentAt",
+         |					"preview",
+         |					"hasAttachment",
+         |					"attachments",
+         |					"replyTo",
+         |					"mailboxIds"
+         |				],
+         |				"fetchTextBodyValues": true,
+         |				"bodyProperties": ["blobId", "partId", "size", "name", "type", "charset", "disposition", "cid"]
+         |			},
+         |			"c1"
+         |		]
+         |	]
+         |}""".stripMargin
+
+    val blobId = `given`
       .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
+      .body(request)
+    .when
+      .post
+    .`then`
+      .statusCode(SC_OK)
+      .contentType(JSON)
+      .extract
+      .jsonPath()
+      .getString("methodResponses[0][1].list[0].attachments[0].blobId")
+
+    val blob = `given`
+      .basePath("")
+      .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER).log().all()
     .when
       .get(s"/download/29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6/$blobId")
     .`then`
@@ -5801,7 +6115,7 @@ trait EmailGetMethodContract {
          |                                "size": 398,
          |                                "name": "text2",
          |                                "type": "application/vnd.ms-publisher",
-         |                                "charset": "us-ascii",
+         |                                "charset": "US-ASCII",
          |                                "disposition": "attachment"
          |                            },
          |                            {
@@ -5877,7 +6191,7 @@ trait EmailGetMethodContract {
          |                                "size": 19,
          |                                "name": "avertissement.txt",
          |                                "type": "text/plain",
-         |                                "charset": "iso-8859-1",
+         |                                "charset": "ISO-8859-1",
          |                                "disposition": "inline",
          |                                "cid": "14672787885774e5c4d4cee471352039@linagora.com"
          |                            }
@@ -8004,7 +8318,7 @@ trait EmailGetMethodContract {
       .asString()
 
     assertThatJson(response)
-      .withOptions(new Options(Option.IGNORING_ARRAY_ORDER))
+      .withOptions(Option.IGNORING_ARRAY_ORDER)
       .inPath("methodResponses[0][1]")
       .isEqualTo(
         s"""{

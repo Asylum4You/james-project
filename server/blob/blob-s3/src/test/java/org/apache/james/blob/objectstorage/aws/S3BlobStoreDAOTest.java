@@ -20,10 +20,13 @@ package org.apache.james.blob.objectstorage.aws;
 
 import static org.apache.james.blob.api.BlobStoreDAOFixture.ELEVEN_KILOBYTES;
 import static org.apache.james.blob.api.BlobStoreDAOFixture.TEST_BUCKET_NAME;
+import static org.apache.james.blob.objectstorage.aws.JamesS3MetricPublisher.DEFAULT_S3_METRICS_PREFIX;
 import static org.apache.james.blob.objectstorage.aws.S3BlobStoreConfiguration.UPLOAD_RETRY_EXCEPTION_PREDICATE;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Optional;
@@ -31,7 +34,11 @@ import java.util.stream.IntStream;
 
 import org.apache.james.blob.api.BlobStoreDAO;
 import org.apache.james.blob.api.BlobStoreDAOContract;
+import org.apache.james.blob.api.BucketName;
+import org.apache.james.blob.api.ObjectNotFoundException;
 import org.apache.james.blob.api.TestBlobId;
+import org.apache.james.metrics.api.NoopGaugeRegistry;
+import org.apache.james.metrics.tests.RecordingMetricFactory;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
@@ -46,7 +53,10 @@ import reactor.util.retry.Retry;
 
 @ExtendWith(DockerAwsS3Extension.class)
 public class S3BlobStoreDAOTest implements BlobStoreDAOContract {
+    private static final BucketName fallbackBucket = BucketName.of("fallback");
+
     private static S3BlobStoreDAO testee;
+    private static S3ClientFactory s3ClientFactory;
 
     @BeforeAll
     static void setUp(DockerAwsS3Container dockerAwsS3) {
@@ -61,9 +71,14 @@ public class S3BlobStoreDAOTest implements BlobStoreDAOContract {
             .region(dockerAwsS3.dockerAwsS3().region())
             .uploadRetrySpec(Optional.of(Retry.backoff(3, java.time.Duration.ofSeconds(1))
                 .filter(UPLOAD_RETRY_EXCEPTION_PREDICATE)))
+            .defaultBucketName(BucketName.DEFAULT)
+            .fallbackBucketName(Optional.of(fallbackBucket))
             .build();
 
-        testee = new S3BlobStoreDAO(s3Configuration, new TestBlobId.Factory());
+        s3ClientFactory = new S3ClientFactory(s3Configuration, () -> new JamesS3MetricPublisher(new RecordingMetricFactory(), new NoopGaugeRegistry(),
+            DEFAULT_S3_METRICS_PREFIX));
+
+        testee = new S3BlobStoreDAO(s3ClientFactory, s3Configuration, new TestBlobId.Factory(), S3RequestOption.DEFAULT);
     }
 
     @AfterEach
@@ -73,7 +88,7 @@ public class S3BlobStoreDAOTest implements BlobStoreDAOContract {
 
     @AfterAll
     static void tearDownClass() {
-        testee.close();
+        s3ClientFactory.close();
     }
 
     @Override
@@ -112,5 +127,74 @@ public class S3BlobStoreDAOTest implements BlobStoreDAOContract {
                     throw new RuntimeException(e);
                 }
             })).doesNotThrowAnyException();
+    }
+
+    @Test
+    void readShouldFallbackToDefinedBucketWhenFailingOnDefaultOne() {
+        BlobStoreDAO store = testee();
+
+        TestBlobId blobId = new TestBlobId("id");
+        Mono.from(store.save(fallbackBucket, blobId, ByteSource.wrap(ELEVEN_KILOBYTES))).block();
+
+        InputStream read = store.read(BucketName.DEFAULT, blobId);
+
+        assertThat(read).hasSameContentAs(new ByteArrayInputStream(ELEVEN_KILOBYTES));
+    }
+
+    @Test
+    void readReactiveShouldFallbackToDefinedBucketWhenFailingOnDefaultOne() {
+        BlobStoreDAO store = testee();
+
+        TestBlobId blobId = new TestBlobId("id");
+        Mono.from(store.save(fallbackBucket, blobId, ByteSource.wrap(ELEVEN_KILOBYTES))).block();
+
+        InputStream read = Mono.from(store.readReactive(BucketName.DEFAULT, blobId)).block();
+
+        assertThat(read).hasSameContentAs(new ByteArrayInputStream(ELEVEN_KILOBYTES));
+    }
+
+    @Test
+    void readBytesShouldFallbackToDefinedBucketWhenFailingOnDefaultOne() {
+        BlobStoreDAO store = testee();
+
+        TestBlobId blobId = new TestBlobId("id");
+        Mono.from(store.save(fallbackBucket, blobId, ByteSource.wrap(ELEVEN_KILOBYTES))).block();
+
+        byte[] bytes = Mono.from(store.readBytes(BucketName.DEFAULT, blobId)).block();
+
+        assertThat(bytes).isEqualTo(ELEVEN_KILOBYTES);
+    }
+
+    @Test
+    void shouldNotReadOnFallbackBucketWhenNotReadingOnDefaultOne() {
+        BlobStoreDAO store = testee();
+
+        TestBlobId blobId = new TestBlobId("id");
+        Mono.from(store.save(TEST_BUCKET_NAME, blobId, ByteSource.wrap(ELEVEN_KILOBYTES))).block();
+
+        assertThatThrownBy(() -> store.read(BucketName.DEFAULT, blobId))
+            .isExactlyInstanceOf(ObjectNotFoundException.class);
+    }
+
+    @Test
+    void shouldNotReadReactiveOnFallbackBucketWhenNotReadingOnDefaultOne() {
+        BlobStoreDAO store = testee();
+
+        TestBlobId blobId = new TestBlobId("id");
+        Mono.from(store.save(TEST_BUCKET_NAME, blobId, ByteSource.wrap(ELEVEN_KILOBYTES))).block();
+
+        assertThatThrownBy(() -> Mono.from(store.readReactive(BucketName.DEFAULT, blobId)).block())
+            .isExactlyInstanceOf(ObjectNotFoundException.class);
+    }
+
+    @Test
+    void shouldNotReadBytesOnFallbackBucketWhenNotReadingOnDefaultOne() {
+        BlobStoreDAO store = testee();
+
+        TestBlobId blobId = new TestBlobId("id");
+        Mono.from(store.save(TEST_BUCKET_NAME, blobId, ByteSource.wrap(ELEVEN_KILOBYTES))).block();
+
+        assertThatThrownBy(() -> Mono.from(store.readBytes(BucketName.DEFAULT, blobId)).block())
+            .isExactlyInstanceOf(ObjectNotFoundException.class);
     }
 }

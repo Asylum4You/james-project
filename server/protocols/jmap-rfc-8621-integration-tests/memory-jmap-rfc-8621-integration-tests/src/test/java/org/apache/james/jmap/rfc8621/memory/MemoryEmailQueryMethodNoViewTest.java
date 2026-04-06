@@ -56,13 +56,15 @@ public class MemoryEmailQueryMethodNoViewTest implements EmailQueryMethodContrac
     @Test
     @Override
     @Disabled("JAMES-3377 Not supported for in-memory test")
-    public void emailQueryFilterByTextShouldIgnoreMarkupsInHtmlBody(GuiceJamesServer server) {}
+    public void emailQueryFilterByTextShouldIgnoreMarkupsInHtmlBody(GuiceJamesServer server) {
+    }
 
     @Test
     @Override
     @Disabled("JAMES-3377 Not supported for in-memory test" +
         "In memory do not attempt message parsing a performs a full match on the raw message content")
-    public void emailQueryFilterByTextShouldIgnoreAttachmentContent(GuiceJamesServer server) {}
+    public void emailQueryFilterByTextShouldIgnoreAttachmentContent(GuiceJamesServer server) {
+    }
 
     @Override
     @Tag(Unstable.TAG)
@@ -76,5 +78,28 @@ public class MemoryEmailQueryMethodNoViewTest implements EmailQueryMethodContrac
         EmailQueryMethodContract.super.shouldListMailsReceivedAfterADate(server);
     }
 
+    @Test
+    @Override
+    @Disabled("JAMES-3340 Not supported for no email query view")
+    public void inMailboxAfterSortedByReceivedAtShouldCollapseThreads(GuiceJamesServer server) {
+    }
+
+    @Test
+    @Override
+    @Disabled("JAMES-3340 Not supported for no email query view")
+    public void inMailboxSortedByReceivedAtShouldCollapseThreads(GuiceJamesServer server) {
+    }
+
+    @Test
+    @Override
+    @Disabled("JAMES-3340 Not supported for no email query view")
+    public void inMailboxSortedBySentAtShouldCollapseThreads(GuiceJamesServer server) {
+    }
+
+    @Test
+    @Override
+    @Disabled("JAMES-3340 Not supported for no email query view")
+    public void inMailboxBeforeSortedByReceivedAtShouldCollapseThreads(GuiceJamesServer server) {
+    }
 
 }

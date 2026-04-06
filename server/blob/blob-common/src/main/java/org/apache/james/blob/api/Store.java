@@ -34,6 +34,7 @@ import org.reactivestreams.Publisher;
 
 import com.github.fge.lambdas.Throwing;
 import com.google.common.base.Optional;
+import com.google.common.base.Preconditions;
 import com.google.common.hash.HashCode;
 import com.google.common.hash.HashFunction;
 import com.google.common.io.ByteProcessor;
@@ -90,6 +91,7 @@ public interface Store<T, I> {
 
         @Override
         public Mono<I> save(T t) {
+            Preconditions.checkNotNull(t);
             return Flux.fromStream(encoder.encode(t))
                 .flatMapSequential(this::saveEntry)
                 .collectMap(Tuple2::getT1, Tuple2::getT2)
@@ -111,7 +113,8 @@ public interface Store<T, I> {
                 // Critical to correctly propagate errors.
                 // Replacing by `map` would cause the error not to be catch downstream. No idea why, failed to reproduce with a test.
                 // Impact: unacknowledged messages for RabbitMQ mailQueue that eventually piles up to interruption of service.
-                .flatMap(e -> Mono.fromCallable(() -> decoder.decode(e))
+                .flatMap(streams -> Mono.fromCallable(() -> decoder.decode(streams))
+                    .doOnError(e -> streams.forEach(Throwing.biConsumer((blobType, byteSource) -> byteSource.close())))
                     .subscribeOn(ReactorUtils.BLOCKING_CALL_WRAPPER));
         }
 
@@ -121,11 +124,12 @@ public interface Store<T, I> {
                     FileBackedOutputStream out = new FileBackedOutputStream(FILE_THRESHOLD);
                     try {
                         long size = in.transferTo(out);
+                        out.flush();
                         return Mono.just(new DelegateCloseableByteSource(out.asByteSource(), () -> {
                             out.reset();
                             out.close();
                         }, size));
-                    } catch (Exception e) {
+                    } catch (Throwable e) {
                         out.reset();
                         out.close();
                         throw e;

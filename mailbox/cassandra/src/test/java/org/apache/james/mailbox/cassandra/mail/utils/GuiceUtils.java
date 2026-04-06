@@ -27,12 +27,12 @@ import org.apache.james.backends.cassandra.init.CassandraTypesProvider;
 import org.apache.james.backends.cassandra.init.configuration.CassandraConfiguration;
 import org.apache.james.blob.api.BlobId;
 import org.apache.james.blob.api.BlobStore;
-import org.apache.james.blob.api.HashBlobId;
+import org.apache.james.blob.api.PlainBlobId;
 import org.apache.james.blob.cassandra.CassandraBlobStoreFactory;
 import org.apache.james.eventsourcing.Event;
+import org.apache.james.eventsourcing.eventstore.EventNestedTypes;
 import org.apache.james.eventsourcing.eventstore.EventStore;
 import org.apache.james.eventsourcing.eventstore.cassandra.CassandraEventStore;
-import org.apache.james.eventsourcing.eventstore.EventNestedTypes;
 import org.apache.james.eventsourcing.eventstore.dto.EventDTO;
 import org.apache.james.eventsourcing.eventstore.dto.EventDTOModule;
 import org.apache.james.json.DTO;
@@ -47,6 +47,7 @@ import org.apache.james.mailbox.cassandra.mail.CassandraUidProvider;
 import org.apache.james.mailbox.cassandra.mail.eventsourcing.acl.ACLModule;
 import org.apache.james.mailbox.model.MessageId;
 import org.apache.james.mailbox.store.BatchSizes;
+import org.apache.james.mailbox.store.mail.AttachmentIdAssignationStrategy;
 import org.apache.james.mailbox.store.mail.ModSeqProvider;
 import org.apache.james.mailbox.store.mail.UidProvider;
 import org.apache.james.metrics.tests.RecordingMetricFactory;
@@ -85,9 +86,10 @@ public class GuiceUtils {
             binder -> binder.bind(MessageId.Factory.class).toInstance(messageIdFactory),
             binder -> binder.bind(BatchSizes.class).toInstance(BatchSizes.defaultValues()),
             binder -> binder.bind(UidProvider.class).to(CassandraUidProvider.class),
+            binder -> binder.bind(AttachmentIdAssignationStrategy.class).to(AttachmentIdAssignationStrategy.Default.class),
             binder -> binder.bind(ModSeqProvider.class).to(CassandraModSeqProvider.class),
             binder -> binder.bind(ACLMapper.class).to(CassandraACLMapper.class),
-            binder -> binder.bind(BlobId.Factory.class).toInstance(new HashBlobId.Factory()),
+            binder -> binder.bind(BlobId.Factory.class).toInstance(new PlainBlobId.Factory()),
             binder -> binder.bind(BlobStore.class).toProvider(() -> CassandraBlobStoreFactory.forTesting(session, new RecordingMetricFactory()).passthrough()),
             binder -> binder.bind(CqlSession.class).toInstance(session),
             binder -> Multibinder.newSetBinder(binder, new TypeLiteral<EventDTOModule<? extends Event, ? extends EventDTO>>() {})

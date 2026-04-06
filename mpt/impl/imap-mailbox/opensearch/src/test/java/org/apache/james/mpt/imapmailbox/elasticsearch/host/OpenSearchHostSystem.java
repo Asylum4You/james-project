@@ -45,7 +45,7 @@ import org.apache.james.mailbox.opensearch.MailboxOpenSearchConstants;
 import org.apache.james.mailbox.opensearch.OpenSearchMailboxConfiguration;
 import org.apache.james.mailbox.opensearch.events.OpenSearchListeningMessageSearchIndex;
 import org.apache.james.mailbox.opensearch.json.MessageToOpenSearchJson;
-import org.apache.james.mailbox.opensearch.query.CriterionConverter;
+import org.apache.james.mailbox.opensearch.query.DefaultCriterionConverter;
 import org.apache.james.mailbox.opensearch.query.QueryConverter;
 import org.apache.james.mailbox.opensearch.search.OpenSearchSearcher;
 import org.apache.james.mailbox.store.StoreMailboxManager;
@@ -104,11 +104,12 @@ public class OpenSearchHostSystem extends JamesImapHostSystem {
                 ImmutableSet.of(),
                 new OpenSearchIndexer(client,
                     MailboxOpenSearchConstants.DEFAULT_MAILBOX_WRITE_ALIAS),
-                new OpenSearchSearcher(client, new QueryConverter(new CriterionConverter()), OpenSearchSearcher.DEFAULT_SEARCH_SIZE,
+                new OpenSearchSearcher(client, new QueryConverter(new DefaultCriterionConverter()), OpenSearchSearcher.DEFAULT_SEARCH_SIZE,
                     MailboxOpenSearchConstants.DEFAULT_MAILBOX_READ_ALIAS, routingKeyFactory),
                 new MessageToOpenSearchJson(new DefaultTextExtractor(), ZoneId.of("Europe/Paris"), IndexAttachments.YES, IndexHeaders.YES),
                 preInstanciationStage.getSessionProvider(), routingKeyFactory, messageIdFactory,
-                OpenSearchMailboxConfiguration.builder().build(), new RecordingMetricFactory()))
+                OpenSearchMailboxConfiguration.builder().build(), new RecordingMetricFactory(),
+                ImmutableSet.of()))
             .noPreDeletionHooks()
             .storeQuotaManager()
             .build();

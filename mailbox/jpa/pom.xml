@@ -23,7 +23,7 @@
     <parent>
         <groupId>org.apache.james</groupId>
         <artifactId>apache-james-mailbox</artifactId>
-        <version>3.9.0-SNAPSHOT</version>
+        <version>3.10.0-SNAPSHOT</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
 
@@ -119,8 +119,8 @@
             <scope>test</scope>
         </dependency>
         <dependency>
-            <groupId>org.apache.derby</groupId>
-            <artifactId>derby</artifactId>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>
@@ -169,7 +169,7 @@
                     <dependency>
                         <groupId>org.apache.xbean</groupId>
                         <artifactId>xbean-asm9-shaded</artifactId>
-                        <version>4.23</version>
+                        <version>4.27</version>
                     </dependency>
                 </dependencies>
                 <executions>

@@ -23,8 +23,8 @@ import java.time.Duration;
 
 import org.apache.james.backends.cassandra.CassandraCluster;
 import org.apache.james.backends.cassandra.DockerCassandraExtension;
-import org.apache.james.backends.cassandra.components.CassandraModule;
-import org.apache.james.backends.cassandra.versions.CassandraSchemaVersionModule;
+import org.apache.james.backends.cassandra.components.CassandraDataDefinition;
+import org.apache.james.backends.cassandra.versions.CassandraSchemaVersionDataDefinition;
 import org.apache.james.util.Host;
 import org.apache.james.util.concurrency.ConcurrentTestRunner;
 import org.apache.james.util.concurrency.ConcurrentTestRunner.ConcurrentOperation;
@@ -38,20 +38,20 @@ import com.datastax.oss.driver.api.core.type.DataTypes;
 class CassandraTableManagerConcurrentTest {
     private static final String TABLE_NAME = "tablename";
 
-    public static final CassandraModule MODULE = CassandraModule.aggregateModules(
-            CassandraSchemaVersionModule.MODULE,
-            CassandraModule.table(TABLE_NAME)
-                .comment("Testing table")
-                .statement(statement -> types -> statement
-                        .withPartitionKey("id", DataTypes.TIMEUUID)
-                        .withClusteringColumn("clustering", DataTypes.BIGINT))
-                .build());
+    public static final CassandraDataDefinition MODULE = CassandraDataDefinition.aggregateModules(
+        CassandraSchemaVersionDataDefinition.MODULE,
+        CassandraDataDefinition.table(TABLE_NAME)
+            .comment("Testing table")
+            .statement(statement -> types -> statement
+                .withPartitionKey("id", DataTypes.TIMEUUID)
+                .withClusteringColumn("clustering", DataTypes.BIGINT))
+            .build());
 
     @RegisterExtension
     static DockerCassandraExtension cassandraExtension = new DockerCassandraExtension();
 
     @Test
-    void initializeTableShouldCreateAllTheTables() throws Exception{
+    void initializeTableShouldCreateAllTheTables() throws Exception {
         Host cassandraHost = cassandraExtension.getDockerCassandra().getHost();
         ConcurrentOperation concurrentOperation = (a, b) -> CassandraCluster.create(MODULE, cassandraHost);
 

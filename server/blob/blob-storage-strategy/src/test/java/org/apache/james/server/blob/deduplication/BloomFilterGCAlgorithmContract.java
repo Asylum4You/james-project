@@ -39,8 +39,8 @@ import org.apache.james.blob.api.BlobReferenceSource;
 import org.apache.james.blob.api.BlobStore;
 import org.apache.james.blob.api.BlobStoreDAO;
 import org.apache.james.blob.api.BucketName;
-import org.apache.james.blob.api.HashBlobId;
 import org.apache.james.blob.api.ObjectNotFoundException;
+import org.apache.james.blob.api.PlainBlobId;
 import org.apache.james.server.blob.deduplication.BloomFilterGCAlgorithm.Context;
 import org.apache.james.server.blob.deduplication.BloomFilterGCAlgorithm.Context.Snapshot;
 import org.apache.james.task.Task;
@@ -57,7 +57,7 @@ import reactor.core.publisher.Mono;
 
 public interface BloomFilterGCAlgorithmContract {
 
-    HashBlobId.Factory BLOB_ID_FACTORY = new HashBlobId.Factory();
+    PlainBlobId.Factory BLOB_ID_FACTORY = new PlainBlobId.Factory();
     ZonedDateTime NOW = ZonedDateTime.parse("2015-10-30T16:12:00Z");
     BucketName DEFAULT_BUCKET = BucketName.of("default");
     GenerationAwareBlobId.Configuration GENERATION_AWARE_BLOB_ID_CONFIGURATION = GenerationAwareBlobId.Configuration.DEFAULT;
@@ -235,7 +235,7 @@ public interface BloomFilterGCAlgorithmContract {
     default void gcShouldHandlerErrorWhenException() {
         when(BLOB_REFERENCE_SOURCE.listReferencedBlobs()).thenReturn(Flux.empty());
         BlobStoreDAO blobStoreDAO = mock(BlobStoreDAO.class);
-        BlobId blobId = GENERATION_AWARE_BLOB_ID_FACTORY.randomId();
+        BlobId blobId = GENERATION_AWARE_BLOB_ID_FACTORY.of(UUID.randomUUID().toString());
         when(blobStoreDAO.listBlobs(DEFAULT_BUCKET)).thenReturn(Flux.just(blobId));
         when(blobStoreDAO.delete(ArgumentMatchers.eq(DEFAULT_BUCKET), any(Collection.class))).thenReturn(Mono.error(new RuntimeException("test")));
 

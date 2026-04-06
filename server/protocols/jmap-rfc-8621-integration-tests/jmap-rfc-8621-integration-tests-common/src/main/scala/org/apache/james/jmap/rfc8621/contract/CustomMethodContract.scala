@@ -35,6 +35,7 @@ import jakarta.inject.{Inject, Named}
 import net.javacrumbs.jsonunit.assertj.JsonAssertions.assertThatJson
 import org.apache.http.HttpStatus.SC_OK
 import org.apache.james.GuiceJamesServer
+import org.apache.james.core.Username
 import org.apache.james.events.Event.EventId
 import org.apache.james.events.EventBus
 import org.apache.james.jmap.api.model.Size.Size
@@ -107,7 +108,7 @@ object CustomMethodContract {
       |    "urn:apache:james:params:jmap:mail:identity:sortorder": {},
       |    "urn:apache:james:params:jmap:delegation": {},
       |    "$CUSTOM": {"custom": "property"},
-      |    "urn:apache:james:params:jmap:mail:shares": {},
+      |    "urn:apache:james:params:jmap:mail:shares": {"subaddressingSupported":true},
       |    "urn:ietf:params:jmap:vacationresponse":{},
       |    "urn:ietf:params:jmap:mdn":{}
       |  },
@@ -147,7 +148,7 @@ object CustomMethodContract {
       |        "urn:ietf:params:jmap:quota": {},
       |        "urn:apache:james:params:jmap:mail:identity:sortorder": {},
       |        "urn:apache:james:params:jmap:delegation": {},
-      |        "urn:apache:james:params:jmap:mail:shares": {},
+      |        "urn:apache:james:params:jmap:mail:shares": {"subaddressingSupported":true},
       |        "$CUSTOM": {"custom": "property"},
       |        "urn:ietf:params:jmap:vacationresponse":{},
       |        "urn:ietf:params:jmap:mdn":{}
@@ -184,7 +185,7 @@ case class CustomCapabilityProperties() extends CapabilityProperties {
 case class CustomCapability(properties: CustomCapabilityProperties = CustomCapabilityProperties(), identifier: CapabilityIdentifier = CUSTOM) extends Capability
 
 case object CustomCapabilityFactory extends CapabilityFactory {
-  override def create(urlPrefixes: UrlPrefixes): Capability = CustomCapability()
+  override def create(urlPrefixes: UrlPrefixes, username: Username): Capability = CustomCapability()
 
   override def id(): CapabilityIdentifier = CUSTOM
 }
@@ -221,11 +222,11 @@ case object CustomBlob extends Blob {
 }
 
 class CustomBlobResolver extends BlobResolver {
-  override def resolve(blobId: org.apache.james.jmap.mail.BlobId, mailboxSession: MailboxSession): BlobResolutionResult =
+  override def resolve(blobId: org.apache.james.jmap.mail.BlobId, mailboxSession: MailboxSession): SMono[BlobResolutionResult] =
     if (blobId.equals(CustomBlob.blobId)) {
-      Applicable(SMono.just(CustomBlob))
+      SMono.just(Applicable(SMono.just(CustomBlob)))
     } else {
-      NonApplicable
+      SMono.just(NonApplicable)
     }
 }
 

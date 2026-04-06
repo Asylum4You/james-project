@@ -1,0 +1,9 @@
+= Distributed James Server &mdash; mailrepositorystore.xml
+
+:sample-configuration-prefix-url: https://github.com/apache/james-project/blob/master/server/apps/distributed-app/sample-configuration
+:pages-path: distributed
+:server-name: Distributed James Server
+:mailet-repository-path-prefix: cassandra
+:mail-repository-protocol: cassandra
+:mail-repository-class: org.apache.james.mailrepository.cassandra.CassandraMailRepository
+include::partial$configure/mailrepositorystore.adoc[]

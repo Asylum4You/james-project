@@ -19,8 +19,10 @@
 
 package org.apache.james.mailbox.lucene.search;
 
+import java.net.URISyntaxException;
 import java.util.List;
 
+import org.apache.james.mailbox.extractor.TextExtractor;
 import org.apache.james.mailbox.inmemory.InMemoryId;
 import org.apache.james.mailbox.inmemory.InMemoryMessageId;
 import org.apache.james.mailbox.inmemory.manager.InMemoryIntegrationResources;
@@ -28,13 +30,34 @@ import org.apache.james.mailbox.model.MailboxId;
 import org.apache.james.mailbox.model.MessageId;
 import org.apache.james.mailbox.model.SearchQuery;
 import org.apache.james.mailbox.store.search.AbstractMessageSearchIndexTest;
-import org.apache.lucene.store.RAMDirectory;
+import org.apache.james.mailbox.tika.TikaConfiguration;
+import org.apache.james.mailbox.tika.TikaExtension;
+import org.apache.james.mailbox.tika.TikaHttpClientImpl;
+import org.apache.james.mailbox.tika.TikaTextExtractor;
+import org.apache.james.metrics.tests.RecordingMetricFactory;
+import org.apache.lucene.store.ByteBuffersDirectory;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 
 import com.github.fge.lambdas.Throwing;
 
 class LuceneMessageSearchIndexTest extends AbstractMessageSearchIndexTest {
+    @RegisterExtension
+    static TikaExtension tika = new TikaExtension();
+
+    static TextExtractor textExtractor;
+
+    @BeforeAll
+    static void setUpClass() throws URISyntaxException {
+        textExtractor = new TikaTextExtractor(new RecordingMetricFactory(),
+            new TikaHttpClientImpl(TikaConfiguration.builder()
+                .host(tika.getIp())
+                .port(tika.getPort())
+                .timeoutInMillis(tika.getTimeoutInMillis())
+                .build()));
+    }
 
     @Override
     protected void awaitMessageCount(List<MailboxId> mailboxIds, SearchQuery query, long messageCount) {
@@ -49,9 +72,9 @@ class LuceneMessageSearchIndexTest extends AbstractMessageSearchIndexTest {
             .defaultAnnotationLimits()
             .defaultMessageParser()
             .listeningSearchIndex(Throwing.function(preInstanciationStage -> new LuceneMessageSearchIndex(
-                preInstanciationStage.getMapperFactory(), new InMemoryId.Factory(), new RAMDirectory(),
+                preInstanciationStage.getMapperFactory(), new InMemoryId.Factory(), new ByteBuffersDirectory(),
                 new InMemoryMessageId.Factory(),
-                preInstanciationStage.getSessionProvider())))
+                preInstanciationStage.getSessionProvider(), textExtractor)))
             .noPreDeletionHooks()
             .storeQuotaManager()
             .build();
@@ -71,6 +94,11 @@ class LuceneMessageSearchIndexTest extends AbstractMessageSearchIndexTest {
     @Override
     protected MessageId initOtherBasedMessageId() {
         return InMemoryMessageId.of(1000);
+    }
+
+    @Override
+    protected boolean supportsCollapseThreads() {
+        return true;
     }
 
     @Disabled("JAMES-1799: ignoring failing test after generalizing OpenSearch test suite to other mailbox search backends")

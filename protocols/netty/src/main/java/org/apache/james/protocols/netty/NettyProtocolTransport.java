@@ -24,7 +24,9 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetSocketAddress;
 import java.nio.channels.FileChannel;
+import java.time.Duration;
 import java.util.Optional;
+import java.util.concurrent.TimeUnit;
 
 import javax.net.ssl.SSLEngine;
 import javax.net.ssl.SSLSession;
@@ -104,10 +106,15 @@ public class NettyProtocolTransport extends AbstractProtocolTransport {
 
     @Override
     protected void writeToClient(byte[] bytes, ProtocolSession session, boolean startTLS) {
-        channel.writeAndFlush(Unpooled.wrappedBuffer(bytes));
-
-        if (startTLS) {
-            prepareStartTLS();
+        if (!startTLS) {
+            channel.writeAndFlush(Unpooled.wrappedBuffer(bytes));
+        } else {
+            channel.eventLoop().execute(() -> {
+                channel.config().setAutoRead(false);
+                channel.writeAndFlush(Unpooled.wrappedBuffer(bytes));
+                prepareStartTLS();
+                channel.config().setAutoRead(true);
+            });
         }
     }
 
@@ -179,4 +186,8 @@ public class NettyProtocolTransport extends AbstractProtocolTransport {
         
     }
 
+    @Override
+    public void schedule(Runnable runnable, Duration waitDelay) {
+        channel.eventLoop().schedule(runnable, waitDelay.toMillis(), TimeUnit.MILLISECONDS);
+    }
 }

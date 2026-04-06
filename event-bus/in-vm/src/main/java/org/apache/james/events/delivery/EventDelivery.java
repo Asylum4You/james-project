@@ -22,6 +22,9 @@ package org.apache.james.events.delivery;
 import static org.apache.james.events.delivery.EventDelivery.PermanentFailureHandler.NO_HANDLER;
 import static org.apache.james.events.delivery.EventDelivery.Retryer.NO_RETRYER;
 
+import java.util.List;
+import java.util.stream.Collectors;
+
 import org.apache.james.events.Event;
 import org.apache.james.events.EventDeadLetters;
 import org.apache.james.events.EventListener;
@@ -32,7 +35,6 @@ import org.slf4j.LoggerFactory;
 
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
-import reactor.util.retry.Retry;
 
 public interface EventDelivery {
 
@@ -65,7 +67,17 @@ public interface EventDelivery {
 
     interface Retryer {
 
-        Retryer NO_RETRYER = (executionResult, event) -> executionResult;
+        Retryer NO_RETRYER = new Retryer() {
+            @Override
+            public Mono<Void> doRetry(Mono<Void> executionResult, Event event) {
+                return executionResult;
+            }
+
+            @Override
+            public Mono<Void> doRetry(Mono<Void> executionResult, List<Event> events) {
+                return executionResult;
+            }
+        };
 
         class BackoffRetryer implements Retryer {
 
@@ -86,7 +98,7 @@ public interface EventDelivery {
             @Override
             public Mono<Void> doRetry(Mono<Void> executionResult, Event event) {
                 return executionResult
-                    .retryWhen(Retry.backoff(retryBackoff.getMaxRetries(), retryBackoff.getFirstBackoff()).jitter(retryBackoff.getJitterFactor()).scheduler(Schedulers.parallel()))
+                    .retryWhen(retryBackoff.asReactorRetry().scheduler(Schedulers.parallel()))
                     .doOnError(throwable -> LOGGER.error("listener {} exceeded maximum retry({}) to handle event {}",
                         listener.getClass().getCanonicalName(),
                         retryBackoff.getMaxRetries(),
@@ -94,9 +106,23 @@ public interface EventDelivery {
                         throwable))
                     .then();
             }
+
+            @Override
+            public Mono<Void> doRetry(Mono<Void> executionResult, List<Event> events) {
+                return executionResult
+                    .retryWhen(retryBackoff.asReactorRetry().scheduler(Schedulers.parallel()))
+                    .doOnError(throwable -> LOGGER.error("listener {} exceeded maximum retry({}) to handle event {}",
+                        listener.getClass().getCanonicalName(),
+                        retryBackoff.getMaxRetries(),
+                        events.stream().map(e -> e.getClass().getCanonicalName()).collect(Collectors.joining(",")),
+                        throwable))
+                    .then();
+            }
         }
 
         Mono<Void> doRetry(Mono<Void> executionResult, Event event);
+
+        Mono<Void> doRetry(Mono<Void> executionResult, List<Event> events);
     }
 
     interface PermanentFailureHandler {
@@ -127,6 +153,8 @@ public interface EventDelivery {
     }
 
     Mono<Void> deliver(EventListener.ReactiveEventListener listener, Event event, DeliveryOption option);
+
+    Mono<Void> deliver(EventListener.ReactiveEventListener listener, List<Event> events, DeliveryOption option);
 
     default Mono<Void> deliver(EventListener listener, Event event, DeliveryOption option) {
         return deliver(EventListener.wrapReactive(listener), event, option);

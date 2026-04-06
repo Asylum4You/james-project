@@ -21,12 +21,15 @@ package org.apache.james.managesieveserver.netty;
 
 import java.io.Closeable;
 import java.net.InetSocketAddress;
+import java.util.Optional;
 
+import org.apache.james.jwt.OidcSASLConfiguration;
 import org.apache.james.managesieve.api.Session;
 import org.apache.james.managesieve.api.SessionTerminatedException;
 import org.apache.james.managesieve.transcode.ManageSieveProcessor;
 import org.apache.james.managesieve.transcode.NotEnoughDataException;
 import org.apache.james.managesieve.util.SettableSession;
+import org.apache.james.protocols.api.ProxyInformation;
 import org.apache.james.protocols.netty.Encryption;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -38,6 +41,8 @@ import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.TooLongFrameException;
+import io.netty.handler.codec.haproxy.HAProxyMessage;
+import io.netty.handler.codec.haproxy.HAProxyProxiedProtocol;
 
 @ChannelHandler.Sharable
 public class ManageSieveChannelUpstreamHandler extends ChannelInboundHandlerAdapter {
@@ -48,12 +53,14 @@ public class ManageSieveChannelUpstreamHandler extends ChannelInboundHandlerAdap
     private final ManageSieveProcessor manageSieveProcessor;
     private final Encryption secure;
     private final int maxLineLength;
+    private final Optional<OidcSASLConfiguration> oidcConfiguration;
 
     public ManageSieveChannelUpstreamHandler(
-        ManageSieveProcessor manageSieveProcessor, Encryption secure, int maxLineLength) {
+        ManageSieveProcessor manageSieveProcessor, Encryption secure, int maxLineLength, Optional<OidcSASLConfiguration> oidcConfiguration) {
         this.manageSieveProcessor = manageSieveProcessor;
         this.secure = secure;
         this.maxLineLength = maxLineLength;
+        this.oidcConfiguration = oidcConfiguration;
     }
 
     private boolean isSSL() {
@@ -64,6 +71,10 @@ public class ManageSieveChannelUpstreamHandler extends ChannelInboundHandlerAdap
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
         ChannelManageSieveResponseWriter attachment = ctx.channel().attr(NettyConstants.RESPONSE_WRITER_ATTRIBUTE_KEY).get();
         try (Closeable closeable = ManageSieveMDCContext.from(ctx)) {
+            if (msg instanceof HAProxyMessage) {
+                handleHAProxyMessage(ctx, (HAProxyMessage) msg);
+                return;
+            }
             String request = attachment.cumulate((String) msg);
             if (request.isEmpty() || request.startsWith("\r\n")) {
                 return;
@@ -73,6 +84,7 @@ public class ManageSieveChannelUpstreamHandler extends ChannelInboundHandlerAdap
             }
 
             Session manageSieveSession = ctx.channel().attr(NettyConstants.SESSION_ATTRIBUTE_KEY).get();
+            Session.State statePriorExecution = manageSieveSession.getState();
             String responseString = manageSieveProcessor.handleRequest(manageSieveSession, request);
             attachment.resetCumulation();
             attachment.write(responseString);
@@ -81,9 +93,38 @@ public class ManageSieveChannelUpstreamHandler extends ChannelInboundHandlerAdap
                 manageSieveSession.setSslEnabled(true);
                 manageSieveSession.setState(Session.State.UNAUTHENTICATED);
                 attachment.stopDetectingCommandInjection();
+
+                // RFC-5804 section 1.7 returning capabilities is mandated after STARTTLS
+                String capabilities = manageSieveProcessor.handleRequest(manageSieveSession, "CAPABILITY");
+                attachment.write(capabilities);
+            }
+            if (manageSieveSession.getState() == Session.State.AUTHENTICATED &&
+                statePriorExecution != Session.State.AUTHENTICATED) {
+                // RFC-5804 section 1.7 returning capabilities is mandated after AUTH
+                String capabilities = manageSieveProcessor.handleRequest(manageSieveSession, "CAPABILITY");
+                attachment.write(capabilities);
             }
         } catch (NotEnoughDataException ex) {
             // Do nothing will keep the cumulation
+        }
+    }
+
+    private void handleHAProxyMessage(ChannelHandlerContext ctx, HAProxyMessage haproxyMsg) throws Exception {
+        try {
+            if (haproxyMsg.proxiedProtocol().equals(HAProxyProxiedProtocol.TCP4) || haproxyMsg.proxiedProtocol().equals(HAProxyProxiedProtocol.TCP6)) {
+                ProxyInformation proxyInformation = new ProxyInformation(
+                    new InetSocketAddress(haproxyMsg.sourceAddress(), haproxyMsg.sourcePort()),
+                    new InetSocketAddress(haproxyMsg.destinationAddress(), haproxyMsg.destinationPort()));
+                ctx.channel().attr(NettyConstants.PROXY_INFO).set(proxyInformation);
+
+                LOGGER.info("Connection from {} runs through {} proxy", haproxyMsg.sourceAddress(), haproxyMsg.destinationAddress());
+            } else {
+                throw new IllegalArgumentException("Only TCP4/TCP6 are supported when using PROXY protocol.");
+            }
+
+            super.channelReadComplete(ctx);
+        } finally {
+            haproxyMsg.release();
         }
     }
 
@@ -120,13 +161,14 @@ public class ManageSieveChannelUpstreamHandler extends ChannelInboundHandlerAdap
             LOGGER.info("Connection established from {}", address.getAddress().getHostAddress());
 
             Session session = new SettableSession();
+            session.setOidcSASLConfiguration(this.oidcConfiguration);
             if (isSSL()) {
                 session.setSslEnabled(true);
             }
             ctx.channel().attr(NettyConstants.SESSION_ATTRIBUTE_KEY).set(session);
             ctx.channel().attr(NettyConstants.RESPONSE_WRITER_ATTRIBUTE_KEY).set(new ChannelManageSieveResponseWriter(ctx.channel()));
             super.channelActive(ctx);
-            ctx.channel().attr(NettyConstants.RESPONSE_WRITER_ATTRIBUTE_KEY).get().write(manageSieveProcessor.getAdvertisedCapabilities() + "OK\r\n");
+            ctx.channel().attr(NettyConstants.RESPONSE_WRITER_ATTRIBUTE_KEY).get().write(manageSieveProcessor.getAdvertisedCapabilities(session));
         }
     }
 

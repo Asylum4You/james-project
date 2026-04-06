@@ -112,6 +112,7 @@ class HealthCheckRoutesTest {
     void validateHealthChecksShouldReturnOkWhenHealthChecksAreHealthy() {
         healthChecks.add(healthCheck(Result.healthy(COMPONENT_NAME_1)));
         healthChecks.add(healthCheck(Result.healthy(COMPONENT_NAME_2)));
+
         String healthCheckBody =
             "{\"status\": \"healthy\"," +
             " \"checks\": [" +
@@ -144,6 +145,7 @@ class HealthCheckRoutesTest {
     void validateHealthChecksShouldReturnInternalErrorWhenOneHealthCheckIsUnhealthy() {
         healthChecks.add(healthCheck(Result.unhealthy(COMPONENT_NAME_1, "cause")));
         healthChecks.add(healthCheck(Result.healthy(COMPONENT_NAME_2)));
+
         String healthCheckBody =
             "{\"status\": \"unhealthy\"," +
             " \"checks\": [" +
@@ -176,6 +178,7 @@ class HealthCheckRoutesTest {
     void validateHealthChecksShouldReturnInternalErrorWhenAllHealthChecksAreUnhealthy() {
         healthChecks.add(healthCheck(Result.unhealthy(COMPONENT_NAME_1, "cause")));
         healthChecks.add(healthCheck(Result.unhealthy(COMPONENT_NAME_2, SAMPLE_CAUSE)));
+
         String healthCheckBody =
             "{\"status\": \"unhealthy\"," +
             " \"checks\": [" +
@@ -205,9 +208,10 @@ class HealthCheckRoutesTest {
     }
 
     @Test
-    void validateHealthChecksShouldReturnInternalErrorWhenOneHealthCheckIsDegraded() {
+    void validateHealthChecksShouldReturnOkWhenOneHealthCheckIsDegraded() {
         healthChecks.add(healthCheck(Result.degraded(COMPONENT_NAME_1, "cause")));
         healthChecks.add(healthCheck(Result.healthy(COMPONENT_NAME_2)));
+
         String healthCheckBody =
             "{\"status\": \"degraded\"," +
             " \"checks\": [" +
@@ -237,9 +241,10 @@ class HealthCheckRoutesTest {
     }
 
     @Test
-    void validateHealthChecksShouldReturnInternalErrorWhenAllHealthCheckAreDegraded() {
+    void validateHealthChecksShouldReturnOkWhenAllHealthCheckAreDegraded() {
         healthChecks.add(healthCheck(Result.degraded(COMPONENT_NAME_1, "cause")));
         healthChecks.add(healthCheck(Result.degraded(COMPONENT_NAME_2, "cause")));
+
         String healthCheckBody =
             "{\"status\": \"degraded\"," +
             " \"checks\": [" +
@@ -298,11 +303,247 @@ class HealthCheckRoutesTest {
             .when(Option.IGNORING_ARRAY_ORDER)
             .isEqualTo(healthCheckBody);
     }
+
+    @Test
+    void validateHealthChecksShouldReturn503WhenOneHealthCheckIsDegradedAndStrictModeIsEnabled() {
+        healthChecks.add(healthCheck(Result.degraded(COMPONENT_NAME_1, "cause")));
+        healthChecks.add(healthCheck(Result.healthy(COMPONENT_NAME_2)));
+
+        String healthCheckBody =
+            "{\"status\": \"degraded\"," +
+                " \"checks\": [" +
+                "  {" +
+                "    \"componentName\": \"component-1\"," +
+                "    \"escapedComponentName\": \"component-1\"," +
+                "    \"status\": \"degraded\"," +
+                "    \"cause\": \"cause\"" +
+                "  }," +
+                "  {" +
+                "    \"componentName\": \"component-2\"," +
+                "    \"escapedComponentName\": \"component-2\"," +
+                "    \"status\": \"healthy\"," +
+                "    \"cause\": null" +
+                "}]}";
+
+        String retrieveBody =
+            given()
+                .queryParam("strict")
+            .when()
+                .get()
+            .then()
+                .statusCode(HttpStatus.SERVICE_UNAVAILABLE_503)
+                .extract()
+                .body().asString();
+
+        assertThatJson(retrieveBody)
+            .when(Option.IGNORING_ARRAY_ORDER)
+            .isEqualTo(healthCheckBody);
+    }
+
+    @Test
+    void validateHealthChecksShouldReturn503WhenAllHealthCheckAreDegradedAndStrictModeIsEnabled() {
+        healthChecks.add(healthCheck(Result.degraded(COMPONENT_NAME_1, "cause")));
+        healthChecks.add(healthCheck(Result.degraded(COMPONENT_NAME_2, "cause")));
+
+        String healthCheckBody =
+            "{\"status\": \"degraded\"," +
+                " \"checks\": [" +
+                "  {" +
+                "    \"componentName\": \"component-1\"," +
+                "    \"escapedComponentName\": \"component-1\"," +
+                "    \"status\": \"degraded\"," +
+                "    \"cause\": \"cause\"" +
+                "  }," +
+                "  {" +
+                "    \"componentName\": \"component-2\"," +
+                "    \"escapedComponentName\": \"component-2\"," +
+                "    \"status\": \"degraded\"," +
+                "    \"cause\": \"cause\"" +
+                "}]}";
+
+        String retrieveBody =
+            given()
+                .queryParam("strict")
+            .when()
+                .get()
+            .then()
+                .statusCode(HttpStatus.SERVICE_UNAVAILABLE_503)
+                .extract()
+                .body().asString();
+
+        assertThatJson(retrieveBody)
+            .when(Option.IGNORING_ARRAY_ORDER)
+            .isEqualTo(healthCheckBody);
+    }
+
+    @Test
+    void validateHealthChecksShouldReturnOkWhenSelectedHealthCheckIsHealthy() {
+        healthChecks.add(healthCheck(Result.healthy(COMPONENT_NAME_1)));
+        healthChecks.add(healthCheck(Result.unhealthy(COMPONENT_NAME_2, "cause")));
+
+        String healthCheckBody =
+            "{\"status\": \"healthy\"," +
+                " \"checks\": [" +
+                "  {" +
+                "    \"componentName\": \"component-1\"," +
+                "    \"escapedComponentName\": \"component-1\"," +
+                "    \"status\": \"healthy\"," +
+                "    \"cause\": null" +
+                "}]}";
+
+        String retrieveBody =
+            given()
+                .queryParam("check", "component-1")
+            .when()
+                .get()
+            .then()
+                .statusCode(HttpStatus.OK_200)
+                .extract()
+                .body().asString();
+
+        assertThatJson(retrieveBody)
+            .when(Option.IGNORING_ARRAY_ORDER)
+            .isEqualTo(healthCheckBody);
+    }
+
+    @Test
+    void validateHealthChecksShouldReturnOkWhenSelectedHealthChecksAreHealthy() {
+        healthChecks.add(healthCheck(Result.healthy(COMPONENT_NAME_1)));
+        healthChecks.add(healthCheck(Result.healthy(COMPONENT_NAME_2)));
+        healthChecks.add(healthCheck(Result.unhealthy(COMPONENT_NAME_3, "cause")));
+
+        String healthCheckBody =
+            "{\"status\": \"healthy\"," +
+                " \"checks\": [" +
+                "  {" +
+                "    \"componentName\": \"component-1\"," +
+                "    \"escapedComponentName\": \"component-1\"," +
+                "    \"status\": \"healthy\"," +
+                "    \"cause\": null" +
+                "  }," +
+                "  {" +
+                "    \"componentName\": \"component-2\"," +
+                "    \"escapedComponentName\": \"component-2\"," +
+                "    \"status\": \"healthy\"," +
+                "    \"cause\": null" +
+                "}]}";
+
+        String retrieveBody =
+            given()
+                .queryParam("check", "component-1", "component-2")
+            .when()
+                .get()
+            .then()
+                .statusCode(HttpStatus.OK_200)
+                .extract()
+                .body().asString();
+
+        assertThatJson(retrieveBody)
+            .when(Option.IGNORING_ARRAY_ORDER)
+            .isEqualTo(healthCheckBody);
+    }
+
+    @Test
+    void validateHealthChecksShouldReturn503WhenSelectedHealthCheckIsDegradedAndStrictModeIsEnabled() {
+        healthChecks.add(healthCheck(Result.healthy(COMPONENT_NAME_1)));
+        healthChecks.add(healthCheck(Result.degraded(COMPONENT_NAME_2, "cause")));
+
+        String healthCheckBody =
+            "{\"status\": \"degraded\"," +
+                " \"checks\": [" +
+                "  {" +
+                "    \"componentName\": \"component-2\"," +
+                "    \"escapedComponentName\": \"component-2\"," +
+                "    \"status\": \"degraded\"," +
+                "    \"cause\": \"cause\"" +
+                "}]}";
+
+        String retrieveBody =
+            given()
+                .queryParam("strict")
+                .queryParam("check", "component-2")
+            .when()
+                .get()
+            .then()
+                .statusCode(HttpStatus.SERVICE_UNAVAILABLE_503)
+                .extract()
+                .body().asString();
+
+        assertThatJson(retrieveBody)
+            .when(Option.IGNORING_ARRAY_ORDER)
+            .isEqualTo(healthCheckBody);
+    }
+
+    @Test
+    void validateHealthChecksShouldReturnStatusUnHealthyWhenOneOfSelectedHealthChecksIsUnhealthy() {
+        healthChecks.add(healthCheck(Result.healthy(COMPONENT_NAME_1)));
+        healthChecks.add(healthCheck(Result.unhealthy(COMPONENT_NAME_2, "cause")));
+
+        String healthCheckBody =
+            "{\"status\": \"unhealthy\"," +
+                " \"checks\": [" +
+                "  {" +
+                "    \"componentName\": \"component-1\"," +
+                "    \"escapedComponentName\": \"component-1\"," +
+                "    \"status\": \"healthy\"," +
+                "    \"cause\": null" +
+                "  }," +
+                "  {" +
+                "    \"componentName\": \"component-2\"," +
+                "    \"escapedComponentName\": \"component-2\"," +
+                "    \"status\": \"unhealthy\"," +
+                "    \"cause\": \"cause\"" +
+                "}]}";
+
+        String retrieveBody =
+            given()
+                .queryParam("check", "component-1", "component-2")
+            .when()
+                .get()
+            .then()
+                .statusCode(HttpStatus.SERVICE_UNAVAILABLE_503)
+                .extract()
+                .body().asString();
+
+        assertThatJson(retrieveBody)
+            .when(Option.IGNORING_ARRAY_ORDER)
+            .isEqualTo(healthCheckBody);
+    }
+
+    @Test
+    void validateHealthChecksShouldReturnNotFoundWhenOneOfSelectedHealthChecksIsUnknown() {
+        healthChecks.add(healthCheck(Result.healthy(COMPONENT_NAME_1)));
+
+        given()
+            .queryParam("check", "component-1", "component-unknown")
+        .when()
+            .get()
+        .then()
+            .statusCode(HttpStatus.NOT_FOUND_404)
+            .body("details", is(nullValue()))
+            .body("type", equalTo("notFound"))
+            .body("message", equalTo("Components with name component-unknown cannot be found"))
+            .body("statusCode", is(HttpStatus.NOT_FOUND_404));
+    }
+
+    @Test
+    void validateHealthChecksShouldReturnNotFoundWhenAllSelectedHealthChecksIsUnknown() {
+        given()
+            .queryParam("check", "component-unknown-1", "component-unknown-2")
+        .when()
+            .get()
+        .then()
+            .statusCode(HttpStatus.NOT_FOUND_404)
+            .body("details", is(nullValue()))
+            .body("type", equalTo("notFound"))
+            .body("message", equalTo("Components with name component-unknown-1, component-unknown-2 cannot be found"))
+            .body("statusCode", is(HttpStatus.NOT_FOUND_404));
+    }
     
     @Test
     void performHealthCheckShouldReturnOkWhenHealthCheckIsHealthy() {
         healthChecks.add(healthCheck(Result.healthy(COMPONENT_NAME_1)));
-        
+
         given()
             .pathParam("componentName", COMPONENT_NAME_1.getName())
         .when()
@@ -331,9 +572,9 @@ class HealthCheckRoutesTest {
     }
     
     @Test
-    void performHealthCheckShouldReturnInternalErrorWhenHealthCheckIsDegraded() {
+    void performHealthCheckShouldReturnOkWhenHealthCheckIsDegraded() {
         healthChecks.add(healthCheck(Result.degraded(COMPONENT_NAME_1, "the cause")));
-        
+
         given()
             .pathParam("componentName", COMPONENT_NAME_1.getName())
         .when()
@@ -349,7 +590,7 @@ class HealthCheckRoutesTest {
     @Test
     void performHealthCheckShouldReturnInternalErrorWhenHealthCheckIsUnhealthy() {
         healthChecks.add(healthCheck(Result.unhealthy(COMPONENT_NAME_1, SAMPLE_CAUSE)));
-        
+
         given()
             .pathParam("componentName", COMPONENT_NAME_1.getName())
         .when()
@@ -361,11 +602,28 @@ class HealthCheckRoutesTest {
             .body("status", equalTo(ResultStatus.UNHEALTHY.getValue()))
             .body("cause", is(SAMPLE_CAUSE));
     }
+
+    @Test
+    void performHealthCheckShouldReturn503WhenHealthCheckIsDegradedAndStrictModeIsEnabled() {
+        healthChecks.add(healthCheck(Result.degraded(COMPONENT_NAME_1, "the cause")));
+
+        given()
+            .pathParam("componentName", COMPONENT_NAME_1.getName())
+            .queryParam("strict")
+        .when()
+            .get("/checks/{componentName}")
+        .then()
+            .statusCode(HttpStatus.SERVICE_UNAVAILABLE_503)
+            .body("componentName", equalTo(NAME_1))
+            .body("escapedComponentName", equalTo(NAME_1))
+            .body("status", equalTo(ResultStatus.DEGRADED.getValue()))
+            .body("cause", equalTo("the cause"));
+    }
     
     @Test
     void performHealthCheckShouldReturnProperlyEscapedComponentName() {
         healthChecks.add(healthCheck(Result.healthy(COMPONENT_NAME_3)));
-        
+
         given()
             .pathParam("componentName", COMPONENT_NAME_3.getName())
         .when()
@@ -380,7 +638,7 @@ class HealthCheckRoutesTest {
     @Test
     void performHealthCheckShouldWorkWithEscapedPathParam() {
         healthChecks.add(healthCheck(Result.healthy(COMPONENT_NAME_3)));
-        
+
         given()
             .urlEncodingEnabled(false)
             .pathParam("componentName", NAME_3_ESCAPED)
@@ -406,6 +664,7 @@ class HealthCheckRoutesTest {
     @Test
     void getHealthchecksShouldReturnHealthCheckWhenHealthCheckPresent() {
         healthChecks.add(healthCheck(Result.healthy(COMPONENT_NAME_3)));
+
         when()
            .get(HealthCheckRoutes.CHECKS)
         .then()
@@ -419,11 +678,11 @@ class HealthCheckRoutesTest {
     void getHealthchecksShouldReturnHealthChecksWhenHealthChecksPresent() {
         healthChecks.add(healthCheck(Result.healthy(COMPONENT_NAME_2)));
         healthChecks.add(healthCheck(Result.healthy(COMPONENT_NAME_3)));
+
         when()
            .get(HealthCheckRoutes.CHECKS)
         .then()
            .body("", hasSize(2))
            .statusCode(HttpStatus.OK_200);
     }
-
 }

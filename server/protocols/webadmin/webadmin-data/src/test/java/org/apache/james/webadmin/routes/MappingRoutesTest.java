@@ -19,6 +19,7 @@
 
 package org.apache.james.webadmin.routes;
 
+import static io.restassured.RestAssured.given;
 import static io.restassured.RestAssured.when;
 import static net.javacrumbs.jsonunit.assertj.JsonAssertions.assertThatJson;
 import static org.hamcrest.CoreMatchers.is;
@@ -38,6 +39,7 @@ import org.apache.james.rrt.memory.MemoryRecipientRewriteTable;
 import org.apache.james.user.memory.MemoryUsersRepository;
 import org.apache.james.webadmin.WebAdminServer;
 import org.apache.james.webadmin.WebAdminUtils;
+import org.apache.james.webadmin.dto.MappingsModule;
 import org.apache.james.webadmin.utils.JsonTransformer;
 import org.eclipse.jetty.http.HttpStatus;
 import org.junit.jupiter.api.AfterEach;
@@ -64,7 +66,7 @@ class MappingRoutesTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        JsonTransformer jsonTransformer = new JsonTransformer();
+        JsonTransformer jsonTransformer = new JsonTransformer(new MappingsModule());
         recipientRewriteTable = new MemoryRecipientRewriteTable();
         DNSService dnsService = mock(DNSService.class);
         MemoryDomainList domainList = new MemoryDomainList(dnsService);
@@ -281,6 +283,139 @@ class MappingRoutesTest {
     }
 
     @Test
+    void getSourcesShouldReturnGroupMappings() throws Exception {
+        MailAddress groupAddress = new MailAddress("group@domain.tld");
+        MailAddress group2Address = new MailAddress("group2@domain.tld");
+        MailAddress group3Address = new MailAddress("group3@domain.tld");
+
+        recipientRewriteTable.addGroupMapping(
+            MappingSource.fromMailAddress(groupAddress), "member1@domain.tld");
+        recipientRewriteTable.addGroupMapping(
+            MappingSource.fromMailAddress(group2Address), "member1@domain.tld");
+        recipientRewriteTable.addGroupMapping(
+            MappingSource.fromMailAddress(groupAddress), "member2@domain.tld");
+        recipientRewriteTable.addGroupMapping(
+            MappingSource.fromMailAddress(group3Address), "member2@domain.tld");
+
+        String jsonBody = given()
+            .queryParam("type", "group")
+        .when()
+            .get("/sources/member1@domain.tld")
+        .then()
+            .contentType(ContentType.JSON)
+            .statusCode(HttpStatus.OK_200)
+            .extract()
+            .body()
+            .asString();
+
+        assertThatJson(jsonBody)
+            .when(Option.IGNORING_ARRAY_ORDER)
+            .isEqualTo("""
+                ["group@domain.tld","group2@domain.tld"]""");
+    }
+
+    @Test
+    void deleteShouldBeIdempotent() {
+        given()
+            .queryParam("type", "group")
+        .when()
+            .delete("/sources/member1@domain.tld")
+        .then()
+            .contentType(ContentType.JSON)
+            .statusCode(HttpStatus.NO_CONTENT_204);
+    }
+
+    @Test
+    void shouldNotReturnDeletedSources() throws Exception {
+        MailAddress groupAddress = new MailAddress("group@domain.tld");
+        MailAddress group2Address = new MailAddress("group2@domain.tld");
+        MailAddress group3Address = new MailAddress("group3@domain.tld");
+
+        recipientRewriteTable.addGroupMapping(
+            MappingSource.fromMailAddress(groupAddress), "member1@domain.tld");
+        recipientRewriteTable.addGroupMapping(
+            MappingSource.fromMailAddress(group2Address), "member1@domain.tld");
+        recipientRewriteTable.addGroupMapping(
+            MappingSource.fromMailAddress(groupAddress), "member2@domain.tld");
+        recipientRewriteTable.addGroupMapping(
+            MappingSource.fromMailAddress(group3Address), "member2@domain.tld");
+
+        given()
+            .queryParam("type", "group")
+        .when()
+            .delete("/sources/member1@domain.tld")
+        .then()
+            .contentType(ContentType.JSON)
+            .statusCode(HttpStatus.NO_CONTENT_204);
+
+        String jsonBody = when()
+            .get()
+        .then()
+            .contentType(ContentType.JSON)
+            .statusCode(HttpStatus.OK_200)
+            .extract()
+            .body()
+            .asString();
+
+        assertThatJson(jsonBody)
+            .when(Option.IGNORING_ARRAY_ORDER)
+            .isEqualTo("{" +
+                "  \"group@domain.tld\": [" +
+                "    {" +
+                "      \"type\": \"Group\"," +
+                "      \"mapping\": \"member2@domain.tld\"" +
+                "    }" +
+                "  ]," +
+                "  \"group3@domain.tld\": [" +
+                "    {" +
+                "      \"type\": \"Group\"," +
+                "      \"mapping\": \"member2@domain.tld\"" +
+                "    }" +
+                "  ]" +
+                "}");
+    }
+
+    @Test
+    void getSourcesShouldRejectInvalidType() {
+        given()
+            .queryParam("type", "invalid")
+        .when()
+            .get("/sources/member1@domain.tld")
+        .then()
+            .contentType(ContentType.JSON)
+            .statusCode(HttpStatus.BAD_REQUEST_400);
+    }
+
+    @Test
+    void getSourcesShouldRejectNoType() {
+        when()
+            .get("/sources/member1@domain.tld")
+        .then()
+            .contentType(ContentType.JSON)
+            .statusCode(HttpStatus.BAD_REQUEST_400);
+    }
+
+    @Test
+    void deleteSourcesShouldRejectInvalidType() {
+        given()
+            .queryParam("type", "invalid")
+        .when()
+            .delete("/sources/member1@domain.tld")
+        .then()
+            .contentType(ContentType.JSON)
+            .statusCode(HttpStatus.BAD_REQUEST_400);
+    }
+
+    @Test
+    void deleteSourcesShouldRejectNoType() {
+        when()
+            .delete("/sources/member1@domain.tld")
+        .then()
+            .contentType(ContentType.JSON)
+            .statusCode(HttpStatus.BAD_REQUEST_400);
+    }
+
+    @Test
     void getMappingsShouldReturnForwardMappings() throws RecipientRewriteTableException {
         Username forwardUsername = Username.of("forwarduser@domain.tld");
 
@@ -478,7 +613,52 @@ class MappingRoutesTest {
             );
     }
 
-     @Test
+    @Test
+    void addMappingsShouldAddMappings() throws Exception {
+        String importedJsonBody = "{" +
+            "  \"alias@domain.tld\": [" +
+            "    {" +
+            "      \"type\": \"Alias\"," +
+            "      \"mapping\": \"user@domain.tld\"" +
+            "    }" +
+            "  ]," +
+            "  \"domain.mapping.tld\": [" +
+            "    {" +
+            "      \"type\": \"Domain\"," +
+            "      \"mapping\": \"realdomain.tld\"" +
+            "    }" +
+            "  ]," +
+            "  \"address@domain.tld\": [" +
+            "    {" +
+            "      \"type\": \"Address\"," +
+            "      \"mapping\": \"user@domain.tld\"" +
+            "    }" +
+            "  ]" +
+            "}";
+
+        given()
+                .contentType(ContentType.JSON)
+                .body(importedJsonBody)
+            .when()
+                .put()
+            .then()
+                .statusCode(HttpStatus.NO_CONTENT_204);
+
+        String jsonBody = when()
+                .get()
+            .then()
+                .contentType(ContentType.JSON)
+                .statusCode(HttpStatus.OK_200)
+                .extract()
+                .body()
+                .asString();
+
+        assertThatJson(jsonBody)
+            .isEqualTo(importedJsonBody);
+    }
+
+
+    @Test
     void getUserMappingsShouldReturnNotFoundByDefault() {
         when()
             .get("/user/")
@@ -593,7 +773,7 @@ class MappingRoutesTest {
         .body("statusCode", is(400))
         .body("type", is("InvalidArgument"))
         .body("message", is("Invalid arguments supplied in the user request"))
-        .body("details", is("Domain parts ASCII chars must be a-z A-Z 0-9 - or _"));
+        .body("details", is("Domain parts ASCII chars must be a-z A-Z 0-9 - or _ in domain@domain.tld"));
     }
 
     @Test

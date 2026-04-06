@@ -22,8 +22,13 @@ package org.apache.james.transport.matchers;
 import static org.apache.mailet.base.MailAddressFixture.ANY_AT_JAMES;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.nio.charset.StandardCharsets;
+
+import jakarta.mail.internet.MimeMessage;
+
 import org.apache.james.core.builder.MimeMessageBuilder;
 import org.apache.james.util.ClassLoaderUtils;
+import org.apache.james.util.MimeMessageUtil;
 import org.apache.mailet.Mail;
 import org.apache.mailet.base.test.FakeMail;
 import org.apache.mailet.base.test.FakeMatcherConfig;
@@ -32,7 +37,7 @@ import org.junit.jupiter.api.Test;
 class AttachmentFileNameIsTest {
     @Test
     void shouldMatchWhenMultipartMixedAndRightFileName() throws Exception {
-        Mail mail =  FakeMail.builder()
+        Mail mail = FakeMail.builder()
             .name("mail")
             .recipient(ANY_AT_JAMES)
             .mimeMessage(MimeMessageBuilder.mimeMessageBuilder()
@@ -55,7 +60,7 @@ class AttachmentFileNameIsTest {
 
     @Test
     void shouldNotMatchWhenMultipartMixedAndWrongFileName() throws Exception {
-        Mail mail =  FakeMail.builder()
+        Mail mail = FakeMail.builder()
             .name("mail")
             .recipient(ANY_AT_JAMES)
             .mimeMessage(MimeMessageBuilder.mimeMessageBuilder()
@@ -78,7 +83,7 @@ class AttachmentFileNameIsTest {
 
     @Test
     void shouldMatchRecursively() throws Exception {
-        Mail mail =  FakeMail.builder()
+        Mail mail = FakeMail.builder()
             .name("mail")
             .recipient(ANY_AT_JAMES)
             .mimeMessage(MimeMessageBuilder.mimeMessageBuilder()
@@ -106,7 +111,7 @@ class AttachmentFileNameIsTest {
 
     @Test
     void shouldIgnoreMultipartAlternative() throws Exception {
-        Mail mail =  FakeMail.builder()
+        Mail mail = FakeMail.builder()
             .name("mail")
             .recipient(ANY_AT_JAMES)
             .mimeMessage(MimeMessageBuilder.mimeMessageBuilder()
@@ -131,7 +136,7 @@ class AttachmentFileNameIsTest {
 
     @Test
     void shouldMatchSingleBody() throws Exception {
-        Mail mail =  FakeMail.builder()
+        Mail mail = FakeMail.builder()
             .name("mail")
             .recipient(ANY_AT_JAMES)
             .mimeMessage(MimeMessageBuilder.mimeMessageBuilder()
@@ -152,8 +157,33 @@ class AttachmentFileNameIsTest {
     }
 
     @Test
+    void shouldMatchWhenLong() throws Exception {
+        Mail mail = FakeMail.builder()
+            .name("mail")
+            .recipient(ANY_AT_JAMES)
+            .mimeMessage(MimeMessageBuilder.mimeMessageBuilder()
+                .setText("abc", "text/plain")
+                .addHeader("Content-Disposition", "attachment;\n" +
+                    " filename*0=\"looooooooooooooooooooooooooooooooooooooooooooooooooooooooooo\";\n" +
+                    " filename*1=\"oooooooooooooooooooooooooooooooooooooong_fiiiiiiiiiiiiiiiiii\";\n" +
+                    " filename*2=\"iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiileeeeeeeeeeeeeeeeeee\";\n" +
+                    " filename*3=\"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee.txt\""))
+            .build();
+
+        AttachmentFileNameIs testee = new AttachmentFileNameIs();
+
+        testee.init(FakeMatcherConfig.builder()
+            .matcherName("AttachmentFileNameIs")
+            .condition("*.txt")
+            .build());
+
+        assertThat(testee.match(mail))
+            .containsOnly(ANY_AT_JAMES);
+    }
+
+    @Test
     void shouldSupportWildcardPrefix() throws Exception {
-        Mail mail =  FakeMail.builder()
+        Mail mail = FakeMail.builder()
             .name("mail")
             .recipient(ANY_AT_JAMES)
             .mimeMessage(MimeMessageBuilder.mimeMessageBuilder()
@@ -175,7 +205,7 @@ class AttachmentFileNameIsTest {
 
     @Test
     void doNotSupportSuffix() throws Exception {
-        Mail mail =  FakeMail.builder()
+        Mail mail = FakeMail.builder()
             .name("mail")
             .recipient(ANY_AT_JAMES)
             .mimeMessage(MimeMessageBuilder.mimeMessageBuilder()
@@ -197,7 +227,7 @@ class AttachmentFileNameIsTest {
 
     @Test
     void supportComaSeparatedValues() throws Exception {
-        Mail mail =  FakeMail.builder()
+        Mail mail = FakeMail.builder()
             .name("mail")
             .recipient(ANY_AT_JAMES)
             .mimeMessage(MimeMessageBuilder.mimeMessageBuilder()
@@ -219,7 +249,7 @@ class AttachmentFileNameIsTest {
 
     @Test
     void supportSpaceSeparatedValues() throws Exception {
-        Mail mail =  FakeMail.builder()
+        Mail mail = FakeMail.builder()
             .name("mail")
             .recipient(ANY_AT_JAMES)
             .mimeMessage(MimeMessageBuilder.mimeMessageBuilder()
@@ -241,7 +271,7 @@ class AttachmentFileNameIsTest {
 
     @Test
     void supportComaSpaceSeparatedValues() throws Exception {
-        Mail mail =  FakeMail.builder()
+        Mail mail = FakeMail.builder()
             .name("mail")
             .recipient(ANY_AT_JAMES)
             .mimeMessage(MimeMessageBuilder.mimeMessageBuilder()
@@ -263,7 +293,7 @@ class AttachmentFileNameIsTest {
 
     @Test
     void shouldNotMatchInNestedMessages() throws Exception {
-        Mail mail =  FakeMail.builder()
+        Mail mail = FakeMail.builder()
             .name("mail")
             .recipient(ANY_AT_JAMES)
             .mimeMessage(MimeMessageBuilder.mimeMessageBuilder()
@@ -286,7 +316,7 @@ class AttachmentFileNameIsTest {
 
     @Test
     void shouldMatchNestedMessages() throws Exception {
-        Mail mail =  FakeMail.builder()
+        Mail mail = FakeMail.builder()
             .name("mail")
             .recipient(ANY_AT_JAMES)
             .mimeMessage(MimeMessageBuilder.mimeMessageBuilder()
@@ -310,7 +340,7 @@ class AttachmentFileNameIsTest {
 
     @Test
     void shouldMatchInline() throws Exception {
-        Mail mail =  FakeMail.builder()
+        Mail mail = FakeMail.builder()
             .name("mail")
             .recipient(ANY_AT_JAMES)
             .mimeMessage(MimeMessageBuilder.mimeMessageBuilder()
@@ -332,7 +362,7 @@ class AttachmentFileNameIsTest {
 
     @Test
     void shouldMatchWhenFileNameIsOnContentDisposition() throws Exception {
-        Mail mail =  FakeMail.builder()
+        Mail mail = FakeMail.builder()
             .name("mail")
             .recipient(ANY_AT_JAMES)
             .mimeMessage(MimeMessageBuilder.mimeMessageBuilder()
@@ -354,7 +384,7 @@ class AttachmentFileNameIsTest {
 
     @Test
     void shouldBeCaseInsensitive() throws Exception {
-        Mail mail =  FakeMail.builder()
+        Mail mail = FakeMail.builder()
             .name("mail")
             .recipient(ANY_AT_JAMES)
             .mimeMessage(MimeMessageBuilder.mimeMessageBuilder()
@@ -376,13 +406,12 @@ class AttachmentFileNameIsTest {
 
     @Test
     void shouldSupportMultilineFilename() throws Exception {
-        /*
-        Content-Type: text/plain;
-	      name*0=fiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii;
-	      name*1=iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiile;
-	      name*2=.txt; charset=us-ascii
-         */
-        Mail mail =  FakeMail.builder()
+        /*Content-Type: text/plain;
+        name*0=fiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii;
+        name*1=iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiile;
+        name*2=.txt; charset=us-ascii
+        */
+        Mail mail = FakeMail.builder()
             .name("mail")
             .recipient(ANY_AT_JAMES)
             .mimeMessage(MimeMessageBuilder.mimeMessageBuilder()
@@ -402,8 +431,64 @@ class AttachmentFileNameIsTest {
     }
 
     @Test
+    void shouldSupportMultilineFilenameWithTrailingStar() throws Exception {
+        /*Content-Type: text/plain;
+        name*0=fiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii;
+        name*1=iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiile;
+        name*2=.txt; charset=us-ascii
+        */
+
+        MimeMessage mimeMessage = MimeMessageUtil.mimeMessageFromBytes(("Content-Type: text/plain;\r\n" +
+            "        name*0*=fiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii;\r\n" +
+            "        name*1*=iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiile;\r\n" +
+            "        name*2*=.txt; charset=us-ascii\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
+        Mail mail = FakeMail.builder()
+            .name("mail")
+            .recipient(ANY_AT_JAMES)
+            .mimeMessage(mimeMessage)
+            .build();
+
+        AttachmentFileNameIs testee = new AttachmentFileNameIs();
+
+        testee.init(FakeMatcherConfig.builder()
+            .matcherName("AttachmentFileNameIs")
+            .condition("fiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiile.txt")
+            .build());
+
+        assertThat(testee.match(mail))
+            .containsOnly(ANY_AT_JAMES);
+    }
+
+    @Test
+    void shouldSupportMultilineFilename2() throws Exception {
+        /*Content-Type: text/plain;
+        name*0=fiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii;
+        name*1=iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiile;
+        name*2=.txt; charset=us-ascii
+        */
+
+        Mail mail = FakeMail.builder()
+            .name("mail")
+            .recipient(ANY_AT_JAMES)
+            .mimeMessage(MimeMessageBuilder.mimeMessageBuilder()
+                .setText("abc", "text/plain;\r\n name=\"" + "fiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiile".repeat(7) + ".txt\"")
+                .build())
+            .build();
+
+        AttachmentFileNameIs testee = new AttachmentFileNameIs();
+
+        testee.init(FakeMatcherConfig.builder()
+            .matcherName("AttachmentFileNameIs")
+            .condition("*.txt")
+            .build());
+
+        assertThat(testee.match(mail))
+            .containsOnly(ANY_AT_JAMES);
+    }
+
+    @Test
     void shouldSupportTrimming() throws Exception {
-        Mail mail =  FakeMail.builder()
+        Mail mail = FakeMail.builder()
             .name("mail")
             .recipient(ANY_AT_JAMES)
             .mimeMessage(MimeMessageBuilder.mimeMessageBuilder()
@@ -425,7 +510,7 @@ class AttachmentFileNameIsTest {
 
     @Test
     void shouldSupportQEncoding() throws Exception {
-        Mail mail =  FakeMail.builder()
+        Mail mail = FakeMail.builder()
             .name("mail")
             .recipient(ANY_AT_JAMES)
             .mimeMessage(MimeMessageBuilder.mimeMessageBuilder()
@@ -447,7 +532,7 @@ class AttachmentFileNameIsTest {
 
     @Test
     void conditionShouldSupportQEncoding() throws Exception {
-        Mail mail =  FakeMail.builder()
+        Mail mail = FakeMail.builder()
             .name("mail")
             .recipient(ANY_AT_JAMES)
             .mimeMessage(MimeMessageBuilder.mimeMessageBuilder()
@@ -469,7 +554,7 @@ class AttachmentFileNameIsTest {
 
     @Test
     void shouldLookupIntoZipEntryWhenRequested() throws Exception {
-        Mail mail =  FakeMail.builder()
+        Mail mail = FakeMail.builder()
             .name("mail")
             .recipient(ANY_AT_JAMES)
             .mimeMessage(MimeMessageBuilder.mimeMessageBuilder()
@@ -492,7 +577,7 @@ class AttachmentFileNameIsTest {
 
     @Test
     void zipNestingIsNotSupported() throws Exception {
-        Mail mail =  FakeMail.builder()
+        Mail mail = FakeMail.builder()
             .name("mail")
             .recipient(ANY_AT_JAMES)
             .mimeMessage(MimeMessageBuilder.mimeMessageBuilder()
@@ -515,7 +600,7 @@ class AttachmentFileNameIsTest {
 
     @Test
     void shouldLookupIntoZipEntryOnlyWhenRequested() throws Exception {
-        Mail mail =  FakeMail.builder()
+        Mail mail = FakeMail.builder()
             .name("mail")
             .recipient(ANY_AT_JAMES)
             .mimeMessage(MimeMessageBuilder.mimeMessageBuilder()
@@ -534,53 +619,5 @@ class AttachmentFileNameIsTest {
 
         assertThat(testee.match(mail))
             .isNull();
-    }
-
-    @Test
-    void shouldSupportDebugMode() throws Exception {
-        AttachmentFileNameIs testee = new AttachmentFileNameIs();
-
-        testee.init(FakeMatcherConfig.builder()
-            .matcherName("AttachmentFileNameIs")
-            .condition("-d file.txt")
-            .build());
-
-        assertThat(testee.isDebug).isTrue();
-    }
-
-    @Test
-    void debugModeShouldBeFalseByDefault() throws Exception {
-        AttachmentFileNameIs testee = new AttachmentFileNameIs();
-
-        testee.init(FakeMatcherConfig.builder()
-            .matcherName("AttachmentFileNameIs")
-            .condition("file.txt")
-            .build());
-
-        assertThat(testee.isDebug).isFalse();
-    }
-
-    @Test
-    void shouldSupportUnzipMode() throws Exception {
-        AttachmentFileNameIs testee = new AttachmentFileNameIs();
-
-        testee.init(FakeMatcherConfig.builder()
-            .matcherName("AttachmentFileNameIs")
-            .condition("-z file.txt")
-            .build());
-
-        assertThat(testee.unzipIsRequested).isTrue();
-    }
-
-    @Test
-    void unzipModeShouldBeFalseByDefault() throws Exception {
-        AttachmentFileNameIs testee = new AttachmentFileNameIs();
-
-        testee.init(FakeMatcherConfig.builder()
-            .matcherName("AttachmentFileNameIs")
-            .condition("file.txt")
-            .build());
-
-        assertThat(testee.unzipIsRequested).isFalse();
     }
 }

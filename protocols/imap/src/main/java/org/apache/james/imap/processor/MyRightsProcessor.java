@@ -30,6 +30,7 @@ import org.apache.james.imap.api.message.Capability;
 import org.apache.james.imap.api.message.response.StatusResponseFactory;
 import org.apache.james.imap.api.process.ImapSession;
 import org.apache.james.imap.main.PathConverter;
+import org.apache.james.imap.message.MailboxName;
 import org.apache.james.imap.message.request.MyRightsRequest;
 import org.apache.james.imap.message.response.MyRightsResponse;
 import org.apache.james.mailbox.MailboxManager;
@@ -57,18 +58,21 @@ public class MyRightsProcessor extends AbstractMailboxProcessor<MyRightsRequest>
 
     private static final List<Capability> CAPABILITIES = Collections.singletonList(ImapConstants.SUPPORTS_ACL);
 
+    private final PathConverter.Factory pathConverterFactory;
+
     @Inject
-    public MyRightsProcessor(MailboxManager mailboxManager, StatusResponseFactory factory, MetricFactory metricFactory) {
+    public MyRightsProcessor(MailboxManager mailboxManager, StatusResponseFactory factory, MetricFactory metricFactory, PathConverter.Factory pathConverterFactory) {
         super(MyRightsRequest.class, mailboxManager, factory, metricFactory);
+        this.pathConverterFactory = pathConverterFactory;
     }
 
     @Override
     protected Mono<Void> processRequestReactive(MyRightsRequest request, ImapSession session, Responder responder) {
         MailboxManager mailboxManager = getMailboxManager();
         MailboxSession mailboxSession = session.getMailboxSession();
-        String mailboxName = request.getMailboxName();
+        MailboxName mailboxName = request.getMailboxName();
 
-        MailboxPath mailboxPath = PathConverter.forSession(session).buildFullPath(mailboxName);
+        MailboxPath mailboxPath = pathConverterFactory.forSession(session).buildFullPath(mailboxName.asString());
         return Mono.from(mailboxManager.getMailboxReactive(mailboxPath, mailboxSession))
             .doOnNext(Throwing.consumer(mailbox -> {
                 Rfc4314Rights myRights = mailboxManager.myRights(mailbox.getMailboxEntity(), mailboxSession);
@@ -118,6 +122,6 @@ public class MyRightsProcessor extends AbstractMailboxProcessor<MyRightsRequest>
     protected MDCBuilder mdc(MyRightsRequest request) {
         return MDCBuilder.create()
             .addToContext(MDCBuilder.ACTION, "MYRIGHTS")
-            .addToContext("mailbox", request.getMailboxName());
+            .addToContext("mailbox", request.getMailboxName().asString());
     }
 }

@@ -24,8 +24,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.util.Optional;
 
 import org.apache.james.backends.cassandra.CassandraClusterExtension;
-import org.apache.james.backends.cassandra.components.CassandraModule;
-import org.apache.james.backends.cassandra.components.CassandraMutualizedQuotaModule;
+import org.apache.james.backends.cassandra.components.CassandraDataDefinition;
+import org.apache.james.backends.cassandra.components.CassandraMutualizedQuotaDataDefinition;
+import org.apache.james.backends.cassandra.components.CassandraQuotaLimitDao;
 import org.apache.james.core.Domain;
 import org.apache.james.core.Username;
 import org.apache.james.core.quota.QuotaCountLimit;
@@ -33,14 +34,15 @@ import org.apache.james.core.quota.QuotaSizeLimit;
 import org.apache.james.domainlist.api.DomainList;
 import org.apache.james.domainlist.api.mock.SimpleDomainList;
 import org.apache.james.mailbox.cassandra.mail.utils.GuiceUtils;
-import org.apache.james.mailbox.cassandra.modules.CassandraMailboxQuotaModule;
+import org.apache.james.mailbox.cassandra.modules.CassandraMailboxQuotaDataDefinition;
 import org.apache.james.mailbox.cassandra.quota.migration.CassandraPerUserMaxQuotaManagerMigration;
 import org.apache.james.mailbox.model.QuotaRoot;
 import org.apache.james.mailbox.quota.MaxQuotaManager;
+import org.apache.james.mailbox.quota.QuotaChangeNotifier;
 import org.apache.james.mailbox.quota.UserQuotaRootResolver;
 import org.apache.james.user.api.UsersRepository;
 import org.apache.james.user.cassandra.CassandraUsersDAO;
-import org.apache.james.user.cassandra.CassandraUsersRepositoryModule;
+import org.apache.james.user.cassandra.CassandraUsersRepositoryDataDefinition;
 import org.apache.james.user.lib.UsersRepositoryImpl;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -56,10 +58,10 @@ public class CassandraPerUserMaxQuotaManagerMigrationTest {
     private static final QuotaRoot QUOTA_ROOT = QuotaRoot.quotaRoot("#private&bob", Optional.empty());
 
     @RegisterExtension
-    static CassandraClusterExtension cassandraCluster = new CassandraClusterExtension(CassandraModule.aggregateModules(
-        CassandraUsersRepositoryModule.MODULE,
-        CassandraMailboxQuotaModule.MODULE,
-        CassandraMutualizedQuotaModule.MODULE));
+    static CassandraClusterExtension cassandraCluster = new CassandraClusterExtension(CassandraDataDefinition.aggregateModules(
+        CassandraUsersRepositoryDataDefinition.MODULE,
+        CassandraMailboxQuotaDataDefinition.MODULE,
+        CassandraMutualizedQuotaDataDefinition.MODULE));
 
     private static CassandraPerUserMaxQuotaManagerMigration migration;
     private static MaxQuotaManager oldMaxQuotaManager;
@@ -74,7 +76,8 @@ public class CassandraPerUserMaxQuotaManagerMigrationTest {
         usersRepository = new UsersRepositoryImpl<>(domainList, usersDAO);
         Injector testInjector = GuiceUtils.testInjector(cassandraCluster.getCassandraCluster());
         oldMaxQuotaManager = testInjector.getInstance(CassandraPerUserMaxQuotaManagerV1.class);
-        newMaxQuotaManager = testInjector.getInstance(CassandraPerUserMaxQuotaManagerV2.class);
+        newMaxQuotaManager = new CassandraPerUserMaxQuotaManagerV2(new CassandraQuotaLimitDao(cassandraCluster.getCassandraCluster().getConf()),
+            QuotaChangeNotifier.NOOP);
         UserQuotaRootResolver userQuotaRootResolver = Mockito.mock(UserQuotaRootResolver.class);
         Mockito.when(userQuotaRootResolver.forUser(USERNAME)).thenReturn(QUOTA_ROOT);
         migration = new CassandraPerUserMaxQuotaManagerMigration(usersRepository,

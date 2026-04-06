@@ -23,6 +23,7 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentLinkedDeque;
 
 import jakarta.annotation.PostConstruct;
@@ -54,6 +55,7 @@ import org.apache.mailet.base.MatcherInverter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.github.fge.lambdas.Throwing;
 import com.google.common.collect.ImmutableList;
 
 /**
@@ -232,7 +234,7 @@ public abstract class AbstractStateMailetProcessor implements MailProcessor, Con
                 // if no matcher is configured throw an Exception
                 throw new ConfigurationException("Please configure only match or nomatch per mailet");
             } else if (matcherName != null) {
-                matcher = matcherLoader.getMatcher(createMatcherConfig(matcherName));
+                matcher = loadMatcher(compMap, matcherName);
                 if (matcher instanceof CompositeMatcher) {
                     CompositeMatcher compMatcher = (CompositeMatcher) matcher;
 
@@ -242,7 +244,7 @@ public abstract class AbstractStateMailetProcessor implements MailProcessor, Con
                     }
                 }
             } else if (invertedMatcherName != null) {
-                Matcher m = matcherLoader.getMatcher(createMatcherConfig(invertedMatcherName));
+                Matcher m = loadMatcher(compMap, invertedMatcherName);
                 if (m instanceof CompositeMatcher) {
                     CompositeMatcher compMatcher = (CompositeMatcher) m;
 
@@ -295,16 +297,9 @@ public abstract class AbstractStateMailetProcessor implements MailProcessor, Con
                     // if no matcher is configured throw an Exception
                     throw new ConfigurationException("Please configure only match or nomatch per mailet");
                 } else if (matcherName != null) {
-                    // try to load from compositeMatchers first
-                    matcher = compositeMatchers.get(matcherName);
-                    if (matcher == null) {
-                        // no composite Matcher found, try to load it via
-                        // MatcherLoader
-                        matcher = matcherLoader.getMatcher(createMatcherConfig(matcherName));
-                    }
+                    matcher = loadMatcher(compositeMatchers, matcherName);
                 } else if (invertedMatcherName != null) {
-                    // no composite Matcher found, try to load it via MatcherLoader
-                    matcher = matcherLoader.getMatcher(createMatcherConfig(invertedMatcherName));
+                    matcher = loadMatcher(compositeMatchers, invertedMatcherName);
                     matcher = new MatcherInverter(matcher);
 
                 } else {
@@ -324,7 +319,8 @@ public abstract class AbstractStateMailetProcessor implements MailProcessor, Con
                 throw new ConfigurationException("Unable to init matcher " + matcherName, ex);
             }
             try {
-                mailet = mailetLoader.getMailet(createMailetConfig(mailetClassName, c));
+                MailetConfig mailetConfig = createMailetConfig(mailetClassName, c);
+                mailet = mailetLoader.getMailet(mailetConfig);
                 LOGGER.info("Mailet {} instantiated.", mailetClassName);
             } catch (MessagingException ex) {
                 // **** Do better job printing out exception
@@ -336,11 +332,22 @@ public abstract class AbstractStateMailetProcessor implements MailProcessor, Con
             }
 
             if (matcher != null && mailet != null) {
-                pairs.add(new MatcherMailetPair(matcher, mailet));
+                var processingErrorConfig = new MailProcessingErrorHandlingConfiguration(
+                        Optional.ofNullable(c.getString("onMailetException")),
+                        Optional.ofNullable(c.getString("onMatchException"))
+                );
+
+
+                pairs.add(new MatcherMailetPair(matcher, mailet, processingErrorConfig));
             } else {
                 throw new ConfigurationException("Unable to load Mailet or Matcher");
             }
         }
+    }
+
+    private Matcher loadMatcher(Map<String, Matcher> compositeMatchers, String matcherName) {
+        return Optional.ofNullable(compositeMatchers.get(matcherName))
+            .orElseGet(Throwing.supplier(() -> matcherLoader.getMatcher(createMatcherConfig(matcherName))));
     }
 
     /**

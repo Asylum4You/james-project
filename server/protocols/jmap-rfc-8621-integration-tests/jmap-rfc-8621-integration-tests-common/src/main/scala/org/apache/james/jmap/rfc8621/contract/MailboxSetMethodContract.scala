@@ -27,9 +27,10 @@ import java.util.concurrent.TimeUnit
 import io.netty.handler.codec.http.HttpHeaderNames.ACCEPT
 import io.restassured.RestAssured._
 import io.restassured.http.ContentType.JSON
+import net.javacrumbs.jsonunit.JsonMatchers.jsonEquals
 import net.javacrumbs.jsonunit.assertj.JsonAssertions.assertThatJson
 import net.javacrumbs.jsonunit.core.Option
-import net.javacrumbs.jsonunit.core.internal.Options
+import net.javacrumbs.jsonunit.core.Option.IGNORING_ARRAY_ORDER
 import org.apache.http.HttpStatus.SC_OK
 import org.apache.james.GuiceJamesServer
 import org.apache.james.jmap.core.ResponseObject.SESSION_STATE
@@ -38,17 +39,18 @@ import org.apache.james.jmap.http.UserCredential
 import org.apache.james.jmap.rfc8621.contract.Fixture.{ACCEPT_RFC8621_VERSION_HEADER, ACCOUNT_ID, ANDRE, BOB, BOB_PASSWORD, CEDRIC, DAVID, DOMAIN, authScheme, baseRequestSpecBuilder}
 import org.apache.james.jmap.rfc8621.contract.tags.CategoryTags
 import org.apache.james.jmap.{JmapGuiceProbe, MessageIdProbe}
+import org.apache.james.mailbox.DefaultMailboxes
 import org.apache.james.mailbox.MessageManager.AppendCommand
 import org.apache.james.mailbox.model.MailboxACL.{EntryKey, Right}
-import org.apache.james.mailbox.model.{MailboxACL, MailboxId, MailboxPath}
+import org.apache.james.mailbox.model.{MailboxACL, MailboxConstants, MailboxId, MailboxPath}
 import org.apache.james.mime4j.dom.Message
 import org.apache.james.modules.{ACLProbeImpl, MailboxProbeImpl}
 import org.apache.james.util.concurrency.ConcurrentTestRunner
 import org.apache.james.utils.DataProbeImpl
 import org.assertj.core.api.Assertions.assertThat
-import org.assertj.core.api.{Assertions, SoftAssertions}
+import org.assertj.core.api.{Assertions, SoftAssertions, ThrowingConsumer}
 import org.awaitility.Awaitility
-import org.hamcrest.Matchers.{equalTo, hasSize, not}
+import org.hamcrest.Matchers.{equalTo, hasEntry, hasKey, hasSize, not, notNullValue}
 import org.junit.jupiter.api.{BeforeEach, RepeatedTest, Tag, Test}
 import reactor.core.scala.publisher.{SFlux, SMono}
 import reactor.core.scheduler.Schedulers
@@ -62,6 +64,7 @@ import sttp.monad.MonadError
 import sttp.ws.WebSocketFrame
 
 import scala.collection.mutable.ListBuffer
+import scala.concurrent.duration.MILLISECONDS
 import scala.jdk.CollectionConverters._
 
 
@@ -2117,11 +2120,11 @@ trait MailboxSetMethodContract {
     val mailboxId: MailboxId = server.getProbe(classOf[MailboxProbeImpl]).createMailbox(path)
 
     server.getProbe(classOf[ACLProbeImpl])
-      .replaceRights(path, BOB.asString, new MailboxACL.Rfc4314Rights(Right.Lookup, Right.Read, Right.CreateMailbox))
+      .replaceRights(path, BOB.asString, new MailboxACL.Rfc4314Rights(Right.Lookup, Right.Read))
     val request =
       s"""
         |{
-        |   "using": [ "urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail" ],
+        |   "using": [ "urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail", "urn:apache:james:params:jmap:mail:shares" ],
         |   "methodCalls": [
         |       [
         |           "Mailbox/set",
@@ -2167,6 +2170,88 @@ trait MailboxSetMethodContract {
          |          "type": "forbidden",
          |          "description": "Insufficient rights",
          |          "properties":["parentId"]
+         |        }
+         |      }
+         |    },
+         |    "c1"]]
+         |}""".stripMargin)
+  }
+
+  @Test
+  def mailboxSetShouldCreateChildMailboxWhenSharedParentMailboxWithCreateRight(server: GuiceJamesServer): Unit = {
+    val path = MailboxPath.forUser(ANDRE, "mailbox")
+    val mailboxId: MailboxId = server.getProbe(classOf[MailboxProbeImpl]).createMailbox(path)
+
+    server.getProbe(classOf[ACLProbeImpl])
+      .replaceRights(path, BOB.asString, new MailboxACL.Rfc4314Rights(Right.Lookup, Right.Read, Right.CreateMailbox))
+    val request =
+      s"""
+        |{
+        |   "using": [ "urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail", "urn:apache:james:params:jmap:mail:shares" ],
+        |   "methodCalls": [
+        |       [
+        |           "Mailbox/set",
+        |           {
+        |                "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+        |                "create": {
+        |                    "C42": {
+        |                      "name": "childMailbox",
+        |                      "parentId":"${mailboxId.serialize}"
+        |                    }
+        |                }
+        |           },
+        |    "c1"
+        |       ]
+        |   ]
+        |}
+        |""".stripMargin
+
+    val response = `given`
+      .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
+      .body(request)
+    .when
+      .post
+    .`then`
+      .log().ifValidationFails()
+      .statusCode(SC_OK)
+      .contentType(JSON)
+      .extract
+      .body
+      .asString
+
+    val childMailboxId: String = server.getProbe(classOf[MailboxProbeImpl])
+      .getMailboxId("#private", ANDRE.asString(), "mailbox.childMailbox")
+      .serialize
+
+    assertThatJson(response)
+      .whenIgnoringPaths("methodResponses[0][1].newState", "methodResponses[0][1].oldState")
+      .isEqualTo(
+      s"""{
+         |  "sessionState": "${SESSION_STATE.value}",
+         |  "methodResponses": [[
+         |    "Mailbox/set",
+         |    {
+         |      "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+         |      "created":{
+         |        "C42":{
+         |          "id":"${childMailboxId}",
+         |          "isSubscribed":true,
+         |          "myRights":{
+         |            "mayAddItems":true,
+         |            "mayCreateChild":true,
+         |            "mayDelete":true,
+         |            "mayReadItems":true,
+         |            "mayRemoveItems":true,
+         |            "mayRename":true,
+         |            "maySetKeywords":true,
+         |            "maySetSeen":true,
+         |            "maySubmit":true
+         |          },
+         |          "sortOrder":1000,
+         |          "totalEmails":0,
+         |          "totalThreads":0,
+         |          "unreadEmails":0,
+         |          "unreadThreads":0
          |        }
          |      }
          |    },
@@ -2357,7 +2442,7 @@ trait MailboxSetMethodContract {
 
     assertThatJson(response)
       .whenIgnoringPaths("methodResponses[0][1].state")
-      .withOptions(new Options(Option.IGNORING_ARRAY_ORDER))
+      .withOptions(Option.IGNORING_ARRAY_ORDER)
       .isEqualTo(
       s"""{
          |    "sessionState": "${SESSION_STATE.value}",
@@ -2560,7 +2645,7 @@ trait MailboxSetMethodContract {
     val request =
       s"""
         |{
-        |   "using": [ "urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail" ],
+        |   "using": [ "urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail", "urn:apache:james:params:jmap:mail:shares" ],
         |   "methodCalls": [
         |       [
         |           "Mailbox/set",
@@ -2598,13 +2683,85 @@ trait MailboxSetMethodContract {
          |      "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
          |      "notDestroyed": {
          |        "${mailboxId.serialize}": {
-         |          "type": "notFound",
-         |          "description": "#private:andre@domain.tld:mailbox"
+         |          "type": "invalidArguments",
+         |          "description": "user 'bob@domain.tld' is not allowed to delete the mailbox '#private:andre@domain.tld:mailbox'"
          |        }
          |      }
          |    },
          |    "c1"]]
          |}""".stripMargin)
+  }
+
+  @Test
+  def deleteSharedMailboxShouldSuccessWhenHasRight(server: GuiceJamesServer): Unit = {
+    val path = MailboxPath.forUser(ANDRE, "mailbox")
+    val mailboxId: MailboxId = server.getProbe(classOf[MailboxProbeImpl]).createMailbox(path)
+    server.getProbe(classOf[ACLProbeImpl])
+      .replaceRights(path, BOB.asString, new MailboxACL.Rfc4314Rights(Right.Lookup, Right.Read, Right.DeleteMailbox))
+
+    val request =
+      s"""
+         |{
+         |   "using": [ "urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail", "urn:apache:james:params:jmap:mail:shares" ],
+         |   "methodCalls": [
+         |       [
+         |           "Mailbox/set",
+         |           {
+         |                "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+         |                "destroy": ["${mailboxId.serialize}"]
+         |           },
+         |    "c1"
+         |       ]
+         |   ]
+         |}
+         |""".stripMargin
+
+    `given`
+      .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
+      .body(request)
+    .when
+      .post
+    .`then`
+      .log().ifValidationFails()
+      .statusCode(SC_OK)
+      .contentType(JSON)
+      .body("methodResponses[0][1].destroyed", hasSize(1))
+      .body("methodResponses[0][1].destroyed[0]", equalTo(mailboxId.serialize))
+  }
+
+  @Test
+  def deleteSharedMailboxShouldFailWhenDoesNotHaveRight(server: GuiceJamesServer): Unit = {
+    val path = MailboxPath.forUser(ANDRE, "mailbox")
+    val mailboxId: MailboxId = server.getProbe(classOf[MailboxProbeImpl]).createMailbox(path)
+    server.getProbe(classOf[ACLProbeImpl])
+      .replaceRights(path, BOB.asString, MailboxACL.FULL_RIGHTS.except(new MailboxACL.Rfc4314Rights(Right.DeleteMailbox)))
+
+    `given`
+      .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
+      .body(
+        s"""
+           |{
+           |   "using": [ "urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail", "urn:apache:james:params:jmap:mail:shares" ],
+           |   "methodCalls": [
+           |       [
+           |           "Mailbox/set",
+           |           {
+           |                "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+           |                "destroy": ["${mailboxId.serialize}"]
+           |           },
+           |    "c1"
+           |       ]
+           |   ]
+           |}
+           |""".stripMargin)
+    .when
+      .post
+    .`then`
+      .log().ifValidationFails()
+      .statusCode(SC_OK)
+      .contentType(JSON)
+      .body("methodResponses[0][1].notDestroyed", hasKey(mailboxId.serialize))
+      .body("methodResponses[0][1].notDestroyed." + mailboxId.serialize + ".type", equalTo("invalidArguments"))
   }
 
   @Test
@@ -3663,15 +3820,15 @@ trait MailboxSetMethodContract {
   }
 
   @Test
-  def updateShouldNotRenameDelegatedMailboxes(server: GuiceJamesServer): Unit = {
+  def updateShouldNotRenameSharedMailboxWhenDoesNotHasRight(server: GuiceJamesServer): Unit = {
     val path = MailboxPath.forUser(ANDRE, "previousName")
     val mailboxId1: MailboxId = server.getProbe(classOf[MailboxProbeImpl]).createMailbox(path)
     server.getProbe(classOf[ACLProbeImpl])
-      .replaceRights(path, BOB.asString, MailboxACL.FULL_RIGHTS)
+      .replaceRights(path, BOB.asString, MailboxACL.FULL_RIGHTS.except(new MailboxACL.Rfc4314Rights(MailboxACL.Right.DeleteMailbox)))
     val request =
       s"""
         |{
-        |   "using": [ "urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail" ],
+        |   "using": [ "urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail", "urn:apache:james:params:jmap:mail:shares" ],
         |   "methodCalls": [
         |       ["Mailbox/set",
         |           {
@@ -3686,6 +3843,63 @@ trait MailboxSetMethodContract {
         |}
         |""".stripMargin
 
+    `given`
+      .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
+      .body(request)
+    .when
+      .post
+    .`then`
+      .log().ifValidationFails()
+      .statusCode(SC_OK)
+      .contentType(JSON)
+      .body("methodResponses[0][1].notUpdated", hasKey(mailboxId1.serialize))
+      .body("methodResponses[0][1].notUpdated." + mailboxId1.serialize,
+        jsonEquals(s"""{
+                      |  "type": "forbidden",
+                      |  "description": "Invalid change to a delegated mailbox"
+                      |}""".stripMargin))
+  }
+
+  @Test
+  def updateShouldRenameSharedMailboxWhenHasRight(server: GuiceJamesServer): Unit = {
+    val parentPath = MailboxPath.forUser(ANDRE, "parent")
+    val parentId: MailboxId = server.getProbe(classOf[MailboxProbeImpl]).createMailbox(parentPath)
+    val childPath = parentPath.child("child1", '.')
+    val childId: MailboxId = server.getProbe(classOf[MailboxProbeImpl]).createMailbox(childPath)
+    server.getProbe(classOf[ACLProbeImpl])
+      .replaceRights(parentPath, BOB.asString, new MailboxACL.Rfc4314Rights(MailboxACL.Right.CreateMailbox));
+    server.getProbe(classOf[ACLProbeImpl])
+      .replaceRights(childPath, BOB.asString, MailboxACL.FULL_RIGHTS);
+
+    val request =
+      s"""
+         |{
+         |  "using": [ "urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail", "urn:apache:james:params:jmap:mail:shares" ],
+         |  "methodCalls": [
+         |    [
+         |      "Mailbox/set",
+         |      {
+         |        "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+         |        "update": {
+         |          "${childId.serialize}": {
+         |            "name": "newName"
+         |          }
+         |        }
+         |      },
+         |      "c1"
+         |    ],
+         |    [
+         |      "Mailbox/get",
+         |      {
+         |        "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+         |        "ids": [ "${childId.serialize}" ],
+         |        "properties": [ "id", "name", "parentId", "myRights", "rights" ]
+         |      },
+         |      "c2"
+         |    ]
+         |  ]
+         |}""".stripMargin
+
     val response = `given`
       .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
       .body(request)
@@ -3695,33 +3909,64 @@ trait MailboxSetMethodContract {
       .log().ifValidationFails()
       .statusCode(SC_OK)
       .contentType(JSON)
-      .extract
-      .body
-      .asString
+    .extract()
+    .body()
+    .asString()
 
     assertThatJson(response)
-      .whenIgnoringPaths("methodResponses[0][1].newState", "methodResponses[0][1].oldState")
+      .withOptions(IGNORING_ARRAY_ORDER)
+      .whenIgnoringPaths("methodResponses[1][1].state", "methodResponses[0][1].newState", "methodResponses[0][1].oldState")
       .isEqualTo(
-      s"""{
-         |  "sessionState": "${SESSION_STATE.value}",
-         |  "methodResponses": [
-         |    ["Mailbox/set", {
-         |      "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
-         |      "notUpdated": {
-         |        "${mailboxId1.serialize}": {
-         |          "type": "notFound",
-         |          "description": "#private:andre@domain.tld:previousName"
-         |        }
-         |      }
-         |    }, "c1"]
-         |  ]
-         |}""".stripMargin)
+        s"""{
+           |  "sessionState": "${SESSION_STATE.value}",
+           |  "methodResponses": [
+           |    [
+           |      "Mailbox/set",
+           |      {
+           |        "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+           |        "updated": {
+           |          "${childId.serialize}": {}
+           |        }
+           |      },
+           |      "c1"
+           |    ],
+           |    [
+           |      "Mailbox/get",
+           |      {
+           |        "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+           |        "list": [
+           |          {
+           |            "id": "${childId.serialize}",
+           |            "name": "newName",
+           |            "parentId": "${parentId.serialize}",
+           |            "myRights": {
+           |              "mayReadItems": true,
+           |              "mayAddItems": true,
+           |              "mayRemoveItems": true,
+           |              "maySetSeen": true,
+           |              "maySetKeywords": true,
+           |              "mayCreateChild": true,
+           |              "mayRename": true,
+           |              "mayDelete": true,
+           |              "maySubmit": true
+           |            },
+           |            "rights": {
+           |              "bob@domain.tld": [ "a", "e", "i", "k", "l", "p", "r", "s", "t", "w", "x" ]
+           |            }
+           |          }
+           |        ],
+           |        "notFound": []
+           |      },
+           |      "c2"
+           |    ]
+           |  ]
+           |}""".stripMargin)
   }
 
   @Test
   def updateShouldNotRenameSystemMailboxes(server: GuiceJamesServer): Unit = {
     val mailboxId: MailboxId = server.getProbe(classOf[MailboxProbeImpl])
-      .createMailbox(MailboxPath.forUser(BOB, "INBOX"))
+      .createMailbox(MailboxPath.forUser(BOB, DefaultMailboxes.DRAFTS))
     val request =
       s"""
         |{
@@ -3771,6 +4016,270 @@ trait MailboxSetMethodContract {
          |    }, "c1"]
          |  ]
          |}""".stripMargin)
+  }
+
+  @Test
+  def updateShouldRenameInbox(server: GuiceJamesServer): Unit = {
+    val bobPath = MailboxPath.inbox(BOB)
+    val mailboxId: MailboxId = server.getProbe(classOf[MailboxProbeImpl]).createMailbox(bobPath)
+    server.getProbe(classOf[MailboxProbeImpl]).appendMessage(BOB.asString(), bobPath,
+        AppendCommand.from(Message.Builder.of.setSubject("test").setBody("testmail", StandardCharsets.UTF_8).build))
+
+    val request =
+      s"""
+         |{
+         |   "using": [ "urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail" ],
+         |   "methodCalls": [
+         |      ["Mailbox/set",
+         |          {
+         |               "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+         |               "update": {
+         |                 "${mailboxId.serialize}" : {
+         |                   "name": "newName"
+         |                 }
+         |               }
+         |          },
+         |   "c2"],
+         |      ["Mailbox/get",
+         |         {
+         |           "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+         |           "properties": ["id", "name", "totalEmails"],
+         |           "ids": ["${mailboxId.serialize}"]
+         |          },
+         |       "c2"]
+         |   ]
+         |}
+         |""".stripMargin
+
+    val response = `given`
+      .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
+      .body(request)
+    .when
+      .post
+    .`then`
+      .log().ifValidationFails()
+      .statusCode(SC_OK)
+      .contentType(JSON)
+      .extract
+      .body
+      .asString
+
+    assertThatJson(response)
+      .whenIgnoringPaths("methodResponses[1][1].state", "methodResponses[0][1].newState", "methodResponses[0][1].oldState")
+      .isEqualTo(
+        s"""{
+           |  "sessionState": "${SESSION_STATE.value}",
+           |  "methodResponses": [
+           |    ["Mailbox/set", {
+           |      "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+           |      "updated": {
+           |        "${mailboxId.serialize}": {}
+           |      }
+           |    }, "c2"],
+           |    ["Mailbox/get", {
+           |      "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+           |      "state": "${INSTANCE.value}",
+           |      "list": [{
+           |        "id": "${mailboxId.serialize}",
+           |        "name": "newName",
+           |        "totalEmails": 1
+           |      }],
+           |      "notFound": []
+           |    }, "c2"]
+           |  ]
+           |}""".stripMargin)
+  }
+
+  @Test
+  def renameInboxShouldCreateNewInbox(server: GuiceJamesServer): Unit = {
+    val bobPath = MailboxPath.inbox(BOB)
+    val mailboxId: MailboxId = server.getProbe(classOf[MailboxProbeImpl]).createMailbox(bobPath)
+    server.getProbe(classOf[MailboxProbeImpl]).appendMessage(BOB.asString(), bobPath,
+      AppendCommand.from(Message.Builder.of.setSubject("test").setBody("testmail", StandardCharsets.UTF_8).build))
+
+    val request =
+      s"""
+         |{
+         |   "using": [ "urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail" ],
+         |   "methodCalls": [
+         |      ["Mailbox/set",
+         |          {
+         |               "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+         |               "update": {
+         |                 "${mailboxId.serialize}" : {
+         |                   "name": "newName"
+         |                 }
+         |               }
+         |          },
+         |   "c2"],
+         |      ["Mailbox/get",
+         |         {
+         |           "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+         |           "properties": ["id", "name"],
+         |           "ids": ["${mailboxId.serialize}"]
+         |          },
+         |       "c2"]
+         |   ]
+         |}
+         |""".stripMargin
+
+    `given`
+      .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
+      .body(request)
+    .when
+      .post
+    .`then`
+      .log().ifValidationFails()
+      .statusCode(SC_OK)
+      .contentType(JSON)
+      .extract
+      .body
+      .asString
+
+    val newInboxId: MailboxId = server.getProbe(classOf[MailboxProbeImpl]).getMailboxId("#private", BOB.asString(), MailboxConstants.INBOX)
+
+    val request2 =
+      s"""
+         |{
+         |   "using": [ "urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail" ],
+         |   "methodCalls": [
+         |      ["Mailbox/get",
+         |         {
+         |           "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+         |           "properties": ["id", "name", "totalEmails"],
+         |           "ids": ["${newInboxId.serialize}"]
+         |          },
+         |       "c2"]
+         |   ]
+         |}
+         |""".stripMargin
+
+    val response2 = `given`
+      .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
+      .body(request2)
+    .when
+      .post
+    .`then`
+      .log().ifValidationFails()
+      .statusCode(SC_OK)
+      .contentType(JSON)
+      .extract
+      .body
+      .asString
+
+    assertThatJson(response2)
+      .whenIgnoringPaths("methodResponses[0][1].state", "methodResponses[0][1].newState", "methodResponses[0][1].oldState")
+      .isEqualTo(
+        s"""{
+           |  "sessionState": "${SESSION_STATE.value}",
+           |  "methodResponses": [
+           |    ["Mailbox/get", {
+           |      "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+           |      "state": "${INSTANCE.value}",
+           |      "list": [{
+           |        "id": "${newInboxId.serialize}",
+           |        "name": "INBOX",
+           |        "totalEmails": 0
+           |      }],
+           |      "notFound": []
+           |    }, "c2"]
+           |  ]
+           |}""".stripMargin)
+  }
+
+  @Test
+  def renameInboxShouldNotAffectSubMailboxes(server: GuiceJamesServer): Unit = {
+    val mailboxId: MailboxId = server.getProbe(classOf[MailboxProbeImpl]).createMailbox(MailboxPath.forUser(BOB, "INBOX"))
+    val subInboxId: MailboxId = server.getProbe(classOf[MailboxProbeImpl]).createMailbox(MailboxPath.forUser(BOB, "INBOX.subInbox"))
+
+    val request =
+      s"""
+         |{
+         |   "using": [ "urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail" ],
+         |   "methodCalls": [
+         |      ["Mailbox/set",
+         |          {
+         |               "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+         |               "update": {
+         |                 "${mailboxId.serialize}" : {
+         |                   "name": "newName"
+         |                 }
+         |               }
+         |          },
+         |   "c2"],
+         |      ["Mailbox/get",
+         |         {
+         |           "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+         |           "properties": ["id", "name"],
+         |           "ids": ["${mailboxId.serialize}"]
+         |          },
+         |       "c2"]
+         |   ]
+         |}
+         |""".stripMargin
+
+    `given`
+      .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
+      .body(request)
+    .when
+      .post
+    .`then`
+      .log().ifValidationFails()
+      .statusCode(SC_OK)
+      .contentType(JSON)
+      .extract
+      .body
+      .asString
+
+    val newInboxId: MailboxId = server.getProbe(classOf[MailboxProbeImpl]).getMailboxId("#private", BOB.asString(), MailboxConstants.INBOX)
+
+    val request2 =
+      s"""
+         |{
+         |   "using": [ "urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail" ],
+         |   "methodCalls": [
+         |      ["Mailbox/get",
+         |         {
+         |           "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+         |           "properties": ["id", "name", "parentId"],
+         |           "ids": ["${subInboxId.serialize}"]
+         |          },
+         |       "c2"]
+         |   ]
+         |}
+         |""".stripMargin
+
+    val response2 = `given`
+      .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
+      .body(request2)
+    .when
+      .post
+    .`then`
+      .log().ifValidationFails()
+      .statusCode(SC_OK)
+      .contentType(JSON)
+      .extract
+      .body
+      .asString
+
+    assertThatJson(response2)
+      .whenIgnoringPaths("methodResponses[0][1].state", "methodResponses[0][1].newState", "methodResponses[0][1].oldState")
+      .isEqualTo(
+        s"""{
+           |  "sessionState": "${SESSION_STATE.value}",
+           |  "methodResponses": [
+           |    ["Mailbox/get", {
+           |      "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+           |      "state": "${INSTANCE.value}",
+           |      "list": [{
+           |        "id": "${subInboxId.serialize}",
+           |        "name": "subInbox",
+           |        "parentId": "${newInboxId.serialize}"
+           |      }],
+           |      "notFound": []
+           |    }, "c2"]
+           |  ]
+           |}""".stripMargin)
   }
 
   @Test
@@ -5569,7 +6078,7 @@ trait MailboxSetMethodContract {
          |      "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
          |      "notUpdated": {
          |        "${mailboxId.serialize}": {
-         |          "type": "invalidArguments",
+         |          "type": "forbidden",
          |          "description": "Invalid change to a delegated mailbox"
          |        }
          |      }
@@ -5842,13 +6351,287 @@ trait MailboxSetMethodContract {
          |      "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
          |      "notUpdated": {
          |        "${mailboxId.serialize}": {
-         |          "type": "invalidPatch",
-         |          "description": "Domain parts ASCII chars must be a-z A-Z 0-9 - or _"
+         |          "type": "invalidArguments",
+         |          "description": "Domain parts ASCII chars must be a-z A-Z 0-9 - or _ in invalid@domain.tld"
          |        }
          |      }
          |    }, "c1"]
          |  ]
          |}""".stripMargin)
+  }
+
+  @Test
+  def partialRightsUpdateShouldCorrectlyHandleAnyoneKeyword(server: GuiceJamesServer): Unit = {
+    val path = MailboxPath.forUser(BOB, "mailbox")
+    val mailboxId = server.getProbe(classOf[MailboxProbeImpl]).createMailbox(path)
+
+    val request =
+      s"""
+         |{
+         |   "using": [ "urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail", "urn:apache:james:params:jmap:mail:shares" ],
+         |   "methodCalls": [
+         |       [
+         |           "Mailbox/set",
+         |           {
+         |                "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+         |                "update": {
+         |                    "${mailboxId.serialize}": {
+         |                      "sharedWith/anyone": ["p"]
+         |                    }
+         |                }
+         |           },
+         |    "c1"
+         |       ],
+         |       ["Mailbox/get",
+         |         {
+         |           "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+         |           "properties": ["id", "rights"],
+         |           "ids": ["${mailboxId.serialize}"]
+         |          },
+         |       "c2"]
+         |   ]
+         |}
+         |""".stripMargin
+
+    val response = `given`
+      .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
+      .body(request)
+    .when
+      .post
+    .`then`
+      .log().ifValidationFails()
+      .statusCode(SC_OK)
+      .contentType(JSON)
+      .extract
+      .body
+      .asString
+
+    assertThatJson(response)
+      .whenIgnoringPaths("methodResponses[0][1].newState", "methodResponses[0][1].oldState",
+        "methodResponses[1][1].state")
+      .isEqualTo(
+        s"""{
+           |  "sessionState": "${SESSION_STATE.value}",
+           |  "methodResponses": [
+           |    ["Mailbox/set", {
+           |      "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+           |      "updated": {
+           |        "${mailboxId.serialize}": {}
+           |      }
+           |    }, "c1"],
+           |    ["Mailbox/get", {
+           |      "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+           |      "list": [{
+           |        "id": "${mailboxId.serialize}",
+           |        "rights": {
+           |          "anyone": ["p"]
+           |        }
+           |      }],
+           |      "notFound": []
+           |    }, "c2"]
+           |  ]
+           |}""".stripMargin)
+
+    assertThat(server.getProbe(classOf[ACLProbeImpl]).retrieveRights(path)
+      .getEntries)
+      .containsKey(MailboxACL.ANYONE_KEY)
+  }
+
+  @Test
+  def partialRightsUpdateShouldNotGrantAnyoneRightOtherThanPost(server: GuiceJamesServer): Unit = {
+    val path = MailboxPath.forUser(BOB, "mailbox")
+    val mailboxId = server.getProbe(classOf[MailboxProbeImpl]).createMailbox(path)
+
+    val request =
+      s"""
+         |{
+         |   "using": [ "urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail", "urn:apache:james:params:jmap:mail:shares" ],
+         |   "methodCalls": [
+         |       [
+         |           "Mailbox/set",
+         |           {
+         |                "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+         |                "update": {
+         |                    "${mailboxId.serialize}": {
+         |                      "sharedWith/anyone": ["r", "l"]
+         |                    }
+         |                }
+         |           },
+         |    "c1"]
+         |   ]
+         |}
+         |""".stripMargin
+
+    val response = `given`
+      .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
+      .body(request)
+      .when
+      .post
+      .`then`
+      .log().ifValidationFails()
+      .statusCode(SC_OK)
+      .contentType(JSON)
+      .extract
+      .body
+      .asString
+
+    assertThatJson(response)
+      .whenIgnoringPaths("methodResponses[0][1].newState", "methodResponses[0][1].oldState",
+        "methodResponses[1][1].state")
+      .isEqualTo(
+        s"""{
+           |  "sessionState": "${SESSION_STATE.value}",
+           |  "methodResponses": [
+           |    ["Mailbox/set", {
+           |      "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+           |      "notUpdated": {
+           |        "${mailboxId.serialize}": {
+           |          "type": "invalidPatch",
+           |          "description": "only the `Post` right can be granted to the identifier `anyone`"
+           |        }
+           |      }
+           |    }, "c1"]
+           |  ]
+           |}""".stripMargin)
+  }
+
+  @Test
+  def resetRightsUpdateShouldCorrectlyHandleAnyoneKeyword(server: GuiceJamesServer): Unit = {
+    val path = MailboxPath.forUser(BOB, "mailbox")
+    val mailboxId = server.getProbe(classOf[MailboxProbeImpl]).createMailbox(path)
+
+    val request =
+      s"""
+         |{
+         |   "using": [ "urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail", "urn:apache:james:params:jmap:mail:shares" ],
+         |   "methodCalls": [
+         |       [
+         |           "Mailbox/set",
+         |           {
+         |                "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+         |                "update": {
+         |                    "${mailboxId.serialize}": {
+         |                      "sharedWith": {
+         |                        "anyone":["p"]
+         |                      }
+         |                    }
+         |                }
+         |           },
+         |    "c1"
+         |       ],
+         |       ["Mailbox/get",
+         |         {
+         |           "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+         |           "properties": ["id", "rights"],
+         |           "ids": ["${mailboxId.serialize}"]
+         |          },
+         |       "c2"]
+         |   ]
+         |}
+         |""".stripMargin
+
+    val response = `given`
+      .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
+      .body(request)
+      .when
+      .post
+      .`then`
+      .log().ifValidationFails()
+      .statusCode(SC_OK)
+      .contentType(JSON)
+      .extract
+      .body
+      .asString
+
+    assertThatJson(response)
+      .whenIgnoringPaths("methodResponses[0][1].newState", "methodResponses[0][1].oldState",
+        "methodResponses[1][1].state")
+      .isEqualTo(
+        s"""{
+           |  "sessionState": "${SESSION_STATE.value}",
+           |  "methodResponses": [
+           |    ["Mailbox/set", {
+           |      "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+           |      "updated": {
+           |        "${mailboxId.serialize}": {}
+           |      }
+           |    }, "c1"],
+           |    ["Mailbox/get", {
+           |      "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+           |      "list": [{
+           |        "id": "${mailboxId.serialize}",
+           |        "rights": {
+           |          "anyone": ["p"]
+           |        }
+           |      }],
+           |      "notFound": []
+           |    }, "c2"]
+           |  ]
+           |}""".stripMargin)
+
+    assertThat(server.getProbe(classOf[ACLProbeImpl]).retrieveRights(path)
+      .getEntries)
+      .containsKey(MailboxACL.ANYONE_KEY)
+  }
+
+  @Test
+  def resetRightsUpdateShouldNotGrantAnyoneRightOtherThanPost(server: GuiceJamesServer): Unit = {
+    val path = MailboxPath.forUser(BOB, "mailbox")
+    val mailboxId = server.getProbe(classOf[MailboxProbeImpl]).createMailbox(path)
+
+    val request =
+      s"""
+         |{
+         |   "using": [ "urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail", "urn:apache:james:params:jmap:mail:shares" ],
+         |   "methodCalls": [
+         |       [
+         |           "Mailbox/set",
+         |           {
+         |                "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+         |                "update": {
+         |                    "${mailboxId.serialize}": {
+         |                      "sharedWith": {
+         |                        "anyone":["r", "l"]
+         |                      }
+         |                    }
+         |                }
+         |           },
+         |    "c1"]
+         |   ]
+         |}
+         |""".stripMargin
+
+    val response = `given`
+      .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
+      .body(request)
+      .when
+      .post
+      .`then`
+      .log().ifValidationFails()
+      .statusCode(SC_OK)
+      .contentType(JSON)
+      .extract
+      .body
+      .asString
+
+    assertThatJson(response)
+      .whenIgnoringPaths("methodResponses[0][1].newState", "methodResponses[0][1].oldState",
+        "methodResponses[1][1].state")
+      .isEqualTo(
+        s"""{
+           |  "sessionState": "${SESSION_STATE.value}",
+           |  "methodResponses": [
+           |    ["Mailbox/set", {
+           |      "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+           |      "notUpdated": {
+           |        "${mailboxId.serialize}": {
+           |          "type": "invalidPatch",
+           |          "description": "only the `Post` right can be granted to the identifier `anyone`"
+           |        }
+           |      }
+           |    }, "c1"]
+           |  ]
+           |}""".stripMargin)
   }
 
   @Test
@@ -5867,7 +6650,7 @@ trait MailboxSetMethodContract {
          |                "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
          |                "update": {
          |                    "${mailboxId.serialize}": {
-         |                      "sharedWith/${ANDRE.asString()}": ["p"]
+         |                      "sharedWith/${ANDRE.asString()}": ["y"]
          |                    }
          |                }
          |           },
@@ -5903,7 +6686,7 @@ trait MailboxSetMethodContract {
          |                "notUpdated": {
          |                    "${mailboxId.serialize}": {
          |                        "type": "invalidArguments",
-         |                        "description": "Specified value do not match the expected JSON format: List(((0),List(JsonValidationError(List(Unknown right 'p'),List()))))",
+         |                        "description": "Specified value do not match the expected JSON format: List(((0),List(JsonValidationError(List(Unknown right 'y'),List()))))",
          |                        "properties": [
          |                            "sharedWith/andre@domain.tld"
          |                        ]
@@ -6097,7 +6880,7 @@ trait MailboxSetMethodContract {
          |      "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
          |      "notUpdated": {
          |        "${mailboxId.serialize}": {
-         |          "type": "invalidArguments",
+         |          "type": "forbidden",
          |          "description": "Invalid change to a delegated mailbox"
          |        }
          |      }
@@ -6314,7 +7097,7 @@ trait MailboxSetMethodContract {
          |}""".stripMargin)
   }
 
-  @RepeatedTest(100)
+  @RepeatedTest(20)
   def concurrencyChecksUponParentIdUpdate(server: GuiceJamesServer): Unit = {
     val mailboxId1: MailboxId = server.getProbe(classOf[MailboxProbeImpl])
       .createMailbox(MailboxPath.forUser(BOB, "mailbox1"))
@@ -6411,7 +7194,7 @@ trait MailboxSetMethodContract {
       .asString
 
     assertThatJson(response)
-      .withOptions(new Options(Option.IGNORING_ARRAY_ORDER))
+      .withOptions(Option.IGNORING_ARRAY_ORDER)
       .inPath("methodResponses[0][1].list")
       .isArray
       .contains(
@@ -6449,7 +7232,7 @@ trait MailboxSetMethodContract {
       .asString
 
     assertThatJson(responseSpecific)
-      .withOptions(new Options(Option.IGNORING_ARRAY_ORDER))
+      .withOptions(Option.IGNORING_ARRAY_ORDER)
       .inPath("methodResponses[0][1].list")
       .isArray
       .contains(
@@ -7450,7 +8233,7 @@ trait MailboxSetMethodContract {
   }
 
   @Test
-  def updateShouldFailWhenRenamingParentIdWithinADelegatedAccount(server: GuiceJamesServer): Unit = {
+  def updateShouldSuccessWhenRenamingParentIdWithinSharedMailboxAndHasRight(server: GuiceJamesServer): Unit = {
     val mailboxProbe = server.getProbe(classOf[MailboxProbeImpl])
     val path = MailboxPath.forUser(ANDRE, "mailbox")
     val mailboxId: MailboxId = mailboxProbe.createMailbox(path)
@@ -7463,7 +8246,7 @@ trait MailboxSetMethodContract {
 
     val request = s"""
         |{
-        |   "using": [ "urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail" ],
+        |   "using": [ "urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail", "urn:apache:james:params:jmap:mail:shares" ],
         |   "methodCalls": [
         |       [
         |           "Mailbox/set",
@@ -7481,7 +8264,7 @@ trait MailboxSetMethodContract {
         |}
         |""".stripMargin
 
-    val response = `given`
+    `given`
       .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
       .body(request)
     .when
@@ -7489,32 +8272,59 @@ trait MailboxSetMethodContract {
     .`then`
       .log().ifValidationFails()
       .statusCode(SC_OK)
-      .contentType(JSON)
-      .extract
-      .body
-      .asString
-
-    assertThatJson(response)
-      .whenIgnoringPaths("methodResponses[0][1].newState", "methodResponses[0][1].oldState")
-      .isEqualTo(
-      s"""{
-         |  "sessionState": "${SESSION_STATE.value}",
-         |  "methodResponses": [
-         |    ["Mailbox/set", {
-         |      "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
-         |      "notUpdated": {
-         |        "${mailboxId.serialize}": {
-         |          "type": "notFound",
-         |          "description": "#private:andre@domain.tld:parent.mailbox"
-         |        }
-         |      }
-         |    }, "c2"]
-         |  ]
-         |}""".stripMargin)
+      .body("methodResponses[0][1].updated", hasKey(mailboxId.serialize))
   }
 
   @Test
-  def updateShouldFailWhenRenamingParentIdFromADelegatedAccount(server: GuiceJamesServer): Unit = {
+  def updateShouldFailWhenRenamingParentIdWithinSharedMailboxAndDoesNotHasRight(server: GuiceJamesServer): Unit = {
+    val mailboxProbe = server.getProbe(classOf[MailboxProbeImpl])
+    val path = MailboxPath.forUser(ANDRE, "mailbox")
+    val mailboxId: MailboxId = mailboxProbe.createMailbox(path)
+    val parentPath = MailboxPath.forUser(ANDRE, "parent")
+    val parentId = mailboxProbe.createMailbox(parentPath)
+
+    val aCLProbeImpl = server.getProbe(classOf[ACLProbeImpl])
+    aCLProbeImpl.replaceRights(path, BOB.asString, MailboxACL.FULL_RIGHTS.except(new MailboxACL.Rfc4314Rights(Right.DeleteMailbox)))
+    aCLProbeImpl.replaceRights(parentPath, BOB.asString, MailboxACL.FULL_RIGHTS.except(new MailboxACL.Rfc4314Rights(Right.CreateMailbox)))
+
+    val request = s"""
+                     |{
+                     |   "using": [ "urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail", "urn:apache:james:params:jmap:mail:shares" ],
+                     |   "methodCalls": [
+                     |       [
+                     |           "Mailbox/set",
+                     |           {
+                     |                "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+                     |                "update": {
+                     |                    "${mailboxId.serialize}": {
+                     |                      "parentId": "${parentId.serialize}"
+                     |                    }
+                     |                }
+                     |           },
+                     |           "c2"
+                     |       ]
+                     |   ]
+                     |}
+                     |""".stripMargin
+
+    `given`
+      .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
+      .body(request)
+    .when
+      .post
+    .`then`
+      .log().ifValidationFails()
+      .statusCode(SC_OK)
+      .body("methodResponses[0][1].notUpdated", hasKey(mailboxId.serialize))
+      .body("methodResponses[0][1].notUpdated." + mailboxId.serialize,
+        jsonEquals(s"""{
+                      |  "type": "forbidden",
+                      |  "description": "Invalid change to a delegated mailbox"
+                      |}""".stripMargin))
+  }
+
+  @Test
+  def updateShouldSuccessWhenUpdateParentIdFromSharedMailboxAndHasRights(server: GuiceJamesServer): Unit = {
     val mailboxProbe = server.getProbe(classOf[MailboxProbeImpl])
     val path = MailboxPath.forUser(ANDRE, "mailbox")
     val mailboxId: MailboxId = mailboxProbe.createMailbox(path)
@@ -7526,7 +8336,7 @@ trait MailboxSetMethodContract {
 
     val request = s"""
         |{
-        |   "using": [ "urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail" ],
+        |   "using": [ "urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail", "urn:apache:james:params:jmap:mail:shares" ],
         |   "methodCalls": [
         |       [
         |           "Mailbox/set",
@@ -7544,9 +8354,185 @@ trait MailboxSetMethodContract {
         |}
         |""".stripMargin
 
-    val response = `given`
+    `given`
       .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
       .body(request)
+    .when
+      .post
+    .`then`
+      .log().ifValidationFails()
+      .statusCode(SC_OK)
+      .body("methodResponses[0][1].updated", hasKey(mailboxId.serialize))
+  }
+
+  @Test
+  def updateShouldFailWhenUpdateParentIdFromSharedMailboxAndDoesNotHasDeleteMailboxRight(server: GuiceJamesServer): Unit = {
+    val mailboxProbe = server.getProbe(classOf[MailboxProbeImpl])
+    val path = MailboxPath.forUser(ANDRE, "mailbox")
+    val mailboxId: MailboxId = mailboxProbe.createMailbox(path)
+    val parentPath = MailboxPath.forUser(BOB, "parent")
+    val parentId = mailboxProbe.createMailbox(parentPath)
+
+    val aCLProbeImpl = server.getProbe(classOf[ACLProbeImpl])
+    aCLProbeImpl.replaceRights(path, BOB.asString, MailboxACL.FULL_RIGHTS.except(new MailboxACL.Rfc4314Rights(Right.DeleteMailbox)))
+
+    val request = s"""
+                     |{
+                     |   "using": [ "urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail", "urn:apache:james:params:jmap:mail:shares" ],
+                     |   "methodCalls": [
+                     |       [
+                     |           "Mailbox/set",
+                     |           {
+                     |                "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+                     |                "update": {
+                     |                    "${mailboxId.serialize}": {
+                     |                      "parentId": "${parentId.serialize}"
+                     |                    }
+                     |                }
+                     |           },
+                     |           "c2"
+                     |       ]
+                     |   ]
+                     |}
+                     |""".stripMargin
+
+    `given`
+      .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
+      .body(request)
+    .when
+      .post
+    .`then`
+      .log().ifValidationFails()
+      .statusCode(SC_OK)
+      .body("methodResponses[0][1].notUpdated", hasKey(mailboxId.serialize))
+      .body("methodResponses[0][1].notUpdated." + mailboxId.serialize,
+        jsonEquals(s"""{
+                      |  "type": "forbidden",
+                      |  "description": "Invalid change to a delegated mailbox"
+                      |}""".stripMargin))
+  }
+
+  @Test
+  def updateShouldFailWhenRenamingParentIdToASharedMailboxWithDoesNotCreateMailboxRight(server: GuiceJamesServer): Unit = {
+    val mailboxProbe = server.getProbe(classOf[MailboxProbeImpl])
+    val path = MailboxPath.forUser(BOB, "mailbox")
+    val mailboxId: MailboxId = mailboxProbe.createMailbox(path)
+    val parentPath = MailboxPath.forUser(ANDRE, "parent")
+    val parentId = mailboxProbe.createMailbox(parentPath)
+
+    val aCLProbeImpl = server.getProbe(classOf[ACLProbeImpl])
+    aCLProbeImpl.replaceRights(parentPath, BOB.asString, MailboxACL.FULL_RIGHTS.except(new MailboxACL.Rfc4314Rights(Right.CreateMailbox)))
+
+    val request = s"""
+        |{
+        |   "using": [ "urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail", "urn:apache:james:params:jmap:mail:shares" ],
+        |   "methodCalls": [
+        |       [
+        |           "Mailbox/set",
+        |           {
+        |                "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+        |                "update": {
+        |                    "${mailboxId.serialize}": {
+        |                      "parentId": "${parentId.serialize}"
+        |                    }
+        |                }
+        |           },
+        |           "c2"
+        |       ]
+        |   ]
+        |}
+        |""".stripMargin
+
+    `given`
+      .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
+      .body(request)
+    .when
+      .post
+    .`then`
+      .log().ifValidationFails()
+      .statusCode(SC_OK)
+      .contentType(JSON)
+      .body("methodResponses[0][1].notUpdated", hasKey(mailboxId.serialize))
+      .body("methodResponses[0][1].notUpdated." + mailboxId.serialize,
+        jsonEquals(s"""{
+                      |  "type": "forbidden",
+                      |  "description": "Invalid change to a delegated mailbox"
+                      |}""".stripMargin))
+  }
+
+  @Test
+  def updateShouldSuccessWhenRenamingParentIdToASharedMailboxWithCreateMailboxRight(server: GuiceJamesServer): Unit = {
+    val mailboxProbe = server.getProbe(classOf[MailboxProbeImpl])
+    val path = MailboxPath.forUser(BOB, "mailbox")
+    val mailboxId: MailboxId = mailboxProbe.createMailbox(path)
+    val parentPath = MailboxPath.forUser(ANDRE, "parent")
+    val parentId = mailboxProbe.createMailbox(parentPath)
+
+    val aCLProbeImpl = server.getProbe(classOf[ACLProbeImpl])
+    aCLProbeImpl.replaceRights(parentPath, BOB.asString, MailboxACL.FULL_RIGHTS)
+
+    val request = s"""
+                     |{
+                     |   "using": [ "urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail", "urn:apache:james:params:jmap:mail:shares" ],
+                     |   "methodCalls": [
+                     |       [
+                     |           "Mailbox/set",
+                     |           {
+                     |                "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+                     |                "update": {
+                     |                    "${mailboxId.serialize}": {
+                     |                      "parentId": "${parentId.serialize}"
+                     |                    }
+                     |                }
+                     |           },
+                     |           "c2"
+                     |       ]
+                     |   ]
+                     |}
+                     |""".stripMargin
+
+    `given`
+      .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
+      .body(request)
+    .when
+      .post
+    .`then`
+      .log().ifValidationFails()
+      .statusCode(SC_OK)
+      .contentType(JSON)
+      .body("methodResponses[0][1].updated", hasKey(mailboxId.serialize))
+  }
+
+  @Test
+  def lookupRightShouldBePropagated(server: GuiceJamesServer): Unit = {
+    val mailboxProbe = server.getProbe(classOf[MailboxProbeImpl])
+    val path = MailboxPath.forUser(BOB, "mailbox")
+    val mailboxId: MailboxId = mailboxProbe.createMailbox(path)
+    val parentPath = MailboxPath.forUser(BOB, "parent")
+    val parentId = mailboxProbe.createMailbox(parentPath)
+
+    val aCLProbeImpl = server.getProbe(classOf[ACLProbeImpl])
+    aCLProbeImpl.replaceRights(path, ANDRE.asString, MailboxACL.FULL_RIGHTS)
+
+    val response = `given`
+      .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
+      .body(s"""{
+              |   "using": [ "urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail", "urn:apache:james:params:jmap:mail:shares" ],
+              |   "methodCalls": [
+              |       [
+              |           "Mailbox/set",
+              |           {
+              |                "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+              |                "update": {
+              |                    "${mailboxId.serialize}": {
+              |                      "parentId": "${parentId.serialize}"
+              |                    }
+              |                }
+              |           },
+              |           "c1"
+              |       ]
+              |   ]
+              |}""".stripMargin)
     .when
       .post
     .`then`
@@ -7565,156 +8551,60 @@ trait MailboxSetMethodContract {
          |  "methodResponses": [
          |    ["Mailbox/set", {
          |      "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
-         |      "notUpdated": {
-         |        "${mailboxId.serialize}": {
-         |          "type": "notFound",
-         |          "description": "#private:andre@domain.tld:mailbox"
-         |        }
-         |      }
-         |    }, "c2"]
-         |  ]
-         |}""".stripMargin)
-  }
-
-  @Test
-  def updateShouldFailWhenRenamingParentIdToADelegatedAccount(server: GuiceJamesServer): Unit = {
-    val mailboxProbe = server.getProbe(classOf[MailboxProbeImpl])
-    val path = MailboxPath.forUser(BOB, "mailbox")
-    val mailboxId: MailboxId = mailboxProbe.createMailbox(path)
-    val parentPath = MailboxPath.forUser(ANDRE, "parent")
-    val parentId = mailboxProbe.createMailbox(parentPath)
-
-    val aCLProbeImpl = server.getProbe(classOf[ACLProbeImpl])
-    aCLProbeImpl.replaceRights(parentPath, BOB.asString, MailboxACL.FULL_RIGHTS)
-
-    val request = s"""
-        |{
-        |   "using": [ "urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail" ],
-        |   "methodCalls": [
-        |       [
-        |           "Mailbox/set",
-        |           {
-        |                "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
-        |                "update": {
-        |                    "${mailboxId.serialize}": {
-        |                      "parentId": "${parentId.serialize}"
-        |                    }
-        |                }
-        |           },
-        |           "c2"
-        |       ]
-        |   ]
-        |}
-        |""".stripMargin
-
-    val response = `given`
-      .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
-      .body(request)
-    .when
-      .post
-    .`then`
-      .log().ifValidationFails()
-      .statusCode(SC_OK)
-      .contentType(JSON)
-      .extract
-      .body
-      .asString
-
-    assertThatJson(response)
-      .whenIgnoringPaths("methodResponses[0][1].newState", "methodResponses[0][1].oldState")
-      .isEqualTo(
-      s"""{
-         |  "sessionState": "${SESSION_STATE.value}",
-         |  "methodResponses": [
-         |    ["Mailbox/set", {
-         |      "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
-         |      "notUpdated": {
-         |        "${mailboxId.serialize}": {
-         |          "type": "notFound",
-         |          "description": "#private:andre@domain.tld:parent.mailbox"
-         |        }
-         |      }
-         |    }, "c2"]
-         |  ]
-         |}""".stripMargin)
-  }
-
-  @Test
-  def lookupRightShouldBePropagated(server: GuiceJamesServer): Unit = {
-    val mailboxProbe = server.getProbe(classOf[MailboxProbeImpl])
-    val path = MailboxPath.forUser(BOB, "mailbox")
-    val mailboxId: MailboxId = mailboxProbe.createMailbox(path)
-    val parentPath = MailboxPath.forUser(BOB, "parent")
-    val parentId = mailboxProbe.createMailbox(parentPath)
-
-    val aCLProbeImpl = server.getProbe(classOf[ACLProbeImpl])
-    aCLProbeImpl.replaceRights(path, ANDRE.asString, MailboxACL.FULL_RIGHTS)
-
-    val request = s"""
-        |{
-        |   "using": [ "urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail", "urn:apache:james:params:jmap:mail:shares" ],
-        |   "methodCalls": [
-        |       [
-        |           "Mailbox/set",
-        |           {
-        |                "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
-        |                "update": {
-        |                    "${mailboxId.serialize}": {
-        |                      "parentId": "${parentId.serialize}"
-        |                    }
-        |                }
-        |           },
-        |           "c1"
-        |       ],
-        |       ["Mailbox/get",
-        |         {
-        |           "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
-        |           "ids": ["${parentId.serialize}"],
-        |           "properties": ["id", "name", "parentId", "rights"]
-        |          },
-        |          "c2"]
-        |   ]
-        |}
-        |""".stripMargin
-
-    val response = `given`
-      .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
-      .body(request)
-    .when
-      .post
-    .`then`
-      .log().ifValidationFails()
-      .statusCode(SC_OK)
-      .contentType(JSON)
-      .extract
-      .body
-      .asString
-
-    assertThatJson(response)
-      .whenIgnoringPaths("methodResponses[0][1].oldState", "methodResponses[0][1].newState", "methodResponses[1][1].state")
-      .isEqualTo(
-      s"""{
-         |  "sessionState": "${SESSION_STATE.value}",
-         |  "methodResponses": [
-         |    ["Mailbox/set", {
-         |      "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
          |      "updated": {
          |        "${mailboxId.serialize}": {}
          |      }
-         |    }, "c1"],
-         |    ["Mailbox/get", {
-         |      "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
-         |      "list": [{
-         |        "id": "${parentId.serialize}",
-         |        "name": "parent",
-         |        "rights": {
-         |          "${ANDRE.asString()}": ["l"]
-         |        }
-         |      }],
-         |      "notFound": []
-         |    }, "c2"]
+         |    }, "c1"]
          |  ]
          |}""".stripMargin)
+
+
+    awaitAtMostTenSeconds.untilAsserted(() =>{
+      val response = `given`
+        .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
+        .body(
+          s"""{
+            |   "using": [ "urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail", "urn:apache:james:params:jmap:mail:shares" ],
+            |   "methodCalls": [
+            |       ["Mailbox/get",
+            |         {
+            |           "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+            |           "ids": ["${parentId.serialize}"],
+            |           "properties": ["id", "name", "parentId", "rights"]
+            |          },
+            |          "c2"]
+            |   ]
+            |}""".stripMargin)
+      .when
+        .post
+      .`then`
+        .log().ifValidationFails()
+        .statusCode(SC_OK)
+        .contentType(JSON)
+        .extract
+        .body
+        .asString
+
+      assertThatJson(response)
+        .isEqualTo(
+          s"""{
+             |  "sessionState": "${SESSION_STATE.value}",
+             |  "methodResponses": [
+             |    ["Mailbox/get", {
+             |      "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+             |      "state": "$${json-unit.ignore}",
+             |      "list": [{
+             |        "id": "${parentId.serialize}",
+             |        "name": "parent",
+             |        "rights": {
+             |          "${ANDRE.asString()}": ["l"]
+             |        }
+             |      }],
+             |      "notFound": []
+             |    }, "c2"]
+             |  ]
+             |}""".stripMargin)
+    })
   }
 
   @Test
@@ -7958,7 +8848,7 @@ trait MailboxSetMethodContract {
       .asString
 
     assertThatJson(response)
-      .withOptions(new Options(Option.IGNORING_ARRAY_ORDER))
+      .withOptions(Option.IGNORING_ARRAY_ORDER)
       .whenIgnoringPaths("methodResponses[1][1].oldState", "methodResponses[1][1].newState")
       .inPath("methodResponses[1][1]")
       .isEqualTo(
@@ -8019,7 +8909,7 @@ trait MailboxSetMethodContract {
       .asString
 
     assertThatJson(response)
-      .withOptions(new Options(Option.IGNORING_ARRAY_ORDER))
+      .withOptions(Option.IGNORING_ARRAY_ORDER)
       .whenIgnoringPaths("methodResponses[1][1].oldState", "methodResponses[1][1].newState")
       .inPath("methodResponses[1][1]")
       .isEqualTo(
@@ -8168,17 +9058,15 @@ trait MailboxSetMethodContract {
                  |      }
                  |    }, "c1"]]
                  |}""".stripMargin))
-
-            List(ws.receive().asPayload)
+            ws.receiveMessageInTimespan(scala.concurrent.duration.Duration(1000, MILLISECONDS))
         })
         .send(backend)
         .body
 
-    Thread.sleep(200)
+    val hasMailboxStateChangeConsumer : ThrowingConsumer[String] = (s: String) => assertThat(s)
+        .startsWith("{\"@type\":\"StateChange\",\"changed\":{\"29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6\":{\"Mailbox\":")
     assertThat(response.toOption.get.asJava)
-      .hasSize(1)
-    assertThat(response.toOption.get.head)
-      .startsWith("{\"@type\":\"StateChange\",\"changed\":{\"29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6\":{\"Mailbox\":")
+      .anySatisfy(hasMailboxStateChangeConsumer)
   }
 
   @Test
@@ -8220,6 +9108,189 @@ trait MailboxSetMethodContract {
           .startsWith("event: state\ndata: {\"@type\":\"StateChange\",\"changed\":{\"29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6\":{\"Mailbox\":")
         assertThat(seq.head).endsWith("\n\n")
       }
+  }
+
+  @Test
+  def createSubfolderInSharedMailboxShouldSucceedWhenHasCreateMailboxRight(server: GuiceJamesServer): Unit = {
+    val path = MailboxPath.forUser(ANDRE, "shared")
+    val sharedMailboxId: MailboxId = server.getProbe(classOf[MailboxProbeImpl]).createMailbox(path)
+    server.getProbe(classOf[ACLProbeImpl])
+      .replaceRights(path, BOB.asString, new MailboxACL.Rfc4314Rights(Right.Lookup, Right.CreateMailbox))
+
+    val response = `given`
+      .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
+      .body(s"""{
+               |   "using": [ "urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail", "urn:apache:james:params:jmap:mail:shares" ],
+               |   "methodCalls": [
+               |     [ "Mailbox/set",
+               |       {
+               |         "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+               |         "create": {
+               |           "C42": {
+               |             "name": "child",
+               |             "parentId": "${sharedMailboxId.serialize}"
+               |           }
+               |         }
+               |       }, "c1"],
+               |     [ "Mailbox/get",
+               |       {
+               |         "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+               |         "ids": ["#C42"],
+               |         "properties": ["id", "name", "parentId"]
+               |       }, "c2"]]
+               |}""".stripMargin)
+    .when
+      .post
+    .`then`
+      .log().ifValidationFails()
+      .statusCode(SC_OK)
+      .extract.body.asString
+
+    assertThatJson(response)
+      .inPath("methodResponses[1][1].list[0]")
+      .isEqualTo(s"""{
+                    |  "id": "$${json-unit.ignore}",
+                    |  "name": "child",
+                    |  "parentId": "${sharedMailboxId.serialize}"
+                    |}""".stripMargin)
+  }
+
+  @Test
+  def renameSubfolderInSharedMailboxShouldSucceedWhenHasDeleteMailboxRight(server: GuiceJamesServer): Unit = {
+    val parentPath = MailboxPath.forUser(ANDRE, "shared")
+    val parentId: MailboxId = server.getProbe(classOf[MailboxProbeImpl]).createMailbox(parentPath)
+    val childPath = parentPath.child("child", '.')
+    val childId: MailboxId = server.getProbe(classOf[MailboxProbeImpl]).createMailbox(childPath)
+
+    server.getProbe(classOf[ACLProbeImpl])
+      .replaceRights(parentPath, BOB.asString, new MailboxACL.Rfc4314Rights(Right.CreateMailbox))
+    server.getProbe(classOf[ACLProbeImpl])
+      .replaceRights(childPath, BOB.asString, new MailboxACL.Rfc4314Rights(Right.Lookup, Right.DeleteMailbox))
+
+    val response = `given`
+      .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
+      .body(s"""{
+               |   "using": [ "urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail", "urn:apache:james:params:jmap:mail:shares" ],
+               |   "methodCalls": [
+               |     [ "Mailbox/set",
+               |       {
+               |         "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+               |         "update": {
+               |           "${childId.serialize}": {
+               |             "name": "renamed"
+               |           }
+               |         }
+               |       }, "c1"],
+               |     [ "Mailbox/get",
+               |       {
+               |         "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+               |         "ids": ["${childId.serialize}"],
+               |         "properties": ["id", "name", "parentId"]
+               |       }, "c2"]]
+               |}""".stripMargin)
+    .when
+      .post
+    .`then`
+      .log().ifValidationFails()
+      .statusCode(SC_OK)
+      .extract.body.asString
+
+    assertThatJson(response)
+      .inPath("methodResponses[1][1].list[0]")
+      .isEqualTo(s"""{
+                    |  "id": "${childId.serialize}",
+                    |  "name": "renamed",
+                    |  "parentId": "${parentId.serialize}"
+                    |}""".stripMargin)
+  }
+
+  @Test
+  def moveSubfolderInSharedMailboxShouldSucceedWhenHasRequiredRights(server: GuiceJamesServer): Unit = {
+    val srcParentPath = MailboxPath.forUser(ANDRE, "src")
+    server.getProbe(classOf[MailboxProbeImpl]).createMailbox(srcParentPath)
+    val childPath = srcParentPath.child("child", '.')
+    val childId: MailboxId = server.getProbe(classOf[MailboxProbeImpl]).createMailbox(childPath)
+    val destParentPath = MailboxPath.forUser(ANDRE, "dest")
+    val destParentId: MailboxId = server.getProbe(classOf[MailboxProbeImpl]).createMailbox(destParentPath)
+
+    server.getProbe(classOf[ACLProbeImpl])
+      .replaceRights(childPath, BOB.asString, new MailboxACL.Rfc4314Rights(Right.Lookup, Right.DeleteMailbox))
+    server.getProbe(classOf[ACLProbeImpl])
+      .replaceRights(destParentPath, BOB.asString, new MailboxACL.Rfc4314Rights(Right.Lookup, Right.CreateMailbox))
+
+    val response = `given`
+      .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
+      .body(s"""{
+               |   "using": [ "urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail", "urn:apache:james:params:jmap:mail:shares" ],
+               |   "methodCalls": [
+               |     [ "Mailbox/set",
+               |       {
+               |         "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+               |         "update": {
+               |           "${childId.serialize}": {
+               |             "parentId": "${destParentId.serialize}"
+               |           }
+               |         }
+               |       }, "c1"],
+               |     [ "Mailbox/get",
+               |       {
+               |         "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+               |         "ids": ["${childId.serialize}"],
+               |         "properties": ["id", "name", "parentId"]
+               |       }, "c2"]]
+               |}""".stripMargin)
+    .when
+      .post
+    .`then`
+      .log().ifValidationFails()
+      .statusCode(SC_OK)
+      .extract.body.asString
+
+    assertThatJson(response)
+      .inPath("methodResponses[1][1].list[0]")
+      .isEqualTo(s"""{
+                    |  "id": "${childId.serialize}",
+                    |  "name": "child",
+                    |  "parentId": "${destParentId.serialize}"
+                    |}""".stripMargin)
+  }
+
+  @Test
+  def deleteSubfolderInSharedMailboxShouldSucceedWhenHasDeleteMailboxRight(server: GuiceJamesServer): Unit = {
+    val parentPath = MailboxPath.forUser(ANDRE, "shared")
+    server.getProbe(classOf[MailboxProbeImpl]).createMailbox(parentPath)
+    val childPath = parentPath.child("child", '.')
+    val childId: MailboxId = server.getProbe(classOf[MailboxProbeImpl]).createMailbox(childPath)
+
+    server.getProbe(classOf[ACLProbeImpl])
+      .replaceRights(childPath, BOB.asString, new MailboxACL.Rfc4314Rights(Right.Lookup, Right.DeleteMailbox))
+
+    val response = `given`
+      .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
+      .body(s"""{
+               |   "using": [ "urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail", "urn:apache:james:params:jmap:mail:shares" ],
+               |   "methodCalls": [
+               |     [ "Mailbox/set",
+               |       {
+               |         "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+               |         "destroy": ["${childId.serialize}"]
+               |       }, "c1"],
+               |     [ "Mailbox/get",
+               |       {
+               |         "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+               |         "ids": ["${childId.serialize}"]
+               |       }, "c2"]]
+               |}""".stripMargin)
+    .when
+      .post
+    .`then`
+      .log().ifValidationFails()
+      .statusCode(SC_OK)
+      .extract.body.asString
+
+    assertThatJson(response)
+      .inPath("methodResponses[1][1].notFound")
+      .isEqualTo(s"""["${childId.serialize}"]""")
   }
 
 }

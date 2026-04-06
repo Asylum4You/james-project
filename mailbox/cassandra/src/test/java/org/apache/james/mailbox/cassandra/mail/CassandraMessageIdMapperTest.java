@@ -31,7 +31,7 @@ import org.apache.james.backends.cassandra.CassandraCluster;
 import org.apache.james.backends.cassandra.CassandraClusterExtension;
 import org.apache.james.backends.cassandra.StatementRecorder;
 import org.apache.james.backends.cassandra.init.configuration.CassandraConfiguration;
-import org.apache.james.blob.api.HashBlobId;
+import org.apache.james.blob.api.PlainBlobId;
 import org.apache.james.core.Username;
 import org.apache.james.junit.categories.Unstable;
 import org.apache.james.mailbox.MailboxSession;
@@ -152,14 +152,14 @@ class CassandraMessageIdMapperTest extends MessageIdMapperTest {
                     .whenQueryStartsWith("UPDATE messagev3"));
 
             try {
-                message1.setUid(mapperProvider.generateMessageUid());
+                message1.setUid(mapperProvider.generateMessageUid(benwaInboxMailbox));
                 message1.setModSeq(mapperProvider.generateModSeq(benwaInboxMailbox));
                 sut.save(message1);
             } catch (Exception e) {
                 // ignoring expected error
             }
 
-            CassandraMessageIdDAO messageIdDAO = new CassandraMessageIdDAO(cassandra.getConf(), new HashBlobId.Factory());
+            CassandraMessageIdDAO messageIdDAO = new CassandraMessageIdDAO(cassandra.getConf(), new PlainBlobId.Factory());
             SoftAssertions.assertSoftly(Throwing.consumer(softly -> {
                 softly.assertThat(sut.find(ImmutableList.of(message1.getMessageId()), MessageMapper.FetchType.METADATA))
                     .isEmpty();
@@ -176,14 +176,14 @@ class CassandraMessageIdMapperTest extends MessageIdMapperTest {
                     .whenQueryStartsWith("INSERT INTO blobparts (id,chunknumber,data)"));
 
             try {
-                message1.setUid(mapperProvider.generateMessageUid());
+                message1.setUid(mapperProvider.generateMessageUid(benwaInboxMailbox));
                 message1.setModSeq(mapperProvider.generateModSeq(benwaInboxMailbox));
                 sut.save(message1);
             } catch (Exception e) {
                 // ignoring expected error
             }
 
-            CassandraMessageIdDAO messageIdDAO = new CassandraMessageIdDAO(cassandra.getConf(), new HashBlobId.Factory());
+            CassandraMessageIdDAO messageIdDAO = new CassandraMessageIdDAO(cassandra.getConf(), new PlainBlobId.Factory());
             SoftAssertions.assertSoftly(Throwing.consumer(softly -> {
                 softly.assertThat(sut.find(ImmutableList.of(message1.getMessageId()), MessageMapper.FetchType.METADATA))
                     .isEmpty();
@@ -200,14 +200,14 @@ class CassandraMessageIdMapperTest extends MessageIdMapperTest {
                     .whenQueryStartsWith("INSERT INTO blobs (id,position) VALUES (:id,:position)"));
 
             try {
-                message1.setUid(mapperProvider.generateMessageUid());
+                message1.setUid(mapperProvider.generateMessageUid(benwaInboxMailbox));
                 message1.setModSeq(mapperProvider.generateModSeq(benwaInboxMailbox));
                 sut.save(message1);
             } catch (Exception e) {
                 // ignoring expected error
             }
 
-            CassandraMessageIdDAO messageIdDAO = new CassandraMessageIdDAO(cassandra.getConf(), new HashBlobId.Factory());
+            CassandraMessageIdDAO messageIdDAO = new CassandraMessageIdDAO(cassandra.getConf(), new PlainBlobId.Factory());
             SoftAssertions.assertSoftly(Throwing.consumer(softly -> {
                 softly.assertThat(sut.find(ImmutableList.of(message1.getMessageId()), MessageMapper.FetchType.METADATA))
                     .isEmpty();
@@ -224,14 +224,14 @@ class CassandraMessageIdMapperTest extends MessageIdMapperTest {
                     .whenQueryStartsWith("INSERT INTO imapuidtable"));
 
             try {
-                message1.setUid(mapperProvider.generateMessageUid());
+                message1.setUid(mapperProvider.generateMessageUid(benwaInboxMailbox));
                 message1.setModSeq(mapperProvider.generateModSeq(benwaInboxMailbox));
                 sut.save(message1);
             } catch (Exception e) {
                 // ignoring expected error
             }
 
-            CassandraMessageIdDAO messageIdDAO = new CassandraMessageIdDAO(cassandra.getConf(), new HashBlobId.Factory());
+            CassandraMessageIdDAO messageIdDAO = new CassandraMessageIdDAO(cassandra.getConf(), new PlainBlobId.Factory());
             SoftAssertions.assertSoftly(Throwing.consumer(softly -> {
                 softly.assertThat(sut.find(ImmutableList.of(message1.getMessageId()), MessageMapper.FetchType.METADATA))
                     .isEmpty();
@@ -248,7 +248,7 @@ class CassandraMessageIdMapperTest extends MessageIdMapperTest {
                     .whenQueryStartsWith("INSERT INTO messageidtable"));
 
             try {
-                message1.setUid(mapperProvider.generateMessageUid());
+                message1.setUid(mapperProvider.generateMessageUid(benwaInboxMailbox));
                 message1.setModSeq(mapperProvider.generateModSeq(benwaInboxMailbox));
                 sut.save(message1);
             } catch (Exception e) {
@@ -257,7 +257,7 @@ class CassandraMessageIdMapperTest extends MessageIdMapperTest {
 
             CassandraMessageIdToImapUidDAO imapUidDAO = new CassandraMessageIdToImapUidDAO(
                 cassandra.getConf(),
-                new HashBlobId.Factory(),
+                new PlainBlobId.Factory(),
                 CassandraConfiguration.DEFAULT_CONFIGURATION);
 
             SoftAssertions.assertSoftly(Throwing.consumer(softly -> {
@@ -275,7 +275,7 @@ class CassandraMessageIdMapperTest extends MessageIdMapperTest {
                     .times(5)
                     .whenQueryStartsWith("INSERT INTO messageidtable"));
 
-            message1.setUid(mapperProvider.generateMessageUid());
+            message1.setUid(mapperProvider.generateMessageUid(benwaInboxMailbox));
             message1.setModSeq(mapperProvider.generateModSeq(benwaInboxMailbox));
             sut.save(message1);
 

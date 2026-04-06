@@ -26,6 +26,7 @@ import static org.apache.james.vault.DeletedMessageFixture.CONTENT;
 import static org.apache.james.vault.DeletedMessageFixture.DELETED_MESSAGE;
 import static org.apache.james.vault.DeletedMessageFixture.DELETED_MESSAGE_2;
 import static org.apache.james.vault.DeletedMessageFixture.DELETED_MESSAGE_GENERATOR;
+import static org.apache.james.vault.DeletedMessageFixture.DELETED_MESSAGE_OTHER_USER;
 import static org.apache.james.vault.DeletedMessageFixture.DELETION_DATE;
 import static org.apache.james.vault.DeletedMessageFixture.DELIVERY_DATE;
 import static org.apache.james.vault.DeletedMessageFixture.FINAL_STAGE;
@@ -75,7 +76,7 @@ import java.util.stream.Stream;
 import org.apache.james.blob.api.BlobId;
 import org.apache.james.blob.api.BlobStore;
 import org.apache.james.blob.api.BucketName;
-import org.apache.james.blob.api.HashBlobId;
+import org.apache.james.blob.api.PlainBlobId;
 import org.apache.james.blob.export.api.BlobExportMechanism;
 import org.apache.james.blob.memory.MemoryBlobStoreDAO;
 import org.apache.james.core.Domain;
@@ -87,6 +88,7 @@ import org.apache.james.domainlist.lib.DomainListConfiguration;
 import org.apache.james.domainlist.memory.MemoryDomainList;
 import org.apache.james.json.DTOConverter;
 import org.apache.james.mailbox.DefaultMailboxes;
+import org.apache.james.mailbox.MailboxManager;
 import org.apache.james.mailbox.MailboxSession;
 import org.apache.james.mailbox.MessageManager;
 import org.apache.james.mailbox.exception.MailboxException;
@@ -102,12 +104,14 @@ import org.apache.james.mailbox.model.MessageId;
 import org.apache.james.mailbox.model.MessageRange;
 import org.apache.james.mailbox.model.MessageResult;
 import org.apache.james.mailbox.model.MultimailboxesSearchQuery;
+import org.apache.james.mailbox.model.SearchOptions;
 import org.apache.james.mailbox.model.SearchQuery;
 import org.apache.james.metrics.tests.RecordingMetricFactory;
 import org.apache.james.server.blob.deduplication.BlobStoreFactory;
 import org.apache.james.task.Hostname;
 import org.apache.james.task.MemoryTaskManager;
 import org.apache.james.user.memory.MemoryUsersRepository;
+import org.apache.james.util.streams.Limit;
 import org.apache.james.utils.UpdatableTickingClock;
 import org.apache.james.vault.DeletedMessage;
 import org.apache.james.vault.DeletedMessageVault;
@@ -177,12 +181,12 @@ class DeletedMessagesVaultRoutesTest {
     private DeletedMessageZipper zipper;
     private MemoryUsersRepository usersRepository;
     private ExportService exportService;
-    private HashBlobId.Factory blobIdFactory;
+    private PlainBlobId.Factory blobIdFactory;
     private UpdatableTickingClock clock;
 
     @BeforeEach
     void beforeEach() throws Exception {
-        blobIdFactory = new HashBlobId.Factory();
+        blobIdFactory = new PlainBlobId.Factory();
         MemoryBlobStoreDAO blobStoreDAO = new MemoryBlobStoreDAO();
         blobStore = spy(BlobStoreFactory.builder()
             .blobStoreDAO(blobStoreDAO)
@@ -391,6 +395,19 @@ class DeletedMessagesVaultRoutesTest {
                 .body("statusCode", is(404))
                 .body("type", is(ErrorResponder.ErrorType.NOT_FOUND.getType()))
                 .body("message", is(notNullValue()));
+        }
+
+        @Test
+        void restoreShouldBypassUserExistenceCheckWhenForceIsTrue() {
+            given()
+                .queryParam("action", "restore")
+                .queryParam("force", "true")
+                .body(MATCH_ALL_QUERY)
+            .when()
+                .post(USERS + SEPARATOR + USERNAME_2.asString())
+            .then()
+                .statusCode(HttpStatus.CREATED_201)
+                .body("taskId", is(notNullValue()));
         }
 
         @ParameterizedTest
@@ -1615,7 +1632,7 @@ class DeletedMessagesVaultRoutesTest {
 
                 doThrow(new RuntimeException("mock exception"))
                     .when(mailboxManager)
-                    .createMailbox(any(MailboxPath.class), any(MailboxSession.class));
+                    .createMailbox(any(MailboxPath.class), any(MailboxManager.CreateOption.class), any(MailboxSession.class));
 
                 String taskId =
                     given()
@@ -2305,6 +2322,15 @@ class DeletedMessagesVaultRoutesTest {
             }
 
             @Test
+            void deleteShouldBypassUserExistenceCheckWhenForceIsTrue() {
+                when()
+                    .delete(USERS + SEPARATOR + USERNAME_2.asString() + SEPARATOR + DELETED_MESSAGE_PARAM_PATH + "?force=true")
+                .then()
+                    .statusCode(HttpStatus.CREATED_201)
+                    .body("taskId", is(notNullValue()));
+            }
+
+            @Test
             void deleteShouldReturnInvalidWhenMessageIdIsInvalid() {
                 when()
                     .delete(BOB_PATH + SEPARATOR + MESSAGE_PATH_PARAM + SEPARATOR + "invalid")
@@ -2321,7 +2347,7 @@ class DeletedMessagesVaultRoutesTest {
         MailboxSession session = mailboxManager.createSystemSession(username);
         int limitToOneMessage = 1;
 
-        return !Flux.from(mailboxManager.search(MultimailboxesSearchQuery.from(SearchQuery.of()).build(), session, limitToOneMessage))
+        return !Flux.from(mailboxManager.search(MultimailboxesSearchQuery.from(SearchQuery.of()).build(), session, SearchOptions.limit(Limit.limit(limitToOneMessage))))
             .collectList().block()
             .isEmpty();
     }
@@ -2359,5 +2385,128 @@ class DeletedMessagesVaultRoutesTest {
     private void storeDeletedMessage(DeletedMessage deletedMessage) {
         Mono.from(Mono.from(vault.append(deletedMessage, new ByteArrayInputStream(CONTENT))))
             .block();
+    }
+
+    @Nested
+    class BrowseMessagesTest {
+
+        private static final String BOB_MESSAGES_PATH = BOB_PATH + SEPARATOR + MESSAGE_PATH_PARAM;
+
+        @Test
+        void browseMessagesShouldReturn404WhenUserDoesNotExist() {
+            given()
+                .body(MATCH_ALL_QUERY)
+            .when()
+                .post(USERS + SEPARATOR + "unknown@apache.org" + SEPARATOR + MESSAGE_PATH_PARAM)
+            .then()
+                .statusCode(HttpStatus.NOT_FOUND_404);
+        }
+
+        @Test
+        void browseMessagesShouldBypassUserExistenceCheckWhenForceIsTrue() {
+            given()
+                .queryParam("force", "true")
+                .body(MATCH_ALL_QUERY)
+            .when()
+                .post(USERS + SEPARATOR + "unknown@apache.org" + SEPARATOR + MESSAGE_PATH_PARAM)
+            .then()
+                .statusCode(HttpStatus.OK_200);
+        }
+
+        @Test
+        void browseMessagesShouldReturn400WhenQueryBodyIsInvalid() {
+            given()
+                .body("{\"invalid\": \"json query\"}")
+            .when()
+                .post(BOB_MESSAGES_PATH)
+            .then()
+                .statusCode(HttpStatus.BAD_REQUEST_400);
+        }
+
+        @Test
+        void browseMessagesShouldReturnEmptyListWhenVaultIsEmpty() {
+            given()
+                .body(MATCH_ALL_QUERY)
+            .when()
+                .post(BOB_MESSAGES_PATH)
+            .then()
+                .statusCode(HttpStatus.OK_200)
+                .body("", hasSize(0));
+        }
+
+        @Test
+        void browseMessagesShouldReturnStoredMessages() {
+            storeDeletedMessage(DELETED_MESSAGE);
+            storeDeletedMessage(DELETED_MESSAGE_2);
+
+            given()
+                .body(MATCH_ALL_QUERY)
+            .when()
+                .post(BOB_MESSAGES_PATH)
+            .then()
+                .statusCode(HttpStatus.OK_200)
+                .body("", hasSize(2));
+        }
+
+        @Test
+        void browseMessagesShouldReturnMessageFields() {
+            storeDeletedMessage(DELETED_MESSAGE);
+
+            given()
+                .body(MATCH_ALL_QUERY)
+            .when()
+                .post(BOB_MESSAGES_PATH)
+            .then()
+                .statusCode(HttpStatus.OK_200)
+                .body("[0].messageId", is(MESSAGE_ID.serialize()))
+                .body("[0].owner", is(USERNAME.asString()))
+                .body("[0].hasAttachment", is(false))
+                .body("[0].size", is((int) CONTENT.length))
+                .body("[0].deliveryDate", is(notNullValue()))
+                .body("[0].deletionDate", is(notNullValue()))
+                .body("[0].originMailboxes", hasSize(2))
+                .body("[0].recipients", hasSize(2));
+        }
+
+        @Test
+        void browseMessagesShouldNotReturnMessagesFromOtherUsers() {
+            storeDeletedMessage(DELETED_MESSAGE);
+            Mono.from(vault.append(DELETED_MESSAGE_OTHER_USER, new ByteArrayInputStream(CONTENT))).block();
+
+            given()
+                .body(MATCH_ALL_QUERY)
+            .when()
+                .post(BOB_MESSAGES_PATH)
+            .then()
+                .statusCode(HttpStatus.OK_200)
+                .body("", hasSize(1))
+                .body("[0].messageId", is(MESSAGE_ID.serialize()));
+        }
+
+        @Test
+        void browseMessagesShouldFilterByCriteria() {
+            storeDeletedMessage(DELETED_MESSAGE);
+            storeDeletedMessage(DELETED_MESSAGE_2);
+
+            String subjectQuery = "{" +
+                "\"combinator\": \"and\"," +
+                "\"criteria\": [{" +
+                "  \"fieldName\": \"subject\"," +
+                "  \"operator\": \"equals\"," +
+                "  \"value\": \"" + SUBJECT + "\"" +
+                "}]}";
+
+            DeletedMessage messageWithSubject = FINAL_STAGE.get().subject(SUBJECT).build();
+            storeDeletedMessage(messageWithSubject);
+
+            given()
+                .body(subjectQuery)
+            .when()
+                .post(BOB_MESSAGES_PATH)
+            .then()
+                .statusCode(HttpStatus.OK_200)
+                .body("", hasSize(1))
+                .body("[0].messageId", is(MESSAGE_ID.serialize()));
+        }
     }
 }

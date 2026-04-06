@@ -21,6 +21,7 @@ package org.apache.james.jmap.rfc8621.memory;
 
 import static org.apache.james.data.UsersRepositoryModuleChooser.Implementation.DEFAULT;
 
+import org.apache.james.ClockExtension;
 import org.apache.james.JamesServerBuilder;
 import org.apache.james.JamesServerExtension;
 import org.apache.james.MemoryJamesConfiguration;
@@ -29,6 +30,7 @@ import org.apache.james.jmap.pushsubscription.PushClientConfiguration;
 import org.apache.james.jmap.rfc8621.contract.PushServerExtension;
 import org.apache.james.jmap.rfc8621.contract.PushSubscriptionProbeModule;
 import org.apache.james.jmap.rfc8621.contract.PushSubscriptionSetMethodContract;
+import org.apache.james.jmap.rfc8621.contract.probe.TypeStateModule;
 import org.apache.james.modules.TestJMAPServerModule;
 import org.junit.jupiter.api.extension.RegisterExtension;
 
@@ -40,8 +42,9 @@ public class MemoryPushSubscriptionSetMethodTest implements PushSubscriptionSetM
             .configurationFromClasspath()
             .usersRepository(DEFAULT)
             .build())
+        .extension(new ClockExtension())
         .server(configuration -> MemoryJamesServerMain.createServer(configuration)
-            .overrideWith(new TestJMAPServerModule(), new PushSubscriptionProbeModule())
+            .overrideWith(new TestJMAPServerModule(), new PushSubscriptionProbeModule(), new TypeStateModule())
             .overrideWith(binder -> binder.bind(PushClientConfiguration.class).toInstance(PushClientConfiguration.UNSAFE_DEFAULT())))
         .build();
 

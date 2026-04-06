@@ -24,7 +24,7 @@
     <parent>
         <groupId>org.apache.james</groupId>
         <artifactId>apache-james-mpt-imapmailbox</artifactId>
-        <version>3.9.0-SNAPSHOT</version>
+        <version>3.10.0-SNAPSHOT</version>
     </parent>
 
     <artifactId>apache-james-mpt-imapmailbox-cassandra</artifactId>
@@ -94,11 +94,6 @@
         <dependency>
             <groupId>com.google.inject</groupId>
             <artifactId>guice</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>commons-codec</groupId>
-            <artifactId>commons-codec</artifactId>
-            <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.testcontainers</groupId>

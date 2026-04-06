@@ -19,6 +19,8 @@
 
 package org.apache.james.backends.redis;
 
+import static java.lang.Boolean.TRUE;
+
 import java.net.URI;
 import java.time.Duration;
 import java.util.UUID;
@@ -34,11 +36,9 @@ import com.github.fge.lambdas.Throwing;
 import io.lettuce.core.RedisClient;
 import io.lettuce.core.api.sync.RedisCommands;
 
-import static java.lang.Boolean.TRUE;
-
 public class DockerRedis {
-    private static final DockerImageName DEFAULT_IMAGE_NAME = DockerImageName.parse("redis").withTag("7.0.12");
-    private static final int DEFAULT_PORT = 6379;
+    public static final DockerImageName DEFAULT_IMAGE_NAME = DockerImageName.parse("redis").withTag("8.0.2");
+    public static final int DEFAULT_PORT = 6379;
 
     private final GenericContainer<?> container;
 

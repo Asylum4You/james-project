@@ -33,6 +33,7 @@ import org.apache.james.mailbox.MailboxSession;
 import org.apache.james.mailbox.MessageManager;
 import org.apache.james.mailbox.RightManager;
 import org.apache.james.mailbox.acl.ACLDiff;
+import org.apache.james.mailbox.events.MailboxEvents;
 import org.apache.james.mailbox.events.MailboxEvents.MailboxACLUpdated;
 import org.apache.james.mailbox.events.MailboxEvents.MailboxRenamed;
 import org.apache.james.mailbox.exception.MailboxNotFoundException;
@@ -130,22 +131,29 @@ public class PropagateLookupRightListener implements EventListener.ReactiveGroup
             .then();
     }
 
-    private MailboxSession createMailboxSession(Event event) {
-        return mailboxManager.createSystemSession(event.getUsername());
+    private MailboxSession createMailboxSession(MailboxEvents.MailboxEvent event) {
+        return mailboxManager.createSystemSession(event.getMailboxPath().getUser());
     }
 
     private Mono<Void> applyLookupRight(MailboxSession session, MailboxPath mailboxPath, MailboxACL.EntryKey entryKey) {
         if (entryKey.equals(MailboxACL.OWNER_KEY)) {
             return Mono.empty();
         }
-        return Mono.fromCallable(() -> MailboxACL.command()
+
+        return Mono.from(rightManager.listRightsReactive(mailboxPath, session))
+            .filter(notContainLookupRightPredicate(entryKey))
+            .flatMap(acl -> Mono.fromCallable(() -> MailboxACL.command()
                 .rights(Right.Lookup)
                 .key(entryKey)
-                .asAddition())
+                .asAddition()))
             .flatMap(aclCommand -> Mono.from(rightManager.applyRightsCommandReactive(mailboxPath, aclCommand, session)))
             .onErrorResume(MailboxNotFoundException.class, e -> {
                 LOGGER.info("Mailbox {} not found, skip lookup right update", mailboxPath);
                 return Mono.empty();
             });
+    }
+
+    private static Predicate<MailboxACL> notContainLookupRightPredicate(MailboxACL.EntryKey entryKey) {
+        return acl -> !(acl.getEntries().containsKey(entryKey) && acl.getEntries().get(entryKey).contains(Right.Lookup));
     }
 }

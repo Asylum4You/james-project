@@ -22,18 +22,18 @@ package org.apache.james.jmap.event;
 import static jakarta.mail.Flags.Flag.DELETED;
 import static org.apache.james.util.ReactorUtils.publishIfPresent;
 
-import java.io.IOException;
+import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
-import java.util.Date;
 import java.util.Optional;
 
 import jakarta.inject.Inject;
 
+import org.apache.james.core.Username;
 import org.apache.james.events.Event;
 import org.apache.james.events.EventListener.ReactiveGroupEventListener;
 import org.apache.james.events.Group;
-import org.apache.james.jmap.api.projections.EmailQueryView;
+import org.apache.james.jmap.api.projections.EmailQueryViewManager;
 import org.apache.james.mailbox.MailboxSession;
 import org.apache.james.mailbox.MessageIdManager;
 import org.apache.james.mailbox.Role;
@@ -42,19 +42,12 @@ import org.apache.james.mailbox.events.MailboxEvents.Added;
 import org.apache.james.mailbox.events.MailboxEvents.Expunged;
 import org.apache.james.mailbox.events.MailboxEvents.FlagsUpdated;
 import org.apache.james.mailbox.events.MailboxEvents.MailboxDeletion;
-import org.apache.james.mailbox.exception.MailboxException;
 import org.apache.james.mailbox.model.FetchGroup;
 import org.apache.james.mailbox.model.MailboxId;
 import org.apache.james.mailbox.model.MessageId;
 import org.apache.james.mailbox.model.MessageMetaData;
 import org.apache.james.mailbox.model.MessageResult;
 import org.apache.james.mailbox.model.UpdatedFlags;
-import org.apache.james.mime4j.codec.DecodeMonitor;
-import org.apache.james.mime4j.dom.Header;
-import org.apache.james.mime4j.dom.field.DateTimeField;
-import org.apache.james.mime4j.field.DateTimeFieldLenientImpl;
-import org.apache.james.mime4j.message.DefaultMessageBuilder;
-import org.apache.james.mime4j.stream.MimeConfig;
 import org.apache.james.util.FunctionalUtils;
 import org.reactivestreams.Publisher;
 
@@ -72,13 +65,13 @@ public class PopulateEmailQueryViewListener implements ReactiveGroupEventListene
     private static final int CONCURRENCY = 5;
 
     private final MessageIdManager messageIdManager;
-    private final EmailQueryView view;
+    private final EmailQueryViewManager viewManager;
     private final SessionProvider sessionProvider;
 
     @Inject
-    public PopulateEmailQueryViewListener(MessageIdManager messageIdManager, EmailQueryView view, SessionProvider sessionProvider) {
+    public PopulateEmailQueryViewListener(MessageIdManager messageIdManager, EmailQueryViewManager viewManager, SessionProvider sessionProvider) {
         this.messageIdManager = messageIdManager;
-        this.view = view;
+        this.viewManager = viewManager;
         this.sessionProvider = sessionProvider;
     }
 
@@ -113,13 +106,14 @@ public class PopulateEmailQueryViewListener implements ReactiveGroupEventListene
     }
 
     private Publisher<Void> handleMailboxDeletion(MailboxDeletion mailboxDeletion) {
-        return view.delete(mailboxDeletion.getMailboxId());
+        return viewManager.getEmailQueryView(mailboxDeletion.getUsername()).delete(mailboxDeletion.getMailboxId());
     }
 
     private Publisher<Void> handleExpunged(Expunged expunged) {
         return Flux.fromStream(expunged.getUids().stream()
-            .map(uid -> expunged.getMetaData(uid).getMessageId()))
-            .concatMap(messageId -> view.delete(expunged.getMailboxId(), messageId))
+            .map(expunged::getMetaData))
+            .concatMap(metaData -> viewManager.getEmailQueryView(expunged.getUsername())
+                .delete(expunged.getMailboxId(), toReceivedAt(metaData.getInternalDate().toInstant()), metaData.getMessageId()))
             .then();
     }
 
@@ -129,9 +123,7 @@ public class PopulateEmailQueryViewListener implements ReactiveGroupEventListene
 
         Mono<Void> removeMessagesMarkedAsDeleted = Flux.fromIterable(flagsUpdated.getUpdatedFlags())
             .filter(updatedFlags -> updatedFlags.isModifiedToSet(DELETED))
-            .map(UpdatedFlags::getMessageId)
-            .handle(publishIfPresent())
-            .concatMap(messageId -> view.delete(flagsUpdated.getMailboxId(), messageId))
+            .concatMap(updatedFlags -> deleteViewForMessageMarkedAsDeleted(flagsUpdated, session, updatedFlags))
             .then();
 
         Mono<Void> addMessagesNoLongerMarkedAsDeleted = Flux.fromIterable(flagsUpdated.getUpdatedFlags())
@@ -141,7 +133,7 @@ public class PopulateEmailQueryViewListener implements ReactiveGroupEventListene
             .concatMap(messageId ->
                 Flux.from(messageIdManager.getMessagesReactive(ImmutableList.of(messageId), FetchGroup.HEADERS, session))
                     .next())
-            .concatMap(message -> handleAdded(flagsUpdated.getMailboxId(), message))
+            .concatMap(message -> handleAdded(flagsUpdated.getMailboxId(), message, flagsUpdated.getUsername()))
             .then();
 
         return removeMessagesMarkedAsDeleted
@@ -163,7 +155,7 @@ public class PopulateEmailQueryViewListener implements ReactiveGroupEventListene
         Mono<Void> doHandleAdded = Flux.from(messageIdManager.getMessagesReactive(ImmutableList.of(messageId), FetchGroup.HEADERS, session))
             .next()
             .filter(message -> !message.getFlags().contains(DELETED))
-            .flatMap(messageResult -> handleAdded(added.getMailboxId(), messageResult));
+            .flatMap(messageResult -> handleAdded(added.getMailboxId(), messageResult, added.getUsername()));
         if (Role.from(added.getMailboxPath().getName()).equals(Optional.of(Role.OUTBOX))) {
             return checkMessageStillInOriginMailbox(messageId, session, mailboxId)
                 .filter(FunctionalUtils.identityPredicate())
@@ -178,25 +170,29 @@ public class PopulateEmailQueryViewListener implements ReactiveGroupEventListene
             .hasElements();
     }
 
-    public Mono<Void> handleAdded(MailboxId mailboxId, MessageResult messageResult) {
-        ZonedDateTime receivedAt = ZonedDateTime.ofInstant(messageResult.getInternalDate().toInstant(), ZoneOffset.UTC);
-
-        return Mono.fromCallable(() -> parseMessage(messageResult))
-            .map(header -> date(header).orElse(messageResult.getInternalDate()))
-            .map(date -> ZonedDateTime.ofInstant(date.toInstant(), ZoneOffset.UTC))
-            .flatMap(sentAt -> view.save(mailboxId, sentAt, receivedAt, messageResult.getMessageId()))
+    public Mono<Void> handleAdded(MailboxId mailboxId, MessageResult messageResult, Username username) {
+        ZonedDateTime receivedAt = toReceivedAt(messageResult.getInternalDate().toInstant());
+        return viewManager.getEmailQueryView(username)
+            .save(mailboxId, receivedAt, messageResult.getMessageId(), messageResult.getThreadId())
             .then();
     }
 
-    private Header parseMessage(MessageResult messageResult) throws IOException, MailboxException {
-        DefaultMessageBuilder defaultMessageBuilder = new DefaultMessageBuilder();
-        defaultMessageBuilder.setMimeEntityConfig(MimeConfig.PERMISSIVE);
-        return defaultMessageBuilder.parseHeader(messageResult.getFullContent().getInputStream());
+    private Mono<Void> deleteViewForMessageMarkedAsDeleted(FlagsUpdated flagsUpdated, MailboxSession session, UpdatedFlags updatedFlags) {
+        return Mono.justOrEmpty(updatedFlags.getMessageId())
+            .flatMap(messageId -> resolveReceivedAt(updatedFlags, messageId, session)
+                .flatMap(receivedAt -> viewManager.getEmailQueryView(flagsUpdated.getUsername())
+                    .delete(flagsUpdated.getMailboxId(), receivedAt, messageId)))
+            .then();
     }
 
-    private Optional<Date> date(Header header) {
-        return Optional.ofNullable(header.getField("Date"))
-            .map(field -> DateTimeFieldLenientImpl.PARSER.parse(field, DecodeMonitor.SILENT))
-            .map(DateTimeField::getDate);
+    private Mono<ZonedDateTime> resolveReceivedAt(UpdatedFlags updatedFlags, MessageId messageId, MailboxSession session) {
+        return Mono.justOrEmpty(updatedFlags.getInternalDate().map(date -> toReceivedAt(date.toInstant())))
+            .switchIfEmpty(Flux.from(messageIdManager.getMessagesReactive(ImmutableList.of(messageId), FetchGroup.HEADERS, session))
+                .next()
+                .map(messageResult -> toReceivedAt(messageResult.getInternalDate().toInstant())));
+    }
+
+    private ZonedDateTime toReceivedAt(Instant internalDate) {
+        return ZonedDateTime.ofInstant(internalDate, ZoneOffset.UTC);
     }
 }

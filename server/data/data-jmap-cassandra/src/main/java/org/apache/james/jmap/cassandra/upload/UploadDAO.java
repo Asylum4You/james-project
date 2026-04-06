@@ -23,13 +23,13 @@ import static com.datastax.oss.driver.api.querybuilder.QueryBuilder.bindMarker;
 import static com.datastax.oss.driver.api.querybuilder.QueryBuilder.deleteFrom;
 import static com.datastax.oss.driver.api.querybuilder.QueryBuilder.insertInto;
 import static com.datastax.oss.driver.api.querybuilder.QueryBuilder.selectFrom;
-import static org.apache.james.jmap.cassandra.upload.UploadModule.BLOB_ID;
-import static org.apache.james.jmap.cassandra.upload.UploadModule.CONTENT_TYPE;
-import static org.apache.james.jmap.cassandra.upload.UploadModule.ID;
-import static org.apache.james.jmap.cassandra.upload.UploadModule.SIZE;
-import static org.apache.james.jmap.cassandra.upload.UploadModule.TABLE_NAME;
-import static org.apache.james.jmap.cassandra.upload.UploadModule.UPLOAD_DATE;
-import static org.apache.james.jmap.cassandra.upload.UploadModule.USER;
+import static org.apache.james.jmap.cassandra.upload.UploadDataDefinition.BLOB_ID;
+import static org.apache.james.jmap.cassandra.upload.UploadDataDefinition.CONTENT_TYPE;
+import static org.apache.james.jmap.cassandra.upload.UploadDataDefinition.ID;
+import static org.apache.james.jmap.cassandra.upload.UploadDataDefinition.SIZE;
+import static org.apache.james.jmap.cassandra.upload.UploadDataDefinition.TABLE_NAME;
+import static org.apache.james.jmap.cassandra.upload.UploadDataDefinition.UPLOAD_DATE;
+import static org.apache.james.jmap.cassandra.upload.UploadDataDefinition.USER;
 
 import java.time.Instant;
 import java.util.Optional;
@@ -216,7 +216,7 @@ public class UploadDAO {
 
     private Function<Row, UploadRepresentation> rowToUploadRepresentation() {
         return row -> new UploadRepresentation(UploadId.from(row.getUuid(ID)),
-            blobIdFactory.from(row.getString(BLOB_ID)),
+            blobIdFactory.parse(row.getString(BLOB_ID)),
             ContentType.of(row.getString(CONTENT_TYPE)),
             row.getLong(SIZE),
             Username.of(row.getString(USER)),

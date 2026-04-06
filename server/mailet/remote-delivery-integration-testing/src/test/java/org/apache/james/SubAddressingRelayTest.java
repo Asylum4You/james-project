@@ -57,7 +57,6 @@ import org.apache.james.utils.SMTPMessageSender;
 import org.apache.james.utils.TestIMAPClient;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.api.io.TempDir;
@@ -179,7 +178,7 @@ class SubAddressingRelayTest {
             .addMailet(MailetConfiguration.builder()
                 .mailet(RemoteDelivery.class)
                 .matcher(All.class)
-                .addProperty("outgoingQueue", "outgoing")
+                .addProperty("outgoing", "outgoing")
                 .addProperty("delayTime", "3 * 10 ms")
                 .addProperty("maxRetries", "3")
                 .addProperty("maxDnsProblemRetries", "0")

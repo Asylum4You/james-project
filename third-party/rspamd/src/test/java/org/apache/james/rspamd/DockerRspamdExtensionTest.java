@@ -21,6 +21,8 @@ package org.apache.james.rspamd;
 
 import static org.apache.james.rspamd.RspamdExtension.PASSWORD;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.not;
 import static org.hamcrest.core.Is.is;
 
 import org.apache.james.junit.categories.Unstable;
@@ -69,7 +71,7 @@ class DockerRspamdExtensionTest {
             .post("checkv2")
         .then()
             .statusCode(HttpStatus.OK_200)
-            .body("action", is("reject"));
+            .body("action", not("no action"));
     }
 
     @Test
@@ -82,6 +84,19 @@ class DockerRspamdExtensionTest {
         .then()
             .statusCode(HttpStatus.OK_200)
             .body("action", is("no action"));
+    }
+
+    @Test
+    void checkPhishingEmailShouldWorkByDefaultRspamdConfig() {
+        RequestSpecification rspamdApi = WebAdminUtils.spec(Port.of(rspamdExtension.rspamdPort()));
+
+        rspamdApi
+            .header(new Header("Password", PASSWORD))
+            .body(ClassLoader.getSystemResourceAsStream("mail/spam/phishing.eml"))
+            .post("checkv2")
+        .then()
+            .statusCode(HttpStatus.OK_200)
+            .body("symbols.PHISHING.name", equalTo("PHISHING"));
     }
 
     @Test

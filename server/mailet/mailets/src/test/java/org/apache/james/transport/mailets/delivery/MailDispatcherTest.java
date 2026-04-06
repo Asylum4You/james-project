@@ -22,7 +22,6 @@ package org.apache.james.transport.mailets.delivery;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -39,6 +38,12 @@ import jakarta.mail.MessagingException;
 import org.apache.commons.io.IOUtils;
 import org.apache.james.core.MailAddress;
 import org.apache.james.core.builder.MimeMessageBuilder;
+import org.apache.james.mailbox.MessageUid;
+import org.apache.james.mailbox.model.ComposedMessageId;
+import org.apache.james.mailbox.model.TestId;
+import org.apache.james.mailbox.model.TestMessageId;
+import org.apache.james.user.api.UsersRepository;
+import org.apache.james.user.memory.MemoryUsersRepository;
 import org.apache.james.util.MimeMessageUtil;
 import org.apache.mailet.Mail;
 import org.apache.mailet.PerRecipientHeaders.Header;
@@ -49,11 +54,8 @@ import org.apache.mailet.base.test.FakeMailContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
-import org.mockito.invocation.InvocationOnMock;
-import org.mockito.stubbing.Answer;
 import org.reactivestreams.Publisher;
 
-import com.github.fge.lambdas.Throwing;
 import com.google.common.collect.ArrayListMultimap;
 
 import reactor.core.publisher.Mono;
@@ -64,15 +66,17 @@ class MailDispatcherTest {
     private static final String VALUE_FOR_USER_2 = "value for user 2";
     private static final Header TEST_HEADER_USER1 = Header.builder().name(TEST_HEADER_NAME).value(VALUE_FOR_USER_1).build();
     private static final Header TEST_HEADER_USER2 = Header.builder().name(TEST_HEADER_NAME).value(VALUE_FOR_USER_2).build();
-    
+
     private FakeMailContext fakeMailContext;
     private MailStore mailStore;
+    private UsersRepository usersRepository;
 
     @BeforeEach
     public void setUp() throws Exception {
         fakeMailContext = FakeMailContext.defaultContext();
         mailStore = mock(MailStore.class);
         when(mailStore.storeMail(any(), any())).thenReturn(Mono.empty());
+        usersRepository = MemoryUsersRepository.withVirtualHosting(null);
     }
 
     @Test
@@ -81,6 +85,7 @@ class MailDispatcherTest {
             .mailetContext(fakeMailContext)
             .mailStore(mailStore)
             .consume(true)
+            .usersRepository(usersRepository)
             .build();
 
         FakeMail mail = FakeMail.builder()
@@ -104,6 +109,7 @@ class MailDispatcherTest {
             .retries(3)
             .mailStore(mailStore)
             .consume(true)
+            .usersRepository(usersRepository)
             .build();
 
         AtomicInteger counter = new AtomicInteger(0);
@@ -135,6 +141,7 @@ class MailDispatcherTest {
             .retries(0)
             .mailStore(mailStore)
             .consume(true)
+            .usersRepository(usersRepository)
             .build();
 
         AtomicInteger counter = new AtomicInteger(0);
@@ -165,6 +172,7 @@ class MailDispatcherTest {
             .mailetContext(fakeMailContext)
             .mailStore(mailStore)
             .consume(true)
+            .usersRepository(usersRepository)
             .build();
 
         FakeMail mail = FakeMail.builder()
@@ -184,6 +192,7 @@ class MailDispatcherTest {
             .mailetContext(fakeMailContext)
             .mailStore(mailStore)
             .consume(false)
+            .usersRepository(usersRepository)
             .build();
 
         String state = "state";
@@ -204,6 +213,7 @@ class MailDispatcherTest {
             .mailetContext(fakeMailContext)
             .mailStore(mailStore)
             .consume(true)
+            .usersRepository(usersRepository)
             .build();
         doReturn(Mono.error(new MessagingException()))
             .when(mailStore)
@@ -240,6 +250,7 @@ class MailDispatcherTest {
             .mailetContext(fakeMailContext)
             .mailStore(mailStore)
             .consume(false)
+            .usersRepository(usersRepository)
             .build();
 
         FakeMail mail = FakeMail.builder()
@@ -265,6 +276,7 @@ class MailDispatcherTest {
             .mailetContext(fakeMailContext)
             .mailStore(accumulatorTestHeaderMailStore)
             .consume(false)
+            .usersRepository(usersRepository)
             .build();
 
         FakeMail mail = FakeMail.builder()
@@ -288,6 +300,7 @@ class MailDispatcherTest {
             .mailetContext(fakeMailContext)
             .mailStore(accumulatorTestHeaderMailStore)
             .consume(false)
+            .usersRepository(usersRepository)
             .build();
 
         FakeMail mail = FakeMail.builder()
@@ -311,6 +324,7 @@ class MailDispatcherTest {
             .mailetContext(fakeMailContext)
             .mailStore(accumulatorTestHeaderMailStore)
             .consume(false)
+            .usersRepository(usersRepository)
             .build();
 
         FakeMail mail = FakeMail.builder()
@@ -336,6 +350,7 @@ class MailDispatcherTest {
             .mailetContext(fakeMailContext)
             .mailStore(accumulatorTestHeaderMailStore)
             .consume(false)
+            .usersRepository(usersRepository)
             .build();
 
         FakeMail mail = FakeMail.builder()
@@ -362,6 +377,7 @@ class MailDispatcherTest {
             .mailetContext(fakeMailContext)
             .mailStore(accumulatorTestHeaderMailStore)
             .consume(false)
+            .usersRepository(usersRepository)
             .build();
 
         FakeMail mail = FakeMail.builder()
@@ -385,6 +401,7 @@ class MailDispatcherTest {
             .mailetContext(fakeMailContext)
             .mailStore(accumulatorTestHeaderMailStore)
             .consume(false)
+            .usersRepository(usersRepository)
             .build();
 
         String headerValue = "arbitraryValue";
@@ -393,7 +410,7 @@ class MailDispatcherTest {
             .sender(MailAddressFixture.OTHER_AT_JAMES)
             .recipients(MailAddressFixture.ANY_AT_JAMES, MailAddressFixture.ANY_AT_JAMES2)
             .mimeMessage(MimeMessageBuilder.mimeMessageBuilder()
-                    .addHeader(TEST_HEADER_NAME, headerValue))
+                .addHeader(TEST_HEADER_NAME, headerValue))
             .state("state")
             .build();
         mail.addSpecificHeaderForRecipient(TEST_HEADER_USER1, MailAddressFixture.ANY_AT_JAMES);
@@ -409,6 +426,7 @@ class MailDispatcherTest {
             .mailetContext(fakeMailContext)
             .mailStore(mailStore)
             .onMailetException("ignore")
+            .usersRepository(usersRepository)
             .build();
 
         doReturn(Mono.error(new MessagingException()))
@@ -437,6 +455,7 @@ class MailDispatcherTest {
             .mailetContext(fakeMailContext)
             .mailStore(mailStore)
             .onMailetException("errorProcessor1")
+            .usersRepository(usersRepository)
             .build();
 
         doReturn(Mono.error(new MessagingException()))
@@ -466,6 +485,7 @@ class MailDispatcherTest {
             .mailetContext(fakeMailContext)
             .mailStore(mailStore)
             .onMailetException("propagate")
+            .usersRepository(usersRepository)
             .build();
 
         doReturn(Mono.error(new MessagingException()))
@@ -483,7 +503,7 @@ class MailDispatcherTest {
             .state("state")
             .build();
 
-        assertThatThrownBy(()-> testee.dispatch(mail))
+        assertThatThrownBy(() -> testee.dispatch(mail))
             .isInstanceOf(Exception.class);
     }
 
@@ -497,13 +517,14 @@ class MailDispatcherTest {
         }
 
         @Override
-        public Publisher<Void> storeMail(MailAddress recipient, Mail mail) {
-            return Mono.fromRunnable(Throwing.runnable(() -> {
+        public Publisher<ComposedMessageId> storeMail(MailAddress recipient, Mail mail) {
+            return Mono.fromCallable(() -> {
                 String[] header = mail.getMessage().getHeader(headerName);
                 if (header != null) {
                     headerValues.put(recipient, header);
                 }
-            }));
+                return new ComposedMessageId(TestId.of(34), TestMessageId.of(4), MessageUid.of(5));
+            });
         }
 
         public Collection<String[]> getHeaderValues(MailAddress recipient) {

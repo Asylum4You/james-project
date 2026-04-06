@@ -24,9 +24,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.time.Clock;
 
 import org.apache.james.backends.cassandra.CassandraClusterExtension;
-import org.apache.james.backends.cassandra.components.CassandraModule;
+import org.apache.james.backends.cassandra.components.CassandraDataDefinition;
 import org.apache.james.backends.cassandra.init.configuration.CassandraConfiguration;
-import org.apache.james.backends.cassandra.versions.CassandraSchemaVersionModule;
+import org.apache.james.backends.cassandra.versions.CassandraSchemaVersionDataDefinition;
 import org.apache.james.blob.api.BlobStore;
 import org.apache.james.core.Username;
 import org.apache.james.events.EventBusTestFixture;
@@ -53,12 +53,13 @@ import org.apache.james.mailbox.cassandra.mail.CassandraThreadLookupDAO;
 import org.apache.james.mailbox.cassandra.mail.CassandraUidProvider;
 import org.apache.james.mailbox.cassandra.mail.CassandraUserMailboxRightsDAO;
 import org.apache.james.mailbox.cassandra.mail.task.RecomputeMailboxCountersService;
-import org.apache.james.mailbox.cassandra.modules.CassandraAnnotationModule;
-import org.apache.james.mailbox.cassandra.modules.CassandraMailboxModule;
-import org.apache.james.mailbox.cassandra.modules.CassandraSubscriptionModule;
+import org.apache.james.mailbox.cassandra.modules.CassandraAnnotationDataDefinition;
+import org.apache.james.mailbox.cassandra.modules.CassandraMailboxDataDefinition;
+import org.apache.james.mailbox.cassandra.modules.CassandraSubscriptionDataDefinition;
 import org.apache.james.mailbox.model.MailboxPath;
 import org.apache.james.mailbox.store.BatchSizes;
 import org.apache.james.mailbox.store.StoreSubscriptionManager;
+import org.apache.james.mailbox.store.mail.AttachmentIdAssignationStrategy;
 import org.apache.james.mailbox.store.user.model.Subscription;
 import org.apache.james.metrics.tests.RecordingMetricFactory;
 import org.junit.jupiter.api.BeforeEach;
@@ -74,11 +75,11 @@ import reactor.core.publisher.Mono;
 class CassandraSubscriptionManagerTest implements SubscriptionManagerContract {
 
     @RegisterExtension
-    static CassandraClusterExtension cassandraCluster = new CassandraClusterExtension(CassandraModule.aggregateModules(
-        CassandraSubscriptionModule.MODULE,
-        CassandraAnnotationModule.MODULE,
-        CassandraSchemaVersionModule.MODULE,
-        CassandraMailboxModule.MODULE));
+    static CassandraClusterExtension cassandraCluster = new CassandraClusterExtension(CassandraDataDefinition.aggregateModules(
+        CassandraSubscriptionDataDefinition.MODULE,
+        CassandraAnnotationDataDefinition.MODULE,
+        CassandraSchemaVersionDataDefinition.MODULE,
+        CassandraMailboxDataDefinition.MODULE));
 
     private SubscriptionManager subscriptionManager;
     private CassandraMailboxSessionMapperFactory mailboxSessionMapperFactory;
@@ -109,6 +110,7 @@ class CassandraSubscriptionManagerTest implements SubscriptionManagerContract {
         CassandraUidProvider uidProvider = null;
         CassandraModSeqProvider modSeqProvider = null;
         RecomputeMailboxCountersService recomputeMailboxCountersService = null;
+        AttachmentIdAssignationStrategy attachmentIdAssignationStrategy = null;
 
         mailboxSessionMapperFactory =  new CassandraMailboxSessionMapperFactory(
             uidProvider,
@@ -133,6 +135,7 @@ class CassandraSubscriptionManagerTest implements SubscriptionManagerContract {
             recomputeMailboxCountersService,
             CassandraConfiguration.DEFAULT_CONFIGURATION,
             BatchSizes.defaultValues(),
+            attachmentIdAssignationStrategy,
             Clock.systemUTC());
 
         InVMEventBus eventBus = new InVMEventBus(new InVmEventDelivery(new RecordingMetricFactory()), EventBusTestFixture.RETRY_BACKOFF_CONFIGURATION, new MemoryEventDeadLetters());

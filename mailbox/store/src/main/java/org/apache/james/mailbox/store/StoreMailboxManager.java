@@ -37,6 +37,8 @@ import org.apache.james.core.Username;
 import org.apache.james.core.quota.QuotaCountUsage;
 import org.apache.james.core.quota.QuotaSizeUsage;
 import org.apache.james.events.EventBus;
+import org.apache.james.mailbox.Authorizator;
+import org.apache.james.mailbox.DefaultMailboxes;
 import org.apache.james.mailbox.MailboxAnnotationManager;
 import org.apache.james.mailbox.MailboxManager;
 import org.apache.james.mailbox.MailboxPathLocker;
@@ -70,6 +72,7 @@ import org.apache.james.mailbox.model.MessageId.Factory;
 import org.apache.james.mailbox.model.MessageRange;
 import org.apache.james.mailbox.model.MultimailboxesSearchQuery;
 import org.apache.james.mailbox.model.QuotaRoot;
+import org.apache.james.mailbox.model.SearchOptions;
 import org.apache.james.mailbox.model.ThreadId;
 import org.apache.james.mailbox.model.UidValidity;
 import org.apache.james.mailbox.model.search.MailboxQuery;
@@ -85,6 +88,9 @@ import org.apache.james.mailbox.store.quota.QuotaComponents;
 import org.apache.james.mailbox.store.search.MessageSearchIndex;
 import org.apache.james.mailbox.store.user.SubscriptionMapper;
 import org.apache.james.mailbox.store.user.model.Subscription;
+import org.apache.james.util.AuditTrail;
+import org.apache.james.util.FunctionalUtils;
+import org.apache.james.util.ReactorUtils;
 import org.reactivestreams.Publisher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -97,7 +103,6 @@ import com.google.common.collect.ImmutableSet;
 
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import reactor.core.publisher.SynchronousSink;
 import reactor.core.scheduler.Schedulers;
 import reactor.util.retry.Retry;
 import reactor.util.retry.RetryBackoffSpec;
@@ -249,6 +254,11 @@ public class StoreMailboxManager implements MailboxManager {
     }
 
     @Override
+    public SessionProvider withExtraAuthorizator(Authorizator authorizator) {
+        return sessionProvider.withExtraAuthorizator(authorizator);
+    }
+
+    @Override
     public AuthorizationStep authenticate(Username givenUserid) {
         return sessionProvider.authenticate(givenUserid);
     }
@@ -339,7 +349,7 @@ public class StoreMailboxManager implements MailboxManager {
     public Mono<MailboxId> createMailboxReactive(MailboxPath mailboxPath, CreateOption createOption, MailboxSession mailboxSession) {
         LOGGER.debug("createMailbox {}", mailboxPath);
 
-        return assertMailboxPathBelongToUserReactive(mailboxSession, mailboxPath)
+        return assertCanCreateReactive(mailboxSession, mailboxPath)
             .then(doCreateMailboxReactive(mailboxPath, createOption, mailboxSession));
     }
 
@@ -371,7 +381,15 @@ public class StoreMailboxManager implements MailboxManager {
                     .retryWhen(Retry.backoff(5, Duration.ofMillis(100))
                         .modifyErrorFilter(old -> old.and(e -> !(e instanceof MailboxException)))
                         .jitter(0.5)
-                        .maxBackoff(Duration.ofSeconds(1)));
+                        .maxBackoff(Duration.ofSeconds(1)))
+                    .flatMap(mailboxId -> ReactorUtils.logAsMono(() -> AuditTrail.entry()
+                        .username(() -> sanitizedMailboxPath.getUser().asString())
+                        .sessionId(() -> String.valueOf(mailboxSession.getSessionId().getValue()))
+                        .protocol("mailbox")
+                        .action("create")
+                        .parameters(Throwing.supplier(() -> ImmutableMap.of("mailboxId", mailboxId.serialize(),
+                            "mailboxPath", sanitizedMailboxPath.asString())))
+                        .log("Mailbox Create")).thenReturn(mailboxId));
             } catch (MailboxNameException e) {
                 return Mono.error(e);
             }
@@ -429,24 +447,62 @@ public class StoreMailboxManager implements MailboxManager {
                 LOGGER.info("{} mailbox was created concurrently", mailboxPath.asString());
                 return Mono.empty();
             })
-            .flatMap(any -> createSubscriptionIfNeeded(mailboxPath, createOption, mailboxSession).thenReturn(any));
+            .flatMap(any -> createSubscriptionIfNeeded(mailboxPath, createOption, mailboxSession).thenReturn(any))
+            .flatMap(any -> inheritRightsReactive(mailboxSession, mailboxPath).thenReturn(any));
     }
 
-    private Mono<Void> assertMailboxPathBelongToUserReactive(MailboxSession mailboxSession, MailboxPath mailboxPath) {
-        if (!mailboxPath.belongsTo(mailboxSession)) {
-            return Mono.error(new InsufficientRightsException("mailboxPath '" + mailboxPath.asString() + "'"
-                + " does not belong to user '" + mailboxSession.getUser().asString() + "'"));
+    private Mono<Boolean> canCreateReactive(MailboxSession session, MailboxPath path) {
+        if (path.belongsTo(session)) {
+            return Mono.just(true);
         }
-        return Mono.empty();
+
+        return nearestExistingParent(session, path)
+            .filterWhen(parent -> hasRightReactive(parent, Right.CreateMailbox, session))
+            .hasElement();
+    }
+
+    private Mono<Void> assertCanCreateReactive(MailboxSession session, MailboxPath path) {
+        return canCreateReactive(session, path)
+            .filter(canCreate -> canCreate)
+            .switchIfEmpty(Mono.error(() -> new InsufficientRightsException("user '" + session.getUser().asString() + "' is not allowed to create the mailbox '" + path.asString() + "'")))
+            .then();
+    }
+
+    private Mono<MailboxPath> nearestExistingParent(MailboxSession session, MailboxPath path) {
+        return Flux.fromIterable(path.getParents(session.getPathDelimiter()).reversed())
+            .filterWhen(parent -> mailboxExists(parent, session))
+            .next();
+    }
+
+    private Mono<Void> inheritRightsReactive(MailboxSession mailboxSession, MailboxPath path) {
+        return nearestExistingParent(mailboxSession, path)
+            .flatMap(parent -> Mono.from(listRightsReactive(parent, mailboxSession)))
+            .map(this::filterLookupOnlyEntries)
+            .flatMap(acl -> {
+                if (acl.getEntries().isEmpty()) {
+                    return Mono.empty();
+                }
+                return storeRightManager.setRightsReactiveWithoutAccessControl(path, acl, mailboxSession);
+            });
+    }
+
+    private MailboxACL filterLookupOnlyEntries(MailboxACL acl) {
+        return new MailboxACL(acl.getEntries().entrySet().stream()
+            .filter(entry -> !isLookupOnly(entry.getValue()))
+            .collect(ImmutableMap.toImmutableMap(Map.Entry::getKey, Map.Entry::getValue)));
+    }
+
+    private boolean isLookupOnly(Rfc4314Rights rights) {
+        return rights.equals(new Rfc4314Rights(Right.Lookup));
     }
 
     @Override
     public void deleteMailbox(final MailboxPath mailboxPath, final MailboxSession session) throws MailboxException {
         LOGGER.info("deleteMailbox {}", mailboxPath);
-        assertIsOwner(session, mailboxPath);
         MailboxMapper mailboxMapper = mailboxSessionMapperFactory.getMailboxMapper(session);
 
         mailboxMapper.execute(() -> block(mailboxMapper.findMailboxByPath(mailboxPath)
+            .flatMap(mailbox -> assertCanDeleteReactive(session, mailbox))
             .flatMap(mailbox -> doDeleteMailbox(mailboxMapper, mailbox, session))
             .switchIfEmpty(Mono.error(() -> new MailboxNotFoundException(mailboxPath)))));
     }
@@ -457,10 +513,7 @@ public class StoreMailboxManager implements MailboxManager {
         MailboxMapper mailboxMapper = mailboxSessionMapperFactory.getMailboxMapper(session);
 
         return mailboxMapper.execute(() -> block(mailboxMapper.findMailboxById(mailboxId)
-            .map(Throwing.<Mailbox, Mailbox>function(mailbox -> {
-                assertIsOwner(session, mailbox.generateAssociatedPath());
-                return mailbox;
-            }).sneakyThrow())
+            .flatMap(mailbox -> assertCanDeleteReactive(session, mailbox))
             .flatMap(mailbox -> doDeleteMailbox(mailboxMapper, mailbox, session))));
     }
 
@@ -470,26 +523,50 @@ public class StoreMailboxManager implements MailboxManager {
         MailboxMapper mailboxMapper = mailboxSessionMapperFactory.getMailboxMapper(session);
 
         return mailboxMapper.executeReactive(mailboxMapper.findMailboxById(mailboxId)
-            .map(Throwing.<Mailbox, Mailbox>function(mailbox -> {
-                assertIsOwner(session, mailbox.generateAssociatedPath());
-                return mailbox;
-            }).sneakyThrow())
+            .flatMap(mailbox -> assertCanDeleteReactive(session, mailbox))
             .flatMap(mailbox -> doDeleteMailbox(mailboxMapper, mailbox, session)));
     }
 
     @Override
     public Mono<Void> deleteMailboxReactive(MailboxPath mailboxPath, MailboxSession session) {
         LOGGER.info("deleteMailbox {}", mailboxPath);
-        if (!mailboxPath.belongsTo(session)) {
-            LOGGER.info("Mailbox {} does not belong to {}", mailboxPath.asString(), session.getUser().asString());
-            return Mono.error(new MailboxNotFoundException(mailboxPath.asString()));
-        }
         MailboxMapper mailboxMapper = mailboxSessionMapperFactory.getMailboxMapper(session);
 
         return mailboxMapper.executeReactive(mailboxMapper.findMailboxByPath(mailboxPath)
+            .flatMap(mailbox -> assertCanDeleteReactive(session, mailbox))
             .flatMap(mailbox -> doDeleteMailbox(mailboxMapper, mailbox, session))
             .switchIfEmpty(Mono.error(() -> new MailboxNotFoundException(mailboxPath))))
             .then();
+    }
+
+    private Mono<Mailbox> assertCanDeleteReactive(MailboxSession session, Mailbox mailbox) {
+        MailboxPath path = mailbox.generateAssociatedPath();
+        if (path.belongsTo(session)) {
+            return Mono.just(mailbox);
+        }
+        return Mono.from(hasRightReactive(path, Right.DeleteMailbox, session))
+            .flatMap(hasRight -> {
+                if (hasRight) {
+                    return Mono.just(mailbox);
+                }
+                return Mono.error(new InsufficientRightsException("user '" + session.getUser().asString() + "' is not allowed to delete the mailbox '" + path.asString() + "'"));
+            });
+    }
+
+    private Mono<MailboxPath> assertCanDeleteWhenRename(MailboxSession session, MailboxPath path) {
+        if (path.belongsTo(session)) {
+            return Mono.just(path);
+        }
+        return Mono.from(myRightsReactive(path, session))
+            .flatMap(rights -> {
+                if (rights.contains(Right.DeleteMailbox)) {
+                    return Mono.just(path);
+                } else if (!rights.contains(Right.Lookup)) {
+                    return Mono.error(new MailboxNotFoundException(path));
+                } else {
+                    return Mono.error(new InsufficientRightsException("user '" + session.getUser().asString() + "' is not allowed to delete the mailbox '" + path.asString() + "'"));
+                }
+            });
     }
 
     private Mono<Mailbox> doDeleteMailbox(MailboxMapper mailboxMapper, Mailbox mailbox, MailboxSession session) {
@@ -542,36 +619,16 @@ public class StoreMailboxManager implements MailboxManager {
         LOGGER.debug("renameMailbox {} to {}", from, to);
         MailboxMapper mapper = mailboxSessionMapperFactory.getMailboxMapper(fromSession);
 
-        return sanitizedPath(from, to, fromSession, toSession)
-        .flatMap(sanitizedPath -> mapper.executeReactive(
-            mapper.findMailboxByPath(from)
-                .switchIfEmpty(Mono.error(() -> new MailboxNotFoundException(from)))
-                .flatMap(mailbox -> doRenameMailbox(mailbox, sanitizedPath, fromSession, toSession, mapper)
-                    .flatMap(renamedResults -> renameSubscriptionsIfNeeded(renamedResults, option, fromSession, toSession)))));
-    }
+        Mono<Mailbox> fromMailboxPublisher = assertCanDeleteWhenRename(fromSession, from)
+            .then(mapper.findMailboxByPath(from)
+                .switchIfEmpty(Mono.error(() -> new MailboxNotFoundException(from))));
 
-    private Mono<MailboxPath> sanitizedPath(MailboxPath from, MailboxPath to, MailboxSession fromSession, MailboxSession toSession) {
-        MailboxPath sanitizedMailboxPath = to.sanitize(toSession.getPathDelimiter());
-
-        return validateDestinationPath(sanitizedMailboxPath, toSession)
-            .then(Mono.fromRunnable(Throwing.runnable(() -> assertIsOwner(fromSession, from))))
-            .thenReturn(sanitizedMailboxPath);
-    }
-
-    private Mono<MailboxPath> sanitizedPath(MailboxPath to, MailboxSession session) {
-        MailboxPath sanitizedMailboxPath = to.sanitize(session.getPathDelimiter());
-
-        return validateDestinationPath(sanitizedMailboxPath, session)
-            .thenReturn(sanitizedMailboxPath);
+        return sanitizedMailboxPath(to, toSession)
+            .flatMap(sanitizedPath -> processRename(fromMailboxPublisher, sanitizedPath, option, fromSession, toSession));
     }
 
     private Mono<List<MailboxRenamedResult>> renameSubscriptionsIfNeeded(List<MailboxRenamedResult> renamedResults,
-                                                                   RenameOption option, MailboxSession session) {
-        return renameSubscriptionsIfNeeded(renamedResults, option, session, session);
-    }
-
-    private Mono<List<MailboxRenamedResult>> renameSubscriptionsIfNeeded(List<MailboxRenamedResult> renamedResults,
-                                                                   RenameOption option, MailboxSession fromSession, MailboxSession toSession) {
+                                                                         RenameOption option, MailboxSession fromSession, MailboxSession toSession) {
         if (option == RenameOption.RENAME_SUBSCRIPTIONS) {
             SubscriptionMapper subscriptionMapper = mailboxSessionMapperFactory.getSubscriptionMapper(fromSession);
 
@@ -605,35 +662,49 @@ public class StoreMailboxManager implements MailboxManager {
 
     @Override
     public Mono<List<MailboxRenamedResult>> renameMailboxReactive(MailboxId mailboxId, MailboxPath newMailboxPath, RenameOption option,
-                                                    MailboxSession session) {
+                                                                  MailboxSession session) {
         LOGGER.debug("renameMailbox {} to {}", mailboxId, newMailboxPath);
         MailboxMapper mapper = mailboxSessionMapperFactory.getMailboxMapper(session);
 
-        return sanitizedPath(newMailboxPath, session)
-            .flatMap(sanitizedPath -> mapper.executeReactive(
-                mapper.findMailboxById(mailboxId)
-                    .doOnNext(Throwing.<Mailbox>consumer(mailbox -> assertIsOwner(session, mailbox.generateAssociatedPath())).sneakyThrow())
-                    .switchIfEmpty(Mono.error(() -> new MailboxNotFoundException(mailboxId)))
-                    .flatMap(mailbox -> doRenameMailbox(mailbox, sanitizedPath, session, session, mapper)
-                        .flatMap(renamedResults -> renameSubscriptionsIfNeeded(renamedResults, option, session)))));
+        Mono<Mailbox> fromMailboxPublisher = mapper.findMailboxById(mailboxId)
+            .flatMap(mailbox -> assertCanDeleteWhenRename(session, mailbox.generateAssociatedPath())
+                .thenReturn(mailbox))
+            .switchIfEmpty(Mono.error(() -> new MailboxNotFoundException(mailboxId)));
+
+        return sanitizedMailboxPath(newMailboxPath, session)
+            .flatMap(sanitizedPath -> processRename(fromMailboxPublisher, sanitizedPath, option, session, session));
     }
 
-    private Mono<Void> validateDestinationPath(MailboxPath newMailboxPath, MailboxSession session) {
-        return mailboxExists(newMailboxPath, session)
-            .handle(Throwing.<Boolean, SynchronousSink<Void>>biConsumer((exists, sink) -> {
-                if (exists) {
-                    sink.error(new MailboxExistsException(newMailboxPath.toString()));
-                }
-                assertIsOwner(session, newMailboxPath);
-                newMailboxPath.assertAcceptable(session.getPathDelimiter());
-            }).sneakyThrow());
+    private Mono<MailboxPath> sanitizedMailboxPath(MailboxPath mailboxPath, MailboxSession session) {
+        Function<MailboxPath, Mono<Boolean>> assertNewMailboxPathDoesNotExist = newMailboxPath -> mailboxExists(mailboxPath, session)
+            .map(FunctionalUtils.negate());
+
+        Function<MailboxPath, Mono<Boolean>> assertRightToCreate = newMailboxPath -> canCreateReactive(session, mailboxPath);
+
+        return Mono.fromCallable(() -> mailboxPath.sanitize(session.getPathDelimiter()))
+            .filterWhen(assertNewMailboxPathDoesNotExist)
+            .switchIfEmpty(Mono.error(() -> new MailboxExistsException(mailboxPath.toString())))
+            .filterWhen(assertRightToCreate)
+            .switchIfEmpty(Mono.error(() -> new InsufficientRightsException("user '" + session.getUser().asString() + "' is not allowed to create the mailbox '" + mailboxPath.asString() + "'")))
+            .flatMap(newMailboxPath -> Mono.fromCallable(() -> newMailboxPath.assertAcceptable(session.getPathDelimiter())));
     }
 
-    private void assertIsOwner(MailboxSession mailboxSession, MailboxPath mailboxPath) throws MailboxNotFoundException {
-        if (!mailboxPath.belongsTo(mailboxSession)) {
-            LOGGER.info("Mailbox {} does not belong to {}", mailboxPath.asString(), mailboxSession.getUser().asString());
-            throw new MailboxNotFoundException(mailboxPath.asString());
-        }
+    private Mono<List<MailboxRenamedResult>> processRename(Mono<Mailbox> fromMailboxPublisher, MailboxPath to, RenameOption option,
+                                                           MailboxSession fromSession, MailboxSession toSession) {
+        MailboxMapper mapper = mailboxSessionMapperFactory.getMailboxMapper(fromSession);
+
+        return mapper.executeReactive(fromMailboxPublisher
+            .flatMap(mailbox -> doRenameMailbox(mailbox, to, fromSession, toSession, mapper)
+                .doOnEach(ReactorUtils.logFinally(() -> AuditTrail.entry()
+                    .username(() -> fromSession.getUser().asString())
+                    .sessionId(() -> String.valueOf(fromSession.getSessionId().getValue()))
+                    .protocol("mailbox")
+                    .action("rename")
+                    .parameters(Throwing.supplier(() -> ImmutableMap.of("mailboxId", mailbox.getMailboxId().serialize(),
+                        "fromMailboxPath", mailbox.generateAssociatedPath().asString(),
+                        "toMailboxPath", to.asString())))
+                    .log("Mailbox Rename")))
+                .flatMap(renamedResults -> renameSubscriptionsIfNeeded(renamedResults, option, fromSession, toSession))));
     }
 
     private Mono<List<MailboxRenamedResult>> doRenameMailbox(Mailbox mailbox, MailboxPath newMailboxPath, MailboxSession fromSession, MailboxSession toSession, MailboxMapper mapper) {
@@ -657,22 +728,7 @@ public class StoreMailboxManager implements MailboxManager {
                 resultBuilder.add(new MailboxRenamedResult(mailboxId, from, newMailboxPath));
                 return mailboxId;
             })
-            .then(Mono.from(locker.executeReactiveWithLockReactive(from, mapper.findMailboxWithPathLike(query)
-                    .concatMap(sub -> {
-                        String subOriginalName = sub.getName();
-                        String subNewName = newMailboxPath.getName() + subOriginalName.substring(from.getName().length());
-                        MailboxPath fromPath = new MailboxPath(from, subOriginalName);
-                        sub.setName(subNewName);
-                        sub.setUser(toSession.getUser());
-                        return mapper.rename(sub)
-                            .map(mailboxId -> {
-                                resultBuilder.add(new MailboxRenamedResult(sub.getMailboxId(), fromPath, sub.generateAssociatedPath()));
-                                return mailboxId;
-                            })
-                            .retryWhen(Retry.backoff(5, Duration.ofMillis(10)))
-                            .then(Mono.fromRunnable(() -> LOGGER.debug("Rename mailbox sub-mailbox {} to {}", subOriginalName, subNewName)));
-                    }, LOW_CONCURRENCY)
-                    .then(), MailboxPathLocker.LockType.Write)))
+            .then(Mono.from(renameSubMailboxes(newMailboxPath, mapper, from, query, resultBuilder)))
             .then(Mono.defer(() -> Flux.fromIterable(resultBuilder.build())
                 .concatMap(result -> eventBus.dispatch(EventFactory.mailboxRenamed()
                         .randomEventId()
@@ -684,6 +740,29 @@ public class StoreMailboxManager implements MailboxManager {
                     new MailboxIdRegistrationKey(result.getMailboxId())))
                 .then()))
             .then(Mono.fromCallable(resultBuilder::build));
+    }
+
+    private Publisher<Void> renameSubMailboxes(MailboxPath newMailboxPath, MailboxMapper mapper,
+                                               MailboxPath from, MailboxQuery.UserBound query, ImmutableList.Builder<MailboxRenamedResult> resultBuilder) {
+        if (DefaultMailboxes.INBOX.equalsIgnoreCase(from.getName())) {
+            return Mono.empty();
+        }
+        return locker.executeReactiveWithLockReactive(from, mapper.findMailboxWithPathLike(query)
+            .concatMap(sub -> {
+                String subOriginalName = sub.getName();
+                String subNewName = newMailboxPath.getName() + subOriginalName.substring(from.getName().length());
+                MailboxPath fromPath = new MailboxPath(from, subOriginalName);
+                sub.setName(subNewName);
+                sub.setUser(newMailboxPath.getUser());
+                return mapper.rename(sub)
+                    .map(mailboxId -> {
+                        resultBuilder.add(new MailboxRenamedResult(sub.getMailboxId(), fromPath, sub.generateAssociatedPath()));
+                        return mailboxId;
+                    })
+                    .retryWhen(Retry.backoff(5, Duration.ofMillis(10)))
+                    .then(Mono.fromRunnable(() -> LOGGER.debug("Rename mailbox sub-mailbox {} to {}", subOriginalName, subNewName)));
+            }, LOW_CONCURRENCY)
+            .then(), MailboxPathLocker.LockType.Write);
     }
 
     @Override
@@ -699,23 +778,23 @@ public class StoreMailboxManager implements MailboxManager {
     @Override
     public Flux<MessageRange> copyMessagesReactive(MessageRange set, MailboxPath from, MailboxPath to, MailboxSession session) {
         return Mono.zip(Mono.from(getMailboxReactive(from, session)), Mono.from(getMailboxReactive(to, session)))
-            .flatMapMany(fromTo -> configuration.getMoveBatcher().batchMessagesReactive(set, messageRange -> {
+            .flatMapMany(fromTo -> {
                 StoreMessageManager fromMessageManager = (StoreMessageManager) fromTo.getT1();
                 StoreMessageManager toMessageManager = (StoreMessageManager) fromTo.getT2();
 
-                return fromMessageManager.copyTo(messageRange, toMessageManager, session).flatMapIterable(Function.identity());
-            }));
+                return fromMessageManager.copyTo(set, toMessageManager, session);
+            });
     }
 
     @Override
     public Flux<MessageRange> copyMessagesReactive(MessageRange set, MailboxId from, MailboxId to, MailboxSession session) {
         return Mono.zip(Mono.from(getMailboxReactive(from, session)), Mono.from(getMailboxReactive(to, session)))
-            .flatMapMany(fromTo -> configuration.getMoveBatcher().batchMessagesReactive(set, messageRange -> {
+            .flatMapMany(fromTo -> {
                 StoreMessageManager fromMessageManager = (StoreMessageManager) fromTo.getT1();
                 StoreMessageManager toMessageManager = (StoreMessageManager) fromTo.getT2();
 
-                return fromMessageManager.copyTo(messageRange, toMessageManager, session).flatMapIterable(Function.identity());
-            }));
+                return fromMessageManager.copyTo(set, toMessageManager, session);
+            });
     }
 
     @Override
@@ -731,23 +810,45 @@ public class StoreMailboxManager implements MailboxManager {
     @Override
     public Flux<MessageRange> moveMessagesReactive(MessageRange set, MailboxPath from, MailboxPath to, MailboxSession session) {
         return Mono.zip(Mono.from(getMailboxReactive(from, session)), Mono.from(getMailboxReactive(to, session)))
-            .flatMapMany(fromTo -> configuration.getMoveBatcher().batchMessagesReactive(set, messageRange -> {
+            .flatMapMany(fromTo -> {
                 StoreMessageManager fromMessageManager = (StoreMessageManager) fromTo.getT1();
                 StoreMessageManager toMessageManager = (StoreMessageManager) fromTo.getT2();
 
-                return fromMessageManager.moveTo(messageRange, toMessageManager, session).flatMapIterable(Function.identity());
-            }));
+                return fromMessageManager.moveTo(set, toMessageManager, session);
+            });
     }
 
     @Override
     public Flux<MessageRange> moveMessagesReactive(MessageRange set, MailboxId from, MailboxId to, MailboxSession session) {
         return Mono.zip(Mono.from(getMailboxReactive(from, session)), Mono.from(getMailboxReactive(to, session)))
-            .flatMapMany(fromTo -> configuration.getMoveBatcher().batchMessagesReactive(set, messageRange -> {
+            .flatMapMany(fromTo -> {
                 StoreMessageManager fromMessageManager = (StoreMessageManager) fromTo.getT1();
                 StoreMessageManager toMessageManager = (StoreMessageManager) fromTo.getT2();
 
-                return fromMessageManager.moveTo(messageRange, toMessageManager, session).flatMapIterable(Function.identity());
-            }));
+                return fromMessageManager.moveTo(set, toMessageManager, session);
+            });
+    }
+
+    @Override
+    public Flux<MessageRange> moveMessagesReactive(List<MessageRange> sets, MailboxId from, MailboxId to, MailboxSession session) {
+        return Mono.zip(Mono.from(getMailboxReactive(from, session)), Mono.from(getMailboxReactive(to, session)))
+            .flatMapMany(fromTo -> {
+                StoreMessageManager fromMessageManager = (StoreMessageManager) fromTo.getT1();
+                StoreMessageManager toMessageManager = (StoreMessageManager) fromTo.getT2();
+
+                return fromMessageManager.moveTo(sets, toMessageManager, session);
+            });
+    }
+
+    @Override
+    public Flux<MessageRange> copyMessagesReactive(List<MessageRange> sets, MailboxId from, MailboxId to, MailboxSession session) {
+        return Mono.zip(Mono.from(getMailboxReactive(from, session)), Mono.from(getMailboxReactive(to, session)))
+            .flatMapMany(fromTo -> {
+                StoreMessageManager fromMessageManager = (StoreMessageManager) fromTo.getT1();
+                StoreMessageManager toMessageManager = (StoreMessageManager) fromTo.getT2();
+
+                return fromMessageManager.copyTo(sets, toMessageManager, session);
+            });
     }
 
     @Override
@@ -808,12 +909,20 @@ public class StoreMailboxManager implements MailboxManager {
 
     private Flux<Mailbox> searchMailboxes(MailboxQuery mailboxQuery, MailboxSession session, Right right) {
         MailboxMapper mailboxMapper = mailboxSessionMapperFactory.getMailboxMapper(session);
-        Flux<Mailbox> baseMailboxes = mailboxMapper
-            .findMailboxWithPathLike(toSingleUserQuery(mailboxQuery, session));
+        Flux<Mailbox> baseMailboxes = getBaseMailboxes(mailboxMapper, mailboxQuery, session);
         Flux<Mailbox> delegatedMailboxes = getDelegatedMailboxes(mailboxMapper, mailboxQuery, right, session)
             .filter(Throwing.predicate(mailbox -> storeRightManager.hasRight(mailbox, right, session)))
             .filter(mailbox -> !mailbox.getUser().equals(session.getUser()));
         return Flux.concat(baseMailboxes, delegatedMailboxes);
+    }
+
+    private Flux<Mailbox> getBaseMailboxes(MailboxMapper mailboxMapper,MailboxQuery mailboxQuery, MailboxSession session) {
+        if (mailboxQuery.isPrivateMailboxes(session)
+          || mailboxQuery.getNamespace().isEmpty() && mailboxQuery.getUser().isEmpty()) {
+            return mailboxMapper.findMailboxWithPathLike(toSingleUserQuery(mailboxQuery, session));
+        } else {
+            return Flux.empty();
+        }
     }
 
     private Flux<MailboxId> accessibleMailboxIds(MultimailboxesSearchQuery.Namespace namespace, Right right, MailboxSession session) {
@@ -871,11 +980,11 @@ public class StoreMailboxManager implements MailboxManager {
     }
 
     @Override
-    public Flux<MessageId> search(MultimailboxesSearchQuery expression, MailboxSession session, long limit) {
+    public Flux<MessageId> search(MultimailboxesSearchQuery expression, MailboxSession session, SearchOptions searchOptions) {
         return getInMailboxIds(expression, session)
             .filter(id -> !expression.getNotInMailboxes().contains(id))
             .collect(ImmutableSet.toImmutableSet())
-            .flatMapMany(Throwing.function(ids -> index.search(session, ids, expression.getSearchQuery(), limit)));
+            .flatMapMany(Throwing.function(ids -> index.search(session, ids, expression.getSearchQuery(), searchOptions)));
     }
 
     @Override
@@ -883,7 +992,7 @@ public class StoreMailboxManager implements MailboxManager {
         return threadIdGuessingAlgorithm.getMessageIdsInThread(threadId, session);
     }
 
-    private Flux<MailboxId> getInMailboxIds(MultimailboxesSearchQuery expression, MailboxSession session) {
+    public Flux<MailboxId> getInMailboxIds(MultimailboxesSearchQuery expression, MailboxSession session) {
         if (expression.getInMailboxes().isEmpty()) {
             return accessibleMailboxIds(expression.getNamespace(), Right.Read, session);
         } else {

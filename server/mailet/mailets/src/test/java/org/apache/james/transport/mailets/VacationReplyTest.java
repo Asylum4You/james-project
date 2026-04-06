@@ -53,7 +53,6 @@ public class VacationReplyTest {
     private MailAddress originalSender;
     private MailAddress originalRecipient;
     private FakeMail mail;
-    private MimeMessage generatedBody;
 
     @Before
     public void setUp() throws Exception {
@@ -71,7 +70,6 @@ public class VacationReplyTest {
         when(htmlTextExtractor.toPlainText(any())).thenReturn("HTML");
 
         mimeMessageBodyGenerator = spy(new MimeMessageBodyGenerator(htmlTextExtractor));
-        generatedBody = MimeMessageUtil.defaultMimeMessage();
     }
 
     @Test
@@ -84,6 +82,7 @@ public class VacationReplyTest {
                 .htmlBody(HTML_REASON)
                 .build())
             .receivedMailRecipient(originalRecipient)
+            .replyRecipient(originalSender)
             .build(mimeMessageBodyGenerator);
 
         assertThat(vacationReply.getRecipients()).containsExactly(originalSender);
@@ -98,6 +97,7 @@ public class VacationReplyTest {
                 .textBody(REASON)
                 .build())
             .receivedMailRecipient(originalRecipient)
+            .replyRecipient(originalSender)
             .build(mimeMessageBodyGenerator);
 
         verify(mimeMessageBodyGenerator).from(argThat(createSubjectMatcher("Re: Original subject")), any(), any());
@@ -113,6 +113,7 @@ public class VacationReplyTest {
                 .subject(Optional.of("Nghiêm Thị Tuyết Nhung"))
                 .textBody(REASON)
                 .build())
+            .replyRecipient(originalRecipient)
             .receivedMailRecipient(originalRecipient)
             .build(mimeMessageBodyGenerator);
 
@@ -128,6 +129,7 @@ public class VacationReplyTest {
                 .subject(Optional.of(SUBJECT))
                 .build())
             .receivedMailRecipient(originalRecipient)
+            .replyRecipient(originalSender)
             .build(mimeMessageBodyGenerator);
 
         verify(mimeMessageBodyGenerator).from(argThat(createSubjectMatcher(SUBJECT)), any(), any());

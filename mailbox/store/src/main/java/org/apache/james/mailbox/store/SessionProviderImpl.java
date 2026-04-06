@@ -127,7 +127,7 @@ public class SessionProviderImpl implements SessionProvider {
     }
 
     private MailboxSession createSession(Username userName, Optional<Username> loggedInUser, MailboxSession.SessionType type) {
-        return new MailboxSession(newSessionId(), userName, loggedInUser, new ArrayList<>(), MailboxConstants.DEFAULT_DELIMITER, type);
+        return new MailboxSession(newSessionId(), userName, loggedInUser, new ArrayList<>(), MailboxConstants.FOLDER_DELIMITER, type);
     }
 
     private MailboxSession.SessionId newSessionId() {
@@ -147,5 +147,10 @@ public class SessionProviderImpl implements SessionProvider {
      */
     private Optional<Username> isValidLogin(Username userid, String passwd) throws MailboxException {
         return authenticator.isAuthentic(userid, passwd);
+    }
+
+    @Override
+    public SessionProvider withExtraAuthorizator(Authorizator authorizator) {
+        return new SessionProviderImpl(authenticator, Authorizator.combine(this.authorizator, authorizator));
     }
 }

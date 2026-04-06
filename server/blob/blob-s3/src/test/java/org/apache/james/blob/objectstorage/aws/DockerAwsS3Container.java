@@ -28,7 +28,7 @@ import org.testcontainers.containers.wait.strategy.Wait;
 
 public class DockerAwsS3Container {
 
-    private static final String AWS_S3_DOCKER_IMAGE = "registry.scality.com/cloudserver/cloudserver:8.7.25";
+    private static final String AWS_S3_DOCKER_IMAGE = "ghcr.io/scality/cloudserver:c1ba296859690c1cbbec609aaae430f6b04b4745";
     private static final int AWS_S3_PORT = 8000;
     private static final int ONE_TIME = 1;
 

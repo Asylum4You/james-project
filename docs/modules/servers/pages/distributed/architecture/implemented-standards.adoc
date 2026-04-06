@@ -1,0 +1,6 @@
+= Distributed James Server &mdash; Implemented standards
+:navtitle: Implemented standards
+
+:server-name: Distributed James Server
+
+include::partial$architecture/implemented-standards.adoc[]

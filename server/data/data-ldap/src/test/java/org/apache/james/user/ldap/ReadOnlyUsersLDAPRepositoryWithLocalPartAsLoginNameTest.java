@@ -35,6 +35,7 @@ import org.apache.commons.configuration2.plist.PropertyListConfiguration;
 import org.apache.commons.configuration2.tree.ImmutableNode;
 import org.apache.james.core.Username;
 import org.apache.james.domainlist.api.DomainList;
+import org.apache.james.metrics.api.NoopGaugeRegistry;
 import org.apache.james.user.api.InvalidUsernameException;
 import org.apache.james.user.lib.UsersRepositoryContract;
 import org.assertj.core.api.SoftAssertions;
@@ -289,10 +290,11 @@ public class ReadOnlyUsersLDAPRepositoryWithLocalPartAsLoginNameTest {
 
     }
 
-    private static ReadOnlyUsersLDAPRepository startUsersRepository(HierarchicalConfiguration<ImmutableNode> ldapRepositoryConfiguration,
+    private static ReadOnlyUsersLDAPRepository startUsersRepository(HierarchicalConfiguration<ImmutableNode> configuration,
                                                                     DomainList domainList) throws Exception {
-        ReadOnlyUsersLDAPRepository ldapRepository = new ReadOnlyUsersLDAPRepository(domainList);
-        ldapRepository.configure(ldapRepositoryConfiguration);
+        ReadOnlyUsersLDAPRepository ldapRepository = new ReadOnlyUsersLDAPRepository(domainList, new NoopGaugeRegistry(),
+            LdapRepositoryConfiguration.from(configuration));
+        ldapRepository.configure(configuration);
         ldapRepository.init();
         return ldapRepository;
     }

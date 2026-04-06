@@ -18,12 +18,10 @@
  ****************************************************************/
 
 
-
 package org.apache.james.protocols.smtp.core.esmtp;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Base64;
 import java.util.Collection;
 import java.util.Collections;
@@ -31,11 +29,10 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.function.Function;
-import java.util.stream.Collectors;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.james.core.Username;
-import org.apache.james.protocols.api.OidcSASLConfiguration;
+import org.apache.james.jwt.OidcSASLConfiguration;
 import org.apache.james.protocols.api.Request;
 import org.apache.james.protocols.api.Response;
 import org.apache.james.protocols.api.handler.CommandHandler;
@@ -55,8 +52,9 @@ import org.apache.james.util.AuditTrail;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Joiner;
-import com.google.common.base.Preconditions;
+import com.google.common.base.Splitter;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
@@ -168,43 +166,64 @@ public class AuthCmdHandler
             }
             String authType = argument.toUpperCase(Locale.US);
             if (authType.equals(AUTH_TYPE_PLAIN) && session.getConfiguration().isPlainAuthEnabled()) {
-                String userpass;
-                if (initialResponse == null) {
-                    session.pushLineHandler(new AbstractSMTPLineHandler() {
-                        @Override
-                        protected Response onCommand(SMTPSession session, String l) {
-                            return doPlainAuth(session, l);
-                        }
-                    });
-                    return AUTH_READY_PLAIN;
-                } else {
-                    userpass = initialResponse.trim();
-                    return doPlainAuth(session, userpass);
-                }
+                return handlePlainContinuation(session, initialResponse);
             } else if (authType.equals(AUTH_TYPE_LOGIN) && session.getConfiguration().isPlainAuthEnabled()) {
-
-                if (initialResponse == null) {
-                    session.pushLineHandler(new AbstractSMTPLineHandler() {
-                        @Override
-                        protected Response onCommand(SMTPSession session, String l) {
-                            return doLoginAuthPass(session, l);
-                        }
-                    });
-                    return AUTH_READY_USERNAME_LOGIN;
-                } else {
-                    String user = initialResponse.trim();
-                    return doLoginAuthPass(session, user);
-                }
-            } else if ((authType.equals(AUTH_TYPE_OAUTHBEARER) || authType.equals(AUTH_TYPE_XOAUTH2))
-                && session.supportsOAuth()) {
-                return doSASLAuthentication(session, initialResponse);
+                return handleLoginAuthContinuation(session, initialResponse);
+            } else if ((authType.equals(AUTH_TYPE_OAUTHBEARER) || authType.equals(AUTH_TYPE_XOAUTH2)) && session.supportsOAuth()) {
+                return handleOauth2Continuation(session, initialResponse);
             } else {
                 return doUnknownAuth(authType);
             }
         }
     }
 
-    private Response doSASLAuthentication(SMTPSession session, String initialResponseString) {
+    private Response handlePlainContinuation(SMTPSession session, String initialResponse) {
+        return Optional.ofNullable(initialResponse)
+        .map(String::trim)
+        .map(userpass -> doPlainAuth(session, userpass))
+        .orElseGet(() -> {
+            session.pushLineHandler(new AbstractSMTPLineHandler() {
+                @Override
+                protected Response onCommand(SMTPSession session, String l) {
+                    return doPlainAuth(session, l);
+                }
+            });
+            return AUTH_READY_USERNAME_LOGIN;
+        });
+    }
+
+    private Response handleLoginAuthContinuation(SMTPSession session, String initialResponse) {
+        return Optional.ofNullable(initialResponse)
+            .map(String::trim)
+            .map(user -> doLoginAuthPass(session, user))
+            .orElseGet(() -> {
+                session.pushLineHandler(new AbstractSMTPLineHandler() {
+                    @Override
+                    protected Response onCommand(SMTPSession session, String l) {
+                        return doLoginAuthPass(session, l);
+                    }
+                });
+                return AUTH_READY_USERNAME_LOGIN;
+            });
+    }
+
+    private Response handleOauth2Continuation(SMTPSession session, String initialResponse) {
+        return Optional.ofNullable(initialResponse)
+            .map(token -> doOauth2Authentication(session, token))
+            .orElseGet(() -> {
+                session.pushLineHandler(new AbstractSMTPLineHandler() {
+                    @Override
+                    protected Response onCommand(SMTPSession session, String l) {
+                        Response response = doOauth2Authentication(session, l);
+                        session.popLineHandler();
+                        return response;
+                    }
+                });
+                return new SMTPResponse(SMTPRetCode.AUTH_READY, "");
+            });
+    }
+
+    private Response doOauth2Authentication(SMTPSession session, String initialResponseString) {
         return session.getConfiguration().saslConfiguration()
             .map(oidcSASLConfiguration -> hooks.stream()
                 .flatMap(hook -> Optional.ofNullable(executeHook(session, hook,
@@ -247,42 +266,57 @@ public class AuthCmdHandler
      */
     private Response doPlainAuth(SMTPSession session, String line) {
         try {
-            List<String> tokens = Optional.ofNullable(decodeBase64(line))
-                .map(userpass1 -> Arrays.stream(userpass1.split("\0"))
-                    .filter(token -> !token.isBlank())
-                    .collect(Collectors.toList()))
-                .orElse(List.of());
-            Preconditions.checkArgument(tokens.size() == 1 || tokens.size() == 2 || tokens.size() == 3);
-            Response response = null;
 
-            if (tokens.size() == 1) {
-                response = doDelegation(session, Username.of(tokens.get(0)));
-            } else if (tokens.size() == 2) {
-                // If we got here, this is what happened.  RFC 2595
-                // says that "the client may leave the authorization
-                // identity empty to indicate that it is the same as
-                // the authentication identity."  As noted above,
-                // that would be represented as a decoded string of
-                // the form: "\0authenticate-id\0password".  The
-                // first call to nextToken will skip the empty
-                // authorize-id, and give us the authenticate-id,
-                // which we would store as the authorize-id.  The
-                // second call will give us the password, which we
-                // think is the authenticate-id (user).  Then when
-                // we ask for the password, there are no more
-                // elements, leading to the exception we just
-                // caught.  So we need to move the user to the
-                // password, and the authorize_id to the user.
-                response = doAuthTest(session, Optional.of(Username.of(tokens.get(0))), Optional.of(tokens.get(1)), AUTH_TYPE_PLAIN);
+            AuthValues authValues =
+                    Optional.ofNullable(decodeBase64(line))
+                            .flatMap(AuthCmdHandler::parseAuthValues)
+                            .orElseThrow(() -> new IllegalArgumentException("Can't parse line as authentication values"));
+
+            Response response;
+
+            if (authValues.password.isEmpty()) {
+                response = doDelegation(session, authValues.username);
             } else {
-                response = doAuthTest(session, Optional.of(Username.of(tokens.get(1))), Optional.of(tokens.get(2)), AUTH_TYPE_PLAIN);
+                response = doAuthTest(session, Optional.of(authValues.username), authValues.password, AUTH_TYPE_PLAIN);
             }
+
             session.popLineHandler();
             return response;
         } catch (Exception e) {
             LOGGER.info("Could not decode parameters for AUTH PLAIN", e);
-            return new SMTPResponse(SMTPRetCode.SYNTAX_ERROR_ARGUMENTS,"Could not decode parameters for AUTH PLAIN");
+            return new SMTPResponse(SMTPRetCode.SYNTAX_ERROR_ARGUMENTS, "Could not decode parameters for AUTH PLAIN");
         }
+    }
+
+    @VisibleForTesting
+    static Optional<AuthValues> parseAuthValues(String input) {
+
+        List<String> parts = Splitter.on('\0').splitToStream(input).filter(token -> !token.isBlank()).toList();
+
+        return switch (parts.size()) {
+            case 1 -> Optional.of(new AuthValues(Username.of(parts.get(0)), Optional.empty()));
+            // If we got here, this is what happened.  RFC 2595
+            // says that "the client may leave the authorization
+            // identity empty to indicate that it is the same as
+            // the authentication identity."  As noted above,
+            // that would be represented as a decoded string of
+            // the form: "\0authenticate-id\0password".  The
+            // first call to nextToken will skip the empty
+            // authorize-id, and give us the authenticate-id,
+            // which we would store as the authorize-id.  The
+            // second call will give us the password, which we
+            // think is the authenticate-id (user).  Then when
+            // we ask for the password, there are no more
+            // elements, leading to the exception we just
+            // caught.  So we need to move the user to the
+            // password, and the authorize_id to the user.
+            case 2 -> Optional.of(new AuthValues(Username.of(parts.get(0)), Optional.of(parts.get(1))));
+            case 3 -> Optional.of(new AuthValues(Username.of(parts.get(1)), Optional.of(parts.get(2))));
+            default -> Optional.empty();
+        };
+    }
+
+    record AuthValues(Username username, Optional<String> password) {
     }
 
     private String decodeBase64(String line) {
@@ -521,8 +555,9 @@ public class AuthCmdHandler
 
     @Override
     public List<Class<?>> getMarkerInterfaces() {
-        List<Class<?>> classes = new ArrayList<>(1);
+        List<Class<?>> classes = new ArrayList<>(2);
         classes.add(AuthHook.class);
+        classes.add(HookResultHook.class);
         return classes;
     }
 

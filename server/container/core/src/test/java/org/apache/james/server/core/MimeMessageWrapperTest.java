@@ -29,14 +29,12 @@ import java.io.InputStreamReader;
 import java.util.Enumeration;
 import java.util.Properties;
 
-import com.google.common.collect.ImmutableList;
 import jakarta.mail.MessagingException;
 import jakarta.mail.Session;
 import jakarta.mail.internet.MimeMessage;
 import jakarta.mail.util.SharedByteArrayInputStream;
 
 import org.apache.commons.io.IOUtils;
-import org.apache.james.core.MailAddress;
 import org.apache.james.lifecycle.api.LifecycleUtil;
 import org.apache.james.util.ClassLoaderUtils;
 import org.apache.james.util.MimeMessageUtil;
@@ -124,6 +122,15 @@ public class MimeMessageWrapperTest extends MimeMessageFromStreamTest {
         MimeMessageWrapper mmw = new MimeMessageWrapper(mw);
         new MimeMessageWrapper(mw).addHeader("Content-Type", "image/*; name=\"20230720_175854.jpg\"");
         mmw.saveChanges();
+    }
+
+    @Test
+    void setHeaderShouldNotAlterValidMimeVersionWhenComment() throws Exception {
+        MimeMessageWrapper mw = new MimeMessageWrapper(getMessageFromSources("Subject: foo\r\nMime-Version: 1.0 (Mac OS X Mail 15.0 \\(3693.60.0.1.1\\))\r\rContent-Transfer-Encoding2: plain" + sep + body));
+        mw.setHeader("abc", "def");
+        mw.saveChanges();
+
+        assertThat(mw.getHeader("Mime-Version")[0]).isEqualTo("1.0 (Mac OS X Mail 15.0 \\(3693.60.0.1.1\\))");
     }
 
     @Test

@@ -76,7 +76,7 @@ public class PostDequeueDecoratorTest {
     private static final MessageUid UID = MessageUid.of(1);
     private static final MailboxPath OUTBOX_MAILBOX_PATH = MailboxPath.forUser(USERNAME, OUTBOX);
     private static final MailboxPath SENT_MAILBOX_PATH = MailboxPath.forUser(USERNAME, SENT);
-    private static final Attribute USERNAME_ATTRIBUTE = new Attribute(MailMetadata.MAIL_METADATA_USERNAME_ATTRIBUTE, AttributeValue.of(RAW_USERNAME));
+    private static final Attribute USERNAME_ATTRIBUTE = new Attribute(Mail.JMAP_AUTH_USER, AttributeValue.of(RAW_USERNAME));
 
     private StoreMailboxManager mailboxManager;
     private MailQueueItem mockedMailQueueItem;
@@ -277,17 +277,15 @@ public class PostDequeueDecoratorTest {
 
         when(messageIdManager.getMessagesReactive(any(), eq(FetchGroup.MINIMAL), any(MailboxSession.class)))
             .thenReturn(Flux.fromIterable(allMessages));
-        when(messageIdManager.setInMailboxesReactive(eq(messageId.getMessageId()), eq(ImmutableList.of(sentMailboxId)), any(MailboxSession.class)))
-            .thenReturn(Mono.empty());
-        when(messageIdManager.setFlagsReactive(eq(new Flags(Flag.SEEN)), eq(MessageManager.FlagsUpdateMode.ADD), eq(messageId.getMessageId()), eq(ImmutableList.of(sentMailboxId)), any(MailboxSession.class)))
+        when(messageIdManager.updateEmail(eq(messageId.getMessageId()), eq(ImmutableList.of(sentMailboxId)),
+            eq(new Flags(Flag.SEEN)), eq(MessageManager.FlagsUpdateMode.ADD), any(MailboxSession.class)))
             .thenReturn(Mono.empty());
 
         testee.done(MailQueueItem.CompletionStatus.SUCCESS);
         testee.done(MailQueueItem.CompletionStatus.SUCCESS);
 
         verify(messageIdManager, times(1)).getMessagesReactive(any(), eq(FetchGroup.MINIMAL), any(MailboxSession.class));
-        verify(messageIdManager, times(1)).setInMailboxesReactive(eq(messageId.getMessageId()), eq(ImmutableList.of(sentMailboxId)), any(MailboxSession.class));
-        verify(messageIdManager, times(1)).setFlagsReactive(eq(new Flags(Flag.SEEN)), eq(MessageManager.FlagsUpdateMode.ADD), eq(messageId.getMessageId()), eq(ImmutableList.of(sentMailboxId)), any(MailboxSession.class));
+        verify(messageIdManager, times(1)).updateEmail(eq(messageId.getMessageId()), eq(ImmutableList.of(sentMailboxId)), eq(new Flags(Flag.SEEN)), eq(MessageManager.FlagsUpdateMode.ADD), any(MailboxSession.class));
 
         verifyNoMoreInteractions(messageIdManager);
     }

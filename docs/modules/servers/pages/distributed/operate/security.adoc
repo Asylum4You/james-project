@@ -1,0 +1,6 @@
+= Security checklist
+:navtitle: Security checklist
+
+:xref-base: distributed
+:backend-name: Cassandra
+include::partial$operate/security.adoc[]

@@ -24,10 +24,9 @@ import java.util.List;
 
 import org.apache.commons.configuration2.HierarchicalConfiguration;
 import org.apache.commons.configuration2.tree.ImmutableNode;
-import org.apache.james.RunArguments;
 import org.apache.james.filesystem.api.FileSystem;
 import org.apache.james.lifecycle.api.ConfigurationSanitizer;
-import org.apache.james.protocols.lib.SslConfig;
+import org.apache.james.protocols.netty.SslConfig;
 import org.apache.james.server.core.configuration.ConfigurationProvider;
 import org.apache.james.utils.KeystoreCreator;
 

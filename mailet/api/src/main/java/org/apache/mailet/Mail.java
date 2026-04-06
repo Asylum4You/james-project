@@ -34,6 +34,7 @@ import jakarta.mail.internet.MimeMessage;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.james.core.MailAddress;
 import org.apache.james.core.MaybeSender;
+import org.apache.james.core.Username;
 import org.apache.mailet.PerRecipientHeaders.Header;
 
 import com.google.common.collect.ImmutableMap;
@@ -102,6 +103,7 @@ public interface Mail extends Serializable, Cloneable {
     String LOCAL_DELIVERY = "local-delivery";
 
     AttributeName SMTP_AUTH_USER = AttributeName.of("org.apache.james.SMTPAuthUser");
+    AttributeName JMAP_AUTH_USER = AttributeName.of("org.apache.james.jmap.send.MailMetaData.username");
     AttributeName SMTP_HELO = AttributeName.of("org.apache.james.HELO");
     AttributeName SSL_PROTOCOL = AttributeName.of("org.apache.james.ssl.protocol");
     AttributeName SSL_CIPHER = AttributeName.of("org.apache.james.ssl.cipher");
@@ -452,5 +454,14 @@ public interface Mail extends Serializable, Cloneable {
         dsnParameters.toAttributes()
             .asAttributes()
             .forEach(this::setAttribute);
+    }
+
+    default Optional<Username> loggedInUser() {
+        return getAttribute(Mail.SMTP_AUTH_USER)
+            .or(() -> getAttribute(Mail.JMAP_AUTH_USER))
+            .map(attribute -> attribute.getValue().value())
+            .filter(String.class::isInstance)
+            .map(String.class::cast)
+            .map(Username::of);
     }
 }

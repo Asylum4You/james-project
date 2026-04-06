@@ -29,6 +29,8 @@ import org.apache.james.protocols.smtp.hook.HookResult;
 import org.apache.james.protocols.smtp.hook.HookReturnCode;
 import org.apache.james.protocols.smtp.hook.MailHook;
 import org.apache.james.protocols.smtp.hook.RcptHook;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.google.common.base.Preconditions;
 
@@ -36,40 +38,48 @@ import com.google.common.base.Preconditions;
  * Handler which check if the authenticated user is the same as the one used as MAIL FROM
  */
 public abstract class AbstractSenderAuthIdentifyVerificationHook implements MailHook, RcptHook {
-    private static final HookResult INVALID_AUTH = HookResult.builder()
+    protected static final HookResult INVALID_AUTH = HookResult.builder()
         .hookReturnCode(HookReturnCode.deny())
         .smtpReturnCode(SMTPRetCode.BAD_SEQUENCE)
         .smtpDescription(DSNStatus.getStatus(DSNStatus.PERMANENT, DSNStatus.SECURITY_AUTH)
             + " Incorrect Authentication for Specified Email Address")
         .build();
-    private static final HookResult AUTH_REQUIRED = HookResult.builder()
+    protected static final HookResult AUTH_REQUIRED = HookResult.builder()
         .hookReturnCode(HookReturnCode.deny())
         .smtpReturnCode(SMTPRetCode.AUTH_REQUIRED)
         .smtpDescription(DSNStatus.getStatus(DSNStatus.PERMANENT, DSNStatus.SECURITY_AUTH)
             + " Authentication Required")
         .build();
+    public static final Logger LOGGER = LoggerFactory.getLogger(AbstractSenderAuthIdentifyVerificationHook.class);
 
     /*
      * Check if the sender address is the same as the user which was used to authenticate.
      * Its important to ignore case here to fix JAMES-837. This is save to do because if the handler is called
      * the user was already authenticated
      */
-    private boolean senderDoesNotMatchAuthUser(SMTPSession session, MaybeSender sender) {
+    protected boolean senderDoesNotMatchAuthUser(SMTPSession session, MaybeSender sender) {
+        if (sender.isNullSender()) {
+            // Authenticated users can legitimately use MAIL FROM eg for MDNs CF RFC 8098
+            // Please note that the header From is later verified by the DATA hook.
+            return false;
+        }
         return session.getUsername() != null &&
-            (isAnonymous(sender) || !senderMatchSessionUser(sender, session) || !belongsToLocalDomain(sender));
+            (!senderMatchSessionUser(sender, session) || !belongsToLocalDomain(sender));
     }
 
     /*
      * Validate that unauthenticated users do not use local addresses in MAIL FROM
      */
-    private boolean unauthenticatedSenderIsLocalUser(SMTPSession session, MaybeSender sender) {
+    protected boolean unauthenticatedSenderIsLocalUser(SMTPSession session, MaybeSender sender) {
         return session.getUsername() == null && !session.isRelayingAllowed() && belongsToLocalDomain(sender);
     }
 
     protected HookResult doCheck(SMTPSession session, MaybeSender sender) {
         if (senderDoesNotMatchAuthUser(session, sender)) {
+            LOGGER.warn("{} tried to send an email as {}", session.getUsername(), sender.asString());
             return INVALID_AUTH;
         } else if (unauthenticatedSenderIsLocalUser(session, sender)) {
+            LOGGER.info("Authentication is required for sending emails as a local user ({})", sender.asString());
             return AUTH_REQUIRED;
         } else {
             return HookResult.DECLINED;

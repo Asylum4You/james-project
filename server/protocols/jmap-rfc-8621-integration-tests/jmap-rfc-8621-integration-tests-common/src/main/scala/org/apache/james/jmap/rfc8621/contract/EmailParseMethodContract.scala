@@ -109,7 +109,7 @@ trait EmailParseMethodContract {
            |                        "references": null,
            |                        "textBody": [
            |                            {
-           |                                "charset": "utf-8",
+           |                                "charset": "UTF-8",
            |                                "size": 39,
            |                                "partId": "2",
            |                                "blobId": "${messageId.serialize()}_2",
@@ -129,7 +129,7 @@ trait EmailParseMethodContract {
            |                                "type": "text/plain"
            |                            },
            |                            {
-           |                                "charset": "us-ascii",
+           |                                "charset": "US-ASCII",
            |                                "disposition": "attachment",
            |                                "size": 398,
            |                                "partId": "4",
@@ -153,7 +153,7 @@ trait EmailParseMethodContract {
            |                        "preview": "Send concerted from html",
            |                        "htmlBody": [
            |                            {
-           |                                "charset": "utf-8",
+           |                                "charset": "UTF-8",
            |                                "size": 39,
            |                                "partId": "2",
            |                                "blobId": "${messageId.serialize()}_2",
@@ -270,7 +270,7 @@ trait EmailParseMethodContract {
            |                        "references": null,
            |                        "bodyValues": {
            |                            "2": {
-           |                                "value": "test body\\n",
+           |                                "value": "test body\\r\\n",
            |                                "isEncodingProblem": false,
            |                                "isTruncated": false
            |                            }
@@ -327,7 +327,7 @@ trait EmailParseMethodContract {
            |                            }
            |                        ],
            |                        "subject": "test subject",
-           |                        "size": 797,
+           |                        "size": 807,
            |                        "blobId": "${messageId.serialize()}_3",
            |                        "preview": "test body",
            |                        "messageId": [
@@ -615,7 +615,7 @@ trait EmailParseMethodContract {
            |                                "size": 398,
            |                                "name": "text2",
            |                                "type": "application/vnd.ms-publisher",
-           |                                "charset": "us-ascii",
+           |                                "charset": "US-ASCII",
            |                                "disposition": "attachment"
            |                            },
            |                            {
@@ -722,7 +722,7 @@ trait EmailParseMethodContract {
            |                                "size": 398,
            |                                "name": "text2",
            |                                "type": "application/vnd.ms-publisher",
-           |                                "charset": "us-ascii",
+           |                                "charset": "US-ASCII",
            |                                "disposition": "attachment"
            |                            },
            |                            {

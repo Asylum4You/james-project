@@ -1,0 +1,8 @@
+= Distributed James Server &mdash; opensearch.properties
+:navtitle: opensearch.properties
+
+:sample-configuration-prefix-url: https://github.com/apache/james-project/blob/master/server/apps/distributed-app/sample-configuration
+:pages-path: distributed
+:server-name: Distributed James Server
+:package-tag: cassandra
+include::partial$configure/opensearch.adoc[]

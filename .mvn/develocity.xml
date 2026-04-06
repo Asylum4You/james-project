@@ -1,0 +1,62 @@
+<develocity>
+  <projectId>james</projectId>
+  <server>
+    <url>https://develocity.apache.org</url>
+    <allowUntrusted>false</allowUntrusted>
+    <!--
+    credentials provided by jenkins exposing DEVELOCITY_ACCESS_KEY
+    apache members can create their own on the server
+    -->
+  </server>
+  <!-- options are documented at https://docs.gradle.com/develocity/maven-extension/current/ -->
+  <!-- chosen values align with https://cwiki.apache.org/confluence/display/INFRA/Project+Onboarding+Instructions+for+Develocity -->
+  <buildScan>
+    <backgroundBuildScanUpload>#{isFalse(env['CI'])}</backgroundBuildScanUpload>
+    <!-- Always publish build scans for CI, only if requested locally differs from onboarding instructions -->
+    <publishing>
+      <onlyIf><![CDATA[env['CI'] != null]]></onlyIf>
+    </publishing>
+    <capture>
+      <fileFingerprints>true</fileFingerprints>
+      <buildLogging>true</buildLogging>
+      <testLogging>true</testLogging>
+    </capture>
+    <links>
+      <link>
+        <name>Apache James github</name>
+        <url>https://github.com/apache/james-project/</url>
+      </link>
+      <link>
+        <name>Apache James project website</name>
+        <url>https://github.com/apache/james-project/</url>
+      </link>
+    </links>
+    <obfuscation>
+      <!-- Use Spring Expression Language. -->
+      <!-- <hostname>#{isTrue(env['CI']) ? hostname : 'Local agent'}</hostname> -->
+      <hostname>#{isTrue(env['CI']) ? 'jenkins' : 'Local agent'}</hostname>
+      <ipAddresses>#{{'0.0.0.0'}}</ipAddresses>
+    </obfuscation>
+  </buildScan>
+  <buildCache>
+    <local>
+      <!-- disabling build cache on CI as it seems to affect
+      MemoryLdapLocalPartLoginIntegrationTest and DistributedTaskManagerTest -->
+      <enabled>#{isFalse(env['CI'])}</enabled>
+      <cleanup>
+    <!-- materialize default settings -->
+        <retention>P7D</retention>
+        <interval>P1D</interval>
+      </cleanup>
+    </local>
+    <remote>
+      <enabled>true</enabled>
+      <storeEnabled>#{isTrue(env['CI'])}</storeEnabled>
+      <!--
+      the next step is this
+      <storeEnabled>#{isTrue(env['CI'])</storeEnabled>
+      but it requires requesting a cache node to infra project
+      -->
+    </remote>
+  </buildCache>
+</develocity>

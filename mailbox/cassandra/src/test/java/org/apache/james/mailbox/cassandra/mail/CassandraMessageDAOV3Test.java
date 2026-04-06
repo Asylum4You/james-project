@@ -32,17 +32,18 @@ import jakarta.mail.Flags;
 import org.apache.commons.io.IOUtils;
 import org.apache.james.backends.cassandra.CassandraCluster;
 import org.apache.james.backends.cassandra.CassandraClusterExtension;
-import org.apache.james.backends.cassandra.components.CassandraModule;
-import org.apache.james.backends.cassandra.versions.CassandraSchemaVersionModule;
+import org.apache.james.backends.cassandra.components.CassandraDataDefinition;
+import org.apache.james.backends.cassandra.init.configuration.CassandraConfiguration;
+import org.apache.james.backends.cassandra.versions.CassandraSchemaVersionDataDefinition;
 import org.apache.james.blob.api.BlobStore;
-import org.apache.james.blob.api.HashBlobId;
-import org.apache.james.blob.cassandra.CassandraBlobModule;
+import org.apache.james.blob.api.PlainBlobId;
+import org.apache.james.blob.cassandra.CassandraBlobDataDefinition;
 import org.apache.james.blob.cassandra.CassandraBlobStoreFactory;
 import org.apache.james.mailbox.MessageUid;
 import org.apache.james.mailbox.ModSeq;
 import org.apache.james.mailbox.cassandra.ids.CassandraId;
 import org.apache.james.mailbox.cassandra.ids.CassandraMessageId;
-import org.apache.james.mailbox.cassandra.modules.CassandraMessageModule;
+import org.apache.james.mailbox.cassandra.modules.CassandraMessageDataDefinition;
 import org.apache.james.mailbox.model.ByteContent;
 import org.apache.james.mailbox.model.ComposedMessageId;
 import org.apache.james.mailbox.model.ComposedMessageIdWithMetaData;
@@ -70,10 +71,10 @@ class CassandraMessageDAOV3Test {
     private static final MessageUid messageUid = MessageUid.of(1);
     private static final List<MessageAttachmentMetadata> NO_ATTACHMENT = ImmutableList.of();
 
-    public static final CassandraModule MODULES = CassandraModule.aggregateModules(
-            CassandraMessageModule.MODULE,
-            CassandraBlobModule.MODULE,
-            CassandraSchemaVersionModule.MODULE);
+    public static final CassandraDataDefinition MODULES = CassandraDataDefinition.aggregateModules(
+            CassandraMessageDataDefinition.MODULE,
+            CassandraBlobDataDefinition.MODULE,
+            CassandraSchemaVersionDataDefinition.MODULE);
 
     @RegisterExtension
     static CassandraClusterExtension cassandraCluster = new CassandraClusterExtension(
@@ -96,12 +97,13 @@ class CassandraMessageDAOV3Test {
         threadId = ThreadId.fromBaseMessageId(messageId);
         BlobStore blobStore = CassandraBlobStoreFactory.forTesting(cassandra.getConf(), new RecordingMetricFactory())
             .passthrough();
-        HashBlobId.Factory blobIdFactory = new HashBlobId.Factory();
+        PlainBlobId.Factory blobIdFactory = new PlainBlobId.Factory();
         testee = new CassandraMessageDAOV3(
             cassandra.getConf(),
             cassandra.getTypesProvider(),
             blobStore,
-            blobIdFactory);
+            blobIdFactory,
+            CassandraConfiguration.DEFAULT_CONFIGURATION);
 
         messageIdWithMetadata = ComposedMessageIdWithMetaData.builder()
                 .composedMessageId(new ComposedMessageId(MAILBOX_ID, messageId, messageUid))

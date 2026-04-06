@@ -25,15 +25,16 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 
 import org.apache.james.backends.cassandra.CassandraCluster;
 import org.apache.james.backends.cassandra.CassandraClusterExtension;
-import org.apache.james.backends.cassandra.components.CassandraModule;
+import org.apache.james.backends.cassandra.components.CassandraDataDefinition;
 import org.apache.james.backends.cassandra.init.configuration.CassandraConfiguration;
-import org.apache.james.backends.cassandra.versions.CassandraSchemaVersionModule;
+import org.apache.james.backends.cassandra.versions.CassandraSchemaVersionDataDefinition;
 import org.apache.james.blob.api.BlobStore;
-import org.apache.james.blob.api.HashBlobId;
+import org.apache.james.blob.api.PlainBlobId;
 import org.apache.james.blob.cassandra.BlobTables;
-import org.apache.james.blob.cassandra.CassandraBlobModule;
+import org.apache.james.blob.cassandra.CassandraBlobDataDefinition;
 import org.apache.james.blob.cassandra.CassandraBlobStoreFactory;
 import org.apache.james.blob.mail.MimeMessageStore;
+import org.apache.james.core.builder.MimeMessageBuilder;
 import org.apache.james.mailrepository.MailRepositoryContract;
 import org.apache.james.mailrepository.api.MailKey;
 import org.apache.james.mailrepository.api.MailRepository;
@@ -41,6 +42,8 @@ import org.apache.james.mailrepository.api.MailRepositoryPath;
 import org.apache.james.mailrepository.api.MailRepositoryUrl;
 import org.apache.james.mailrepository.api.Protocol;
 import org.apache.james.metrics.tests.RecordingMetricFactory;
+import org.apache.james.server.core.MailImpl;
+import org.apache.mailet.Mail;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Nested;
@@ -49,14 +52,14 @@ import org.junit.jupiter.api.extension.RegisterExtension;
 
 class CassandraMailRepositoryTest {
     static final MailRepositoryUrl URL = MailRepositoryUrl.from("proto://url");
-    static final HashBlobId.Factory BLOB_ID_FACTORY = new HashBlobId.Factory();
+    static final PlainBlobId.Factory BLOB_ID_FACTORY = new PlainBlobId.Factory();
 
     @RegisterExtension
     static CassandraClusterExtension cassandraCluster = new CassandraClusterExtension(
-        CassandraModule.aggregateModules(
-            CassandraSchemaVersionModule.MODULE,
-            CassandraMailRepositoryModule.MODULE,
-            CassandraBlobModule.MODULE));
+        CassandraDataDefinition.aggregateModules(
+            CassandraSchemaVersionDataDefinition.MODULE,
+            CassandraMailRepositoryDataDefinition.MODULE,
+            CassandraBlobDataDefinition.MODULE));
 
     CassandraMailRepository cassandraMailRepository;
 
@@ -180,6 +183,32 @@ class CassandraMailRepositoryTest {
 
             assertThatCode(() -> testee.retrieve(key2))
                 .doesNotThrowAnyException();
+        }
+
+        @Test
+        void listWithConditionsShouldReturnStoredMailsKeys() throws Exception {
+            MailRepository testee = retrieveRepository();
+
+            Mail mail = MailImpl.builder()
+                .name("mail1")
+                .sender("sender@domain.com")
+                .addRecipient("rec1@domain.com")
+                .mimeMessage(MimeMessageBuilder.mimeMessageBuilder().build())
+                .build();
+
+            Mail mail2 = MailImpl.builder()
+                .name("mail2")
+                .sender("sender2@domain.com")
+                .addRecipient("rec1@domain.com")
+                .mimeMessage(MimeMessageBuilder.mimeMessageBuilder().build())
+                .build();
+
+            MailKey key1 = testee.store(mail);
+            testee.store(mail2);
+
+            assertThat(testee.list(new MailRepository.SenderCondition("sender@domain.com")))
+                .toIterable()
+                .containsOnly(key1);
         }
     }
 

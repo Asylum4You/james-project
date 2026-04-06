@@ -21,7 +21,7 @@ package org.apache.james.vault.metadata;
 
 import static org.apache.james.backends.cassandra.Scenario.Builder.fail;
 import static org.apache.james.vault.DeletedMessageFixture.USERNAME;
-import static org.apache.james.vault.metadata.DeletedMessageMetadataModule.MODULE;
+import static org.apache.james.vault.metadata.DeletedMessageMetadataDataDefinition.MODULE;
 import static org.apache.james.vault.metadata.DeletedMessageVaultMetadataFixture.BUCKET_NAME;
 import static org.apache.james.vault.metadata.DeletedMessageVaultMetadataFixture.DELETED_MESSAGE;
 import static org.apache.james.vault.metadata.DeletedMessageVaultMetadataFixture.DELETED_MESSAGE_2;
@@ -32,7 +32,7 @@ import java.util.stream.Stream;
 
 import org.apache.james.backends.cassandra.CassandraCluster;
 import org.apache.james.backends.cassandra.CassandraClusterExtension;
-import org.apache.james.blob.api.HashBlobId;
+import org.apache.james.blob.api.PlainBlobId;
 import org.apache.james.mailbox.inmemory.InMemoryId;
 import org.apache.james.mailbox.inmemory.InMemoryMessageId;
 import org.apache.james.vault.dto.DeletedMessageWithStorageInformationConverter;
@@ -56,7 +56,7 @@ public class CassandraDeletedMessageMetadataVaultTest implements DeletedMessageM
 
     @BeforeEach
     void setUp(CassandraCluster cassandra) {
-        HashBlobId.Factory blobIdFactory = new HashBlobId.Factory();
+        PlainBlobId.Factory blobIdFactory = new PlainBlobId.Factory();
         InMemoryMessageId.Factory messageIdFactory = new InMemoryMessageId.Factory();
         DeletedMessageWithStorageInformationConverter dtoConverter = new DeletedMessageWithStorageInformationConverter(blobIdFactory, messageIdFactory, new InMemoryId.Factory());
 

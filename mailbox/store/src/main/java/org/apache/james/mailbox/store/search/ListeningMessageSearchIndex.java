@@ -20,6 +20,7 @@ package org.apache.james.mailbox.store.search;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 import jakarta.mail.Flags;
@@ -60,6 +61,8 @@ import reactor.core.scheduler.Schedulers;
  */
 public abstract class ListeningMessageSearchIndex implements MessageSearchIndex, EventListener.ReactiveGroupEventListener {
     private static final Logger LOGGER = LoggerFactory.getLogger(ListeningMessageSearchIndex.class);
+
+    public abstract void postReindexing();
 
     public interface SearchOverride {
         boolean applicable(SearchQuery searchQuery, MailboxSession session);
@@ -139,7 +142,7 @@ public abstract class ListeningMessageSearchIndex implements MessageSearchIndex,
         return Flux.fromIterable(MessageRange.toRanges(added.getUids()))
             .concatMap(range -> retrieveMailboxMessages(session, mailbox, range, fetchType))
             .publishOn(Schedulers.parallel())
-            .concatMap(mailboxMessage -> add(session, mailbox, mailboxMessage))
+            .concatMap(mailboxMessage -> add(session, mailbox, mailboxMessage, Optional.of(added)))
             .then();
     }
 
@@ -158,6 +161,10 @@ public abstract class ListeningMessageSearchIndex implements MessageSearchIndex,
      * @param message The added message
      */
     public abstract Mono<Void> add(MailboxSession session, Mailbox mailbox, MailboxMessage message);
+
+    public Mono<Void> add(MailboxSession session, Mailbox mailbox, MailboxMessage message, Optional<Added> added) {
+        return add(session, mailbox, message);
+    }
 
     /**
      * Delete the concerned UIDs for the given {@link Mailbox} from the index

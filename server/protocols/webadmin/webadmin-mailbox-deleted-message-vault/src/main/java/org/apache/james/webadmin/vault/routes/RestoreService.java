@@ -25,6 +25,7 @@ import static org.apache.james.webadmin.vault.routes.RestoreService.RestoreResul
 import static org.apache.james.webadmin.vault.routes.RestoreService.RestoreResult.RESTORE_SUCCEED;
 
 import java.io.InputStream;
+import java.util.Date;
 import java.util.function.Predicate;
 
 import jakarta.inject.Inject;
@@ -53,7 +54,7 @@ import reactor.core.publisher.Mono;
 
 public class RestoreService {
 
-    enum RestoreResult {
+    public enum RestoreResult {
         RESTORE_SUCCEED,
         RESTORE_FAILED
     }
@@ -67,8 +68,8 @@ public class RestoreService {
     private final VaultConfiguration vaultConfiguration;
 
     @Inject
-    RestoreService(DeletedMessageVault deletedMessageVault, MailboxManager mailboxManager,
-                   VaultConfiguration vaultConfiguration) {
+    public RestoreService(DeletedMessageVault deletedMessageVault, MailboxManager mailboxManager,
+                          VaultConfiguration vaultConfiguration) {
         this.deletedMessageVault = deletedMessageVault;
         this.mailboxManager = mailboxManager;
         this.vaultConfiguration = vaultConfiguration;
@@ -88,7 +89,9 @@ public class RestoreService {
             messageContent(deletedMessage),
             inputStream -> Mono.usingWhen(
                 Mono.fromCallable(() -> ByteSourceContent.of(inputStream)),
-                content -> Mono.from(restoreMailboxManager.appendMessageReactive(AppendCommand.builder().build(content), session))
+                content -> Mono.from(restoreMailboxManager.appendMessageReactive(AppendCommand.builder()
+                        .withInternalDate(Date.from(deletedMessage.getDeliveryDate().toInstant()))
+                        .build(content), session))
                     .map(any -> RESTORE_SUCCEED),
                 content -> Mono.fromRunnable(Throwing.runnable(content::close))),
             stream -> Mono.fromRunnable(Throwing.runnable(stream::close)))
@@ -111,7 +114,7 @@ public class RestoreService {
             });
     }
 
-    private MessageManager restoreMailboxManager(MailboxSession session) throws MailboxException {
+    protected MessageManager restoreMailboxManager(MailboxSession session) throws MailboxException {
         MailboxPath restoreMailbox = MailboxPath.forUser(session.getUser(), vaultConfiguration.getRestoreLocation());
         try {
             return mailboxManager.getMailbox(restoreMailbox, session);
@@ -122,7 +125,7 @@ public class RestoreService {
     }
 
     private MessageManager createRestoreMailbox(MailboxSession session, MailboxPath restoreMailbox) throws MailboxException {
-        return mailboxManager.createMailbox(restoreMailbox, session)
+        return mailboxManager.createMailbox(restoreMailbox, MailboxManager.CreateOption.CREATE_SUBSCRIPTION, session)
             .map(Throwing.<MailboxId, MessageManager>function(mailboxId -> mailboxManager.getMailbox(mailboxId, session)).sneakyThrow())
             .orElseThrow(() -> new RuntimeException("createMailbox " + restoreMailbox.asString() + " returns an empty mailboxId"));
     }

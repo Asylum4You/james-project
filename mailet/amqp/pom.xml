@@ -23,7 +23,7 @@
     <parent>
         <groupId>org.apache.james</groupId>
         <artifactId>apache-mailet</artifactId>
-        <version>3.9.0-SNAPSHOT</version>
+        <version>3.10.0-SNAPSHOT</version>
         <relativePath>../</relativePath>
     </parent>
 
@@ -33,7 +33,6 @@
     <name>Apache James :: Mailet :: AMQP</name>
     <description>Provides a mailet forwarding mail attributes over AMQP</description>
     <inceptionYear>2021</inceptionYear>
-
 
     <dependencies>
         <dependency>

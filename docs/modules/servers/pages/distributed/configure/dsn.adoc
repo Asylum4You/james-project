@@ -1,0 +1,8 @@
+= Distributed James Server &mdash; Delivery Submission Notifications
+:navtitle: ESMTP DSN setup
+
+:sample-configuration-prefix-url: https://github.com/apache/james-project/blob/master/server/apps/distributed-app/sample-configuration
+:pages-path: distributed
+:mailet-repository-path-prefix: cassandra
+:server-name: distributed
+include::partial$configure/dsn.adoc[]

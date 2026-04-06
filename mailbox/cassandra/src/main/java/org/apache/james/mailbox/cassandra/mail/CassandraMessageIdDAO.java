@@ -59,6 +59,7 @@ import jakarta.mail.Flags;
 import jakarta.mail.Flags.Flag;
 
 import org.apache.james.backends.cassandra.utils.CassandraAsyncExecutor;
+import org.apache.james.backends.cassandra.utils.ProfileLocator;
 import org.apache.james.blob.api.BlobId;
 import org.apache.james.mailbox.MessageUid;
 import org.apache.james.mailbox.ModSeq;
@@ -74,6 +75,7 @@ import org.apache.james.util.streams.Limit;
 
 import com.datastax.oss.driver.api.core.CqlSession;
 import com.datastax.oss.driver.api.core.ProtocolVersion;
+import com.datastax.oss.driver.api.core.config.DriverExecutionProfile;
 import com.datastax.oss.driver.api.core.cql.BoundStatement;
 import com.datastax.oss.driver.api.core.cql.BoundStatementBuilder;
 import com.datastax.oss.driver.api.core.cql.PreparedStatement;
@@ -129,6 +131,9 @@ public class CassandraMessageIdDAO {
     private final PreparedStatement update;
     private final PreparedStatement listStatement;
     private final ProtocolVersion protocolVersion;
+    private final DriverExecutionProfile readProfile;
+    private final DriverExecutionProfile listUidProfile;
+    private final DriverExecutionProfile writeProfile;
 
     @Inject
     public CassandraMessageIdDAO(CqlSession session, BlobId.Factory blobIdFactory) {
@@ -151,6 +156,9 @@ public class CassandraMessageIdDAO {
         this.listStatement = prepareList(session);
         this.selectMetadataRange = prepareSelectMetadataRange(session);
         this.selectNotDeletedRange = prepareSelectNotDeletedRange(session);
+        this.readProfile = ProfileLocator.READ.locateProfile(session, "MESSAGEID");
+        this.listUidProfile = ProfileLocator.READ.locateProfile(session, "MESSAGEID-LIST-UID");
+        this.writeProfile = ProfileLocator.WRITE.locateProfile(session, "MESSAGEID");
     }
 
     private PreparedStatement prepareDelete(CqlSession session) {
@@ -322,7 +330,8 @@ public class CassandraMessageIdDAO {
     public Mono<Void> delete(CassandraId mailboxId, MessageUid uid) {
         return cassandraAsyncExecutor.executeVoid(delete.bind()
             .set(MAILBOX_ID, mailboxId.asUuid(), TypeCodecs.TIMEUUID)
-            .setLong(IMAP_UID, uid.asLong()));
+            .setLong(IMAP_UID, uid.asLong())
+            .setExecutionProfile(writeProfile));
     }
 
     public Mono<Void> insert(CassandraMessageMetadata metadata) {
@@ -356,6 +365,7 @@ public class CassandraMessageIdDAO {
             .setInt(BODY_START_OCTET, Math.toIntExact(metadata.getBodyStartOctet().get()))
             .setLong(FULL_CONTENT_OCTETS, metadata.getSize().get())
             .setString(HEADER_CONTENT, metadata.getHeaderContent().get().asString())
+            .setExecutionProfile(writeProfile)
             .build());
     }
 
@@ -420,6 +430,7 @@ public class CassandraMessageIdDAO {
         } else {
             statementBuilder.setSet(REMOVED_USERS_FLAGS, removedFlags, String.class);
         }
+        statementBuilder.setExecutionProfile(writeProfile);
         return statementBuilder.build();
     }
 
@@ -436,7 +447,8 @@ public class CassandraMessageIdDAO {
     private Mono<Row> selectOneRow(CassandraId mailboxId, MessageUid uid) {
         return cassandraAsyncExecutor.executeSingleRow(select.bind()
             .set(MAILBOX_ID, mailboxId.asUuid(), TypeCodecs.TIMEUUID)
-            .setLong(IMAP_UID, uid.asLong()));
+            .setLong(IMAP_UID, uid.asLong())
+            .setExecutionProfile(readProfile));
     }
 
     public Flux<CassandraMessageMetadata> retrieveMessages(CassandraId mailboxId, MessageRange set, Limit limit) {
@@ -447,24 +459,30 @@ public class CassandraMessageIdDAO {
 
     public Flux<MessageUid> listUids(CassandraId mailboxId) {
         return cassandraAsyncExecutor.executeRows(selectAllUids.bind()
-                .set(MAILBOX_ID, mailboxId.asUuid(), TypeCodecs.TIMEUUID))
+                .set(MAILBOX_ID, mailboxId.asUuid(), TypeCodecs.TIMEUUID)
+                .setExecutionProfile(listUidProfile))
             .map(row -> MessageUid.of(TypeCodecs.BIGINT.decodePrimitive(row.getBytesUnsafe(0), protocolVersion)));
     }
 
     public Flux<ComposedMessageIdWithMetaData> listMessagesMetadata(CassandraId mailboxId, MessageRange range) {
+        MemoizedSupplier<FlagsExtractor.Optimized> memoizedReader = new MemoizedSupplier<>();
+
         return cassandraAsyncExecutor.executeRows(selectMetadataRange.bind()
                 .set(MAILBOX_ID, mailboxId.asUuid(), TypeCodecs.TIMEUUID)
                 .setLong(IMAP_UID_GTE, range.getUidFrom().asLong())
-                .setLong(IMAP_UID_LTE, range.getUidTo().asLong()))
+                .setLong(IMAP_UID_LTE, range.getUidTo().asLong())
+                .setExecutionProfile(readProfile))
             .map(row -> {
-                CassandraMessageId messageId = CassandraMessageId.Factory.of(row.get(MESSAGE_ID, TypeCodecs.TIMEUUID));
+                FlagsExtractor.Optimized reader = memoizedReader.get(() -> FlagsExtractor.Optimized.of(row));
+                CassandraMessageId messageId = CassandraMessageId.Factory.of(reader.getMessageId(row));
+
                 return ComposedMessageIdWithMetaData.builder()
-                    .modSeq(ModSeq.of(TypeCodecs.BIGINT.decodePrimitive(row.getBytesUnsafe(MOD_SEQ), protocolVersion)))
-                    .threadId(getThreadIdFromRow(row, messageId))
-                    .flags(FlagsExtractor.getFlags(row))
+                    .modSeq(ModSeq.of(reader.getModSeq(row)))
+                    .threadId(asThreadId(messageId, reader.getThreadId(row)))
+                    .flags(reader.getFlags(row))
                     .composedMessageId(new ComposedMessageId(mailboxId,
                         messageId,
-                        MessageUid.of(TypeCodecs.BIGINT.decodePrimitive(row.getBytesUnsafe(IMAP_UID), protocolVersion))))
+                        MessageUid.of(reader.getImapUid(row))))
                     .build();
             });
     }
@@ -476,7 +494,8 @@ public class CassandraMessageIdDAO {
         return cassandraAsyncExecutor.executeRows(selectNotDeletedRange.bind()
                 .set(MAILBOX_ID, mailboxId.asUuid(), TypeCodecs.TIMEUUID)
                 .setLong(IMAP_UID_GTE, range.getUidFrom().asLong())
-                .setLong(IMAP_UID_LTE, range.getUidTo().asLong()))
+                .setLong(IMAP_UID_LTE, range.getUidTo().asLong())
+                .setExecutionProfile(listUidProfile))
             .filter(row -> !TypeCodecs.BOOLEAN.decodePrimitive(
                 row.getBytesUnsafe(deletedPosition.get(() -> row.getColumnDefinitions().firstIndexOf(DELETED))), protocolVersion))
             .map(row -> MessageUid.of(TypeCodecs.BIGINT.decodePrimitive(
@@ -487,7 +506,8 @@ public class CassandraMessageIdDAO {
         return cassandraAsyncExecutor.executeRows(selectUidOnlyRange.bind()
                 .set(MAILBOX_ID, mailboxId.asUuid(), TypeCodecs.TIMEUUID)
                 .setLong(IMAP_UID_GTE, range.getUidFrom().asLong())
-                .setLong(IMAP_UID_LTE, range.getUidTo().asLong()))
+                .setLong(IMAP_UID_LTE, range.getUidTo().asLong())
+                .setExecutionProfile(listUidProfile))
             .map(row -> MessageUid.of(TypeCodecs.BIGINT.decodePrimitive(row.getBytesUnsafe(0), protocolVersion)));
     }
 
@@ -523,9 +543,11 @@ public class CassandraMessageIdDAO {
         return cassandraAsyncExecutor.executeRows(limit.getLimit()
             .map(limitAsInt -> selectAllLimited.bind()
                 .set(MAILBOX_ID, mailboxId.asUuid(), TypeCodecs.TIMEUUID)
-                .setInt(LIMIT, limitAsInt))
+                .setInt(LIMIT, limitAsInt)
+                .setExecutionProfile(readProfile))
             .orElseGet(() -> selectAll.bind()
-                .set(MAILBOX_ID, mailboxId.asUuid(), TypeCodecs.TIMEUUID)));
+                .set(MAILBOX_ID, mailboxId.asUuid(), TypeCodecs.TIMEUUID)
+                .setExecutionProfile(readProfile)));
     }
 
     private Flux<Row> selectFrom(CassandraId mailboxId, MessageUid uid, Limit limit) {
@@ -533,10 +555,12 @@ public class CassandraMessageIdDAO {
             .map(limitAsInt -> selectUidGteLimited.bind()
                 .set(MAILBOX_ID, mailboxId.asUuid(), TypeCodecs.TIMEUUID)
                 .setLong(IMAP_UID, uid.asLong())
-                .setInt(LIMIT, limitAsInt))
+                .setInt(LIMIT, limitAsInt)
+                .setExecutionProfile(readProfile))
             .orElseGet(() -> selectUidGte.bind()
                 .set(MAILBOX_ID, mailboxId.asUuid(), TypeCodecs.TIMEUUID)
-                .setLong(IMAP_UID, uid.asLong())));
+                .setLong(IMAP_UID, uid.asLong())
+                .setExecutionProfile(readProfile)));
     }
 
     private Flux<Row> selectRange(CassandraId mailboxId, MessageUid from, MessageUid to, Limit limit) {
@@ -545,11 +569,13 @@ public class CassandraMessageIdDAO {
                 .set(MAILBOX_ID, mailboxId.asUuid(), TypeCodecs.TIMEUUID)
                 .setLong(IMAP_UID_GTE, from.asLong())
                 .setLong(IMAP_UID_LTE, to.asLong())
-                .setInt(LIMIT, limitAsInt))
+                .setInt(LIMIT, limitAsInt)
+                .setExecutionProfile(readProfile))
             .orElseGet(() -> selectUidRange.bind()
                 .set(MAILBOX_ID, mailboxId.asUuid(), TypeCodecs.TIMEUUID)
                 .setLong(IMAP_UID_GTE, from.asLong())
-                .setLong(IMAP_UID_LTE, to.asLong())));
+                .setLong(IMAP_UID_LTE, to.asLong())
+                .setExecutionProfile(readProfile)));
     }
 
     private Optional<CassandraMessageMetadata> fromRowToComposedMessageIdWithFlags(Row row) {
@@ -581,12 +607,16 @@ public class CassandraMessageIdDAO {
                 .map(Date::from))
             .size(row.get(FULL_CONTENT_OCTETS, Long.class))
             .headerContent(Optional.ofNullable(row.get(HEADER_CONTENT, TypeCodecs.TEXT))
-                .map(blobIdFactory::from))
+                .map(blobIdFactory::parse))
             .build());
     }
 
     private ThreadId getThreadIdFromRow(Row row, MessageId messageId) {
         UUID threadIdUUID = row.get(THREAD_ID, TypeCodecs.TIMEUUID);
+        return asThreadId(messageId, threadIdUUID);
+    }
+
+    private static ThreadId asThreadId(MessageId messageId, UUID threadIdUUID) {
         if (threadIdUUID == null) {
             return ThreadId.fromBaseMessageId(messageId);
         }
@@ -622,6 +652,7 @@ public class CassandraMessageIdDAO {
             .setInt(BODY_START_OCTET, 0)
             .setLong(FULL_CONTENT_OCTETS, 0)
             .setString(HEADER_CONTENT, null)
+            .setExecutionProfile(writeProfile)
             .build());
     }
 }

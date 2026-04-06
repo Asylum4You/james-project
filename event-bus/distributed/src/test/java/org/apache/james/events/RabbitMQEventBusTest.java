@@ -97,7 +97,7 @@ class RabbitMQEventBusTest implements GroupContract.SingleEventBusGroupContract,
     ErrorHandlingContract {
     
     static EventBusName TEST_EVENT_BUS = new EventBusName("test");
-    static NamingStrategy TEST_NAMING_STRATEGY = new NamingStrategy(TEST_EVENT_BUS);
+    static NamingStrategy TEST_NAMING_STRATEGY = new DefaultNamingStrategy(TEST_EVENT_BUS);
     static DispatchingFailureGroup dispatchingFailureGroup = new DispatchingFailureGroup(TEST_EVENT_BUS);
 
     @RegisterExtension
@@ -159,10 +159,9 @@ class RabbitMQEventBusTest implements GroupContract.SingleEventBusGroupContract,
     }
 
     private RabbitMQEventBus newEventBus(NamingStrategy namingStrategy, Sender sender, ReceiverProvider receiverProvider) throws Exception {
-        return new RabbitMQEventBus(namingStrategy, sender, receiverProvider, eventSerializer,
-            EventBusTestFixture.RETRY_BACKOFF_CONFIGURATION, routingKeyConverter,
-            memoryEventDeadLetters, new RecordingMetricFactory(),
-            rabbitMQExtension.getRabbitChannelPool(), EventBusId.random(), rabbitMQExtension.getRabbitMQ().getConfiguration());
+        return new RabbitMQEventBus(namingStrategy, sender, receiverProvider, eventSerializer, routingKeyConverter,
+            memoryEventDeadLetters, new RecordingMetricFactory(), rabbitMQExtension.getRabbitChannelPool(), EventBusId.random(),
+            new RabbitMQEventBus.Configurations(rabbitMQExtension.getRabbitMQ().getConfiguration(), EventBusTestFixture.RETRY_BACKOFF_CONFIGURATION));
     }
 
     @Override
@@ -185,6 +184,15 @@ class RabbitMQEventBusTest implements GroupContract.SingleEventBusGroupContract,
     @Disabled("This test is failing by design as the different registration keys are handled by distinct messages")
     public void dispatchShouldCallListenerOnceWhenSeveralKeysMatching() {
 
+    }
+
+    @Test
+    void groupQueuesNameShouldRemainUnchanged() {
+        // to detect breaking change on Group queues name
+        assertThat(new DefaultNamingStrategy(new EventBusName("mailboxEvent"))
+            .workQueue(GroupRegistrationHandler.GROUP)
+            .asString())
+            .isEqualTo("mailboxEvent-workQueue-org.apache.james.events.GroupRegistrationHandler$GroupRegistrationHandlerGroup");
     }
 
     @Test
@@ -452,7 +460,7 @@ class RabbitMQEventBusTest implements GroupContract.SingleEventBusGroupContract,
             class DispatchingWhenNetWorkIssue {
 
                 @RegisterExtension
-                RabbitMQExtension rabbitMQNetWorkIssueExtension = RabbitMQExtension.defaultRabbitMQ()
+                static RabbitMQExtension rabbitMQNetWorkIssueExtension = RabbitMQExtension.defaultRabbitMQ()
                     .restartPolicy(DockerRestartPolicy.PER_TEST)
                     .isolationPolicy(RabbitMQExtension.IsolationPolicy.WEAK);
 
@@ -472,7 +480,7 @@ class RabbitMQEventBusTest implements GroupContract.SingleEventBusGroupContract,
                     rabbitMQNetWorkIssueExtension.getRabbitMQ().pause();
 
                     assertThatThrownBy(() -> rabbitMQEventBusWithNetWorkIssue.dispatch(EVENT, NO_KEYS).block())
-                        .getCause()
+                        .cause()
                         .isInstanceOf(NoSuchElementException.class)
                         .hasMessageContaining("Timeout waiting for idle object");
 
@@ -488,7 +496,8 @@ class RabbitMQEventBusTest implements GroupContract.SingleEventBusGroupContract,
                 eventBus.start();
                 assertThat(rabbitManagementAPI.listExchanges())
                     .filteredOn(exchange -> exchange.getName().equals(TEST_NAMING_STRATEGY.exchange()))
-                    .hasOnlyOneElementSatisfying(exchange -> {
+                    .singleElement()
+                    .satisfies(exchange -> {
                         assertThat(exchange.isDurable()).isTrue();
                         assertThat(exchange.getType()).isEqualTo(DIRECT_EXCHANGE);
                     });
@@ -595,7 +604,7 @@ class RabbitMQEventBusTest implements GroupContract.SingleEventBusGroupContract,
                 rabbitMQExtension.getRabbitMQ().pause();
 
                 assertThatThrownBy(() -> eventBus.dispatch(EVENT, NO_KEYS).block())
-                        .getCause()
+                        .cause()
                         .isInstanceOf(NoSuchElementException.class)
                         .hasMessageContaining("Timeout waiting for idle object");
 
@@ -633,7 +642,7 @@ class RabbitMQEventBusTest implements GroupContract.SingleEventBusGroupContract,
                 rabbitMQExtension.getRabbitMQ().pause();
 
                 assertThatThrownBy(() -> eventBus.dispatch(EVENT, NO_KEYS).block())
-                        .getCause()
+                        .cause()
                         .isInstanceOf(NoSuchElementException.class)
                         .hasMessageContaining("Timeout waiting for idle object");
 
@@ -652,7 +661,7 @@ class RabbitMQEventBusTest implements GroupContract.SingleEventBusGroupContract,
                 rabbitMQExtension.getRabbitMQ().pause();
 
                 assertThatThrownBy(() -> eventBus.dispatch(EVENT, NO_KEYS).block())
-                        .getCause()
+                        .cause()
                         .isInstanceOf(NoSuchElementException.class)
                         .hasMessageContaining("Timeout waiting for idle object");
 
@@ -703,7 +712,7 @@ class RabbitMQEventBusTest implements GroupContract.SingleEventBusGroupContract,
                 EventListenerCountingSuccessfulExecution listener = new EventListenerCountingSuccessfulExecution();
                 eventBus.register(listener, GROUP_A);
 
-                try (Closeable closeable = ConcurrentTestRunner.builder()
+                try (Closeable ignored = ConcurrentTestRunner.builder()
                     .operation((threadNumber, step) -> eventBus.dispatch(EVENT, KEY_1).block())
                     .threadCount(THREAD_COUNT)
                     .operationCount(OPERATION_COUNT)
@@ -800,7 +809,7 @@ class RabbitMQEventBusTest implements GroupContract.SingleEventBusGroupContract,
                 eventBus.register(listener, GROUP_A);
                 eventBus2.register(listener, GROUP_A);
 
-                try (Closeable closeable = ConcurrentTestRunner.builder()
+                try (Closeable ignored = ConcurrentTestRunner.builder()
                     .operation((threadNumber, step) -> eventBus.dispatch(EVENT, KEY_1).block())
                     .threadCount(THREAD_COUNT)
                     .operationCount(OPERATION_COUNT)
@@ -828,7 +837,7 @@ class RabbitMQEventBusTest implements GroupContract.SingleEventBusGroupContract,
 
         @BeforeEach
         void beforeEach() throws Exception {
-            otherEventBus = newEventBus(new NamingStrategy(new EventBusName("other")), rabbitMQExtension.getSender(), rabbitMQExtension.getReceiverProvider());
+            otherEventBus = newEventBus(new DefaultNamingStrategy(new EventBusName("other")), rabbitMQExtension.getSender(), rabbitMQExtension.getReceiverProvider());
             otherEventBus.start();
         }
 
@@ -857,8 +866,8 @@ class RabbitMQEventBusTest implements GroupContract.SingleEventBusGroupContract,
         void eventBusPubSubWithDistinctNamingStrategiesShouldBeIsolated() throws Exception {
             EventCollector listener = new EventCollector();
             EventCollector otherListener = new EventCollector();
-            eventBus.register(listener, KEY_1);
-            otherEventBus.register(otherListener, KEY_1);
+            Mono.from(eventBus.register(listener, KEY_1)).block();
+            Mono.from(otherEventBus.register(otherListener, KEY_1)).block();
 
             eventBus.dispatch(EVENT, ImmutableSet.of(KEY_1)).block();
 

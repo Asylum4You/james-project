@@ -25,12 +25,14 @@ import org.apache.commons.lang3.NotImplementedException;
 import org.apache.james.data.UsersRepositoryModuleChooser;
 import org.apache.james.eventsourcing.eventstore.EventNestedTypes;
 import org.apache.james.jmap.JMAPListenerModule;
+import org.apache.james.jmap.JMAPModule;
 import org.apache.james.json.DTO;
 import org.apache.james.json.DTOModule;
 import org.apache.james.modules.BlobExportMechanismModule;
 import org.apache.james.modules.CassandraConsistencyTaskSerializationModule;
 import org.apache.james.modules.DistributedTaskManagerModule;
 import org.apache.james.modules.DistributedTaskSerializationModule;
+import org.apache.james.modules.LegacyEncryptionModule;
 import org.apache.james.modules.MailboxModule;
 import org.apache.james.modules.MailetProcessingModule;
 import org.apache.james.modules.RunArgumentsModule;
@@ -41,6 +43,7 @@ import org.apache.james.modules.blobstore.BlobStoreModulesChooser;
 import org.apache.james.modules.data.CassandraDLPConfigurationStoreModule;
 import org.apache.james.modules.data.CassandraDelegationStoreModule;
 import org.apache.james.modules.data.CassandraDomainListModule;
+import org.apache.james.modules.data.CassandraDropListsModule;
 import org.apache.james.modules.data.CassandraJmapModule;
 import org.apache.james.modules.data.CassandraRecipientRewriteTableModule;
 import org.apache.james.modules.data.CassandraSieveQuotaLegacyModule;
@@ -48,10 +51,10 @@ import org.apache.james.modules.data.CassandraSieveQuotaModule;
 import org.apache.james.modules.data.CassandraSieveRepositoryModule;
 import org.apache.james.modules.data.CassandraUsersRepositoryModule;
 import org.apache.james.modules.data.CassandraVacationModule;
+import org.apache.james.modules.event.ContentDeletionEventBusModule;
 import org.apache.james.modules.event.JMAPEventBusModule;
-import org.apache.james.modules.event.RabbitMQEventBusModule;
+import org.apache.james.modules.event.MailboxEventBusModule;
 import org.apache.james.modules.eventstore.CassandraEventStoreModule;
-import org.apache.james.modules.mailbox.CassandraDeletedMessageVaultModule;
 import org.apache.james.modules.mailbox.CassandraMailboxModule;
 import org.apache.james.modules.mailbox.CassandraMailboxQuotaLegacyModule;
 import org.apache.james.modules.mailbox.CassandraMailboxQuotaModule;
@@ -75,6 +78,7 @@ import org.apache.james.modules.queue.rabbitmq.RabbitMQModule;
 import org.apache.james.modules.server.DKIMMailetModule;
 import org.apache.james.modules.server.DLPRoutesModule;
 import org.apache.james.modules.server.DataRoutesModules;
+import org.apache.james.modules.server.DropListsRoutesModule;
 import org.apache.james.modules.server.InconsistencyQuotasSolvingRoutesModule;
 import org.apache.james.modules.server.JMXServerModule;
 import org.apache.james.modules.server.JmapTasksModule;
@@ -130,12 +134,14 @@ public class CassandraRabbitMQJamesServerMain implements JamesServerMain {
         new CassandraJmapModule(),
         new CassandraVacationModule(),
         new IMAPServerModule(),
+        new LegacyEncryptionModule(),
         new LMTPServerModule(),
         new ManageSieveServerModule(),
         new POP3ServerModule(),
         new ProtocolHandlerModule(),
         new SMTPServerModule(),
         new JMAPServerModule(),
+        JMAPModule.INSTANCE,
         new JmapEventBusModule(),
         WEBADMIN);
 
@@ -177,7 +183,8 @@ public class CassandraRabbitMQJamesServerMain implements JamesServerMain {
 
     protected static final Module MODULES = Modules.override(REQUIRE_TASK_MANAGER_MODULE, new DistributedTaskManagerModule())
         .with(new RabbitMQModule(),
-            new RabbitMQEventBusModule(),
+            new MailboxEventBusModule(),
+            new ContentDeletionEventBusModule(),
             new DistributedTaskSerializationModule());
 
     public static void main(String[] args) throws Exception {
@@ -209,7 +216,8 @@ public class CassandraRabbitMQJamesServerMain implements JamesServerMain {
                 .chooseModules(configuration.getUsersRepositoryImplementation()))
             .combineWith(chooseDeletedMessageVault(configuration.getVaultConfiguration()))
             .combineWith(chooseQuotaModule(configuration))
-            .overrideWith(chooseJmapModules(configuration));
+            .overrideWith(chooseJmapModules(configuration))
+            .overrideWith(chooseDropListsModule(configuration));
     }
 
     private static Module chooseMailQueue(CassandraRabbitMQJamesConfiguration configuration) {
@@ -227,14 +235,9 @@ public class CassandraRabbitMQJamesServerMain implements JamesServerMain {
     }
 
     private static Module chooseDeletedMessageVault(VaultConfiguration vaultConfiguration) {
-        if (vaultConfiguration.isEnabled() && vaultConfiguration.isWorkQueueEnabled()) {
-            return Modules.combine(
-                new DistributedDeletedMessageVaultModule(),
-                new DeletedMessageVaultRoutesModule());
-        }
         if (vaultConfiguration.isEnabled()) {
             return Modules.combine(
-                new CassandraDeletedMessageVaultModule(),
+                new DistributedDeletedMessageVaultModule(),
                 new DeletedMessageVaultRoutesModule());
         }
         return binder -> {
@@ -258,4 +261,14 @@ public class CassandraRabbitMQJamesServerMain implements JamesServerMain {
             return Modules.combine(new CassandraMailboxQuotaModule(), new CassandraSieveQuotaModule());
         }
     }
+
+    private static Module chooseDropListsModule(CassandraRabbitMQJamesConfiguration configuration) {
+        if (configuration.isDropListsEnabled()) {
+            return Modules.combine(new CassandraDropListsModule(), new DropListsRoutesModule());
+        }
+        return binder -> {
+
+        };
+    }
+
 }

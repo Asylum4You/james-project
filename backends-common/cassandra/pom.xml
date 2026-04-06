@@ -24,14 +24,14 @@
     <parent>
         <groupId>org.apache.james</groupId>
         <artifactId>james-backends-common</artifactId>
-        <version>3.9.0-SNAPSHOT</version>
+        <version>3.10.0-SNAPSHOT</version>
     </parent>
 
     <artifactId>apache-james-backends-cassandra</artifactId>
     <name>Apache James :: Backends Common :: Cassandra</name>
 
     <properties>
-        <cassandra.driver.version>4.17.0</cassandra.driver.version>
+        <cassandra.driver.version>4.19.1</cassandra.driver.version>
     </properties>
 
     <dependencies>
@@ -62,28 +62,16 @@
             <scope>test</scope>
         </dependency>
         <dependency>
-            <groupId>com.datastax.oss</groupId>
-            <artifactId>java-driver-core</artifactId>
-            <version>${cassandra.driver.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>com.datastax.oss</groupId>
-            <artifactId>java-driver-query-builder</artifactId>
-            <version>${cassandra.driver.version}</version>
-        </dependency>
-        <dependency>
             <groupId>com.google.guava</groupId>
             <artifactId>guava</artifactId>
         </dependency>
         <dependency>
             <groupId>commons-beanutils</groupId>
             <artifactId>commons-beanutils</artifactId>
-            <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>commons-codec</groupId>
             <artifactId>commons-codec</artifactId>
-            <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>io.netty</groupId>
@@ -110,6 +98,16 @@
             <groupId>net.javacrumbs.json-unit</groupId>
             <artifactId>json-unit-assertj</artifactId>
             <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.cassandra</groupId>
+            <artifactId>java-driver-core</artifactId>
+            <version>${cassandra.driver.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.cassandra</groupId>
+            <artifactId>java-driver-query-builder</artifactId>
+            <version>${cassandra.driver.version}</version>
         </dependency>
         <dependency>
             <groupId>org.apache.commons</groupId>

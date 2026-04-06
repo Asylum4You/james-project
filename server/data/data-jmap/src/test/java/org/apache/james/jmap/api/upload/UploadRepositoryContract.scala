@@ -21,14 +21,17 @@
 
  import java.io.InputStream
  import java.nio.charset.StandardCharsets
+ import java.time.Duration
  import java.util.UUID
 
  import org.apache.commons.io.IOUtils
+ import org.apache.james.blob.api.{BlobId, BlobStoreDAO, BucketName, ObjectNotFoundException}
  import org.apache.james.core.Username
  import org.apache.james.jmap.api.model.Size.sanitizeSize
  import org.apache.james.jmap.api.model.{Upload, UploadId, UploadMetaData, UploadNotFoundException}
- import org.apache.james.jmap.api.upload.UploadRepositoryContract.{CONTENT_TYPE, DATA_STRING, USER}
+ import org.apache.james.jmap.api.upload.UploadRepositoryContract.{CONTENT_TYPE, DATA_STRING, UPLOAD_BUCKET, USER}
  import org.apache.james.mailbox.model.ContentType
+ import org.apache.james.utils.UpdatableTickingClock
  import org.assertj.core.api.Assertions.{assertThat, assertThatCode, assertThatThrownBy}
  import org.assertj.core.groups.Tuple.tuple
  import org.junit.jupiter.api.Test
@@ -41,6 +44,7 @@
      .of("text/html")
    private lazy val DATA_STRING: String = "123321"
    private lazy val USER: Username = Username.of("Bob")
+   private lazy val UPLOAD_BUCKET: BucketName = BucketName.of("jmap-uploads")
  }
 
  trait UploadRepositoryContract {
@@ -48,6 +52,10 @@
    def randomUploadId(): UploadId = UploadId.from(UUID.randomUUID())
 
    def testee: UploadRepository
+
+   def clock: UpdatableTickingClock
+
+   def blobStoreDAO: BlobStoreDAO
 
    def data(): InputStream = IOUtils.toInputStream(DATA_STRING, StandardCharsets.UTF_8)
 
@@ -201,4 +209,28 @@
      assertThat(SMono.fromPublisher(testee.delete(uploadIdOfAlice, Username.of("Bob"))).block()).isFalse
    }
 
+   @Test
+   def deleteByUploadDateBeforeShouldRemoveExpiredUploads(): Unit = {
+     val uploadId1: UploadId = SMono.fromPublisher(testee.upload(data(), CONTENT_TYPE, USER)).block().uploadId
+     clock.setInstant(clock.instant().plus(8, java.time.temporal.ChronoUnit.DAYS))
+     val uploadId2: UploadId = SMono.fromPublisher(testee.upload(data(), CONTENT_TYPE, USER)).block().uploadId
+
+     SMono(testee.deleteByUploadDateBefore(Duration.ofDays(7))).block();
+
+     assertThatThrownBy(() => SMono.fromPublisher(testee.retrieve(uploadId1, USER)).block())
+       .isInstanceOf(classOf[UploadNotFoundException])
+     assertThat(SMono.fromPublisher(testee.retrieve(uploadId2, USER)).block())
+       .isNotNull
+   }
+
+   @Test
+   def deleteByUploadDateBeforeShouldRemoveExpiredUploadsFromBlobstore(): Unit = {
+     val blobId: BlobId = SMono.fromPublisher(testee.upload(data(), CONTENT_TYPE, USER)).block().blobId
+     clock.setInstant(clock.instant().plus(8, java.time.temporal.ChronoUnit.DAYS))
+
+     SMono(testee.deleteByUploadDateBefore(Duration.ofDays(7))).block();
+
+     assertThatThrownBy(() => blobStoreDAO.read(UPLOAD_BUCKET, blobId))
+       .isInstanceOf(classOf[ObjectNotFoundException])
+   }
  }

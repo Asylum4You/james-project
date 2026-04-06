@@ -27,7 +27,6 @@ import jakarta.persistence.Basic;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
-import jakarta.persistence.NamedQueries;
 import jakarta.persistence.NamedQuery;
 import jakarta.persistence.Table;
 import jakarta.persistence.Version;
@@ -42,12 +41,11 @@ import com.google.common.hash.Hashing;
 
 @Entity(name = "JamesUser")
 @Table(name = "JAMES_USER")
-@NamedQueries({ 
-    @NamedQuery(name = "findUserByName", query = "SELECT user FROM JamesUser user WHERE user.name=:name"),
-    @NamedQuery(name = "deleteUserByName", query = "DELETE FROM JamesUser user WHERE user.name=:name"),
-    @NamedQuery(name = "containsUser", query = "SELECT COUNT(user) FROM JamesUser user WHERE user.name=:name"), 
-    @NamedQuery(name = "countUsers", query = "SELECT COUNT(user) FROM JamesUser user"), 
-    @NamedQuery(name = "listUserNames", query = "SELECT user.name FROM JamesUser user") })
+@NamedQuery(name = "findUserByName", query = "SELECT user FROM JamesUser user WHERE user.name=:name")
+@NamedQuery(name = "deleteUserByName", query = "DELETE FROM JamesUser user WHERE user.name=:name")
+@NamedQuery(name = "containsUser", query = "SELECT COUNT(user) FROM JamesUser user WHERE user.name=:name")
+@NamedQuery(name = "countUsers", query = "SELECT COUNT(user) FROM JamesUser user")
+@NamedQuery(name = "listUserNames", query = "SELECT user.name FROM JamesUser user")
 public class JPAUser implements User {
 
     /**
@@ -59,7 +57,7 @@ public class JPAUser implements User {
      */
     @VisibleForTesting
     static String hashPassword(String password, String nullableSalt, String nullableAlgorithm) {
-        Algorithm algorithm = Algorithm.of(Optional.ofNullable(nullableAlgorithm).orElse("SHA-512"));
+        Algorithm algorithm = buildAlgorithm(nullableAlgorithm);
         if (algorithm.isPBKDF2()) {
             return algorithm.digest(password, nullableSalt);
         }
@@ -69,6 +67,19 @@ public class JPAUser implements User {
         }
         return chooseHashFunction(algorithm.getName()).apply(credentials);
     }
+
+    private static Algorithm buildAlgorithm(String nullableAlgorithm) {
+        return Algorithm.of(Optional.ofNullable(nullableAlgorithm).orElse("SHA-512"));
+    }
+
+    public String getPasswordHash() {
+        return password;
+    }
+
+    public Algorithm getAlgorithm() {
+        return buildAlgorithm(alg);
+    }
+
 
     interface PasswordHashFunction extends Function<String, String> {}
 

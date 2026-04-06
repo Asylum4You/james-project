@@ -33,8 +33,9 @@ import java.util.function.Function;
 import jakarta.inject.Inject;
 
 import org.apache.james.backends.cassandra.init.CassandraTypesProvider;
-import org.apache.james.backends.cassandra.init.CassandraZonedDateTimeModule;
+import org.apache.james.backends.cassandra.init.CassandraZonedDateTimeDataDefinition;
 import org.apache.james.backends.cassandra.utils.CassandraAsyncExecutor;
+import org.apache.james.backends.cassandra.utils.ProfileLocator;
 import org.apache.james.util.ValuePatch;
 import org.apache.james.vacation.api.AccountId;
 import org.apache.james.vacation.api.Vacation;
@@ -42,6 +43,7 @@ import org.apache.james.vacation.api.VacationPatch;
 import org.apache.james.vacation.cassandra.tables.CassandraVacationTable;
 
 import com.datastax.oss.driver.api.core.CqlSession;
+import com.datastax.oss.driver.api.core.config.DriverExecutionProfile;
 import com.datastax.oss.driver.api.core.cql.PreparedStatement;
 import com.datastax.oss.driver.api.core.cql.Row;
 import com.datastax.oss.driver.api.core.type.UserDefinedType;
@@ -56,10 +58,12 @@ public class CassandraVacationDAO {
     private final PreparedStatement readStatement;
     private final UserDefinedType zonedDateTimeUserType;
     private final BiFunction<VacationPatch, RegularInsert, RegularInsert> insertGeneratorPipeline;
+    private final DriverExecutionProfile readProfile;
+    private final DriverExecutionProfile writeProfile;
 
     @Inject
     public CassandraVacationDAO(CqlSession session, CassandraTypesProvider cassandraTypesProvider) {
-        this.zonedDateTimeUserType = cassandraTypesProvider.getDefinedUserType(CassandraZonedDateTimeModule.ZONED_DATE_TIME);
+        this.zonedDateTimeUserType = cassandraTypesProvider.getDefinedUserType(CassandraZonedDateTimeDataDefinition.ZONED_DATE_TIME);
         this.cassandraAsyncExecutor = new CassandraAsyncExecutor(session);
 
         this.readStatement = session.prepare(selectFrom(CassandraVacationTable.TABLE_NAME)
@@ -77,6 +81,9 @@ public class CassandraVacationDAO {
             .stream()
             .reduce((vacation, insert) -> insert,
                 (a, b) -> (vacation, insert) -> b.apply(vacation, a.apply(vacation, insert)));
+
+        this.readProfile = ProfileLocator.READ.locateProfile(session, "VACATION");
+        this.writeProfile = ProfileLocator.WRITE.locateProfile(session, "VACATION");
     }
 
     public Mono<Void> modifyVacation(AccountId accountId, VacationPatch vacationPatch) {
@@ -84,12 +91,14 @@ public class CassandraVacationDAO {
             createSpecificUpdate(vacationPatch,
                 insertInto(CassandraVacationTable.TABLE_NAME)
                     .value(CassandraVacationTable.ACCOUNT_ID, literal(accountId.getIdentifier())))
-                .build());
+                .build()
+                .setExecutionProfile(writeProfile));
     }
 
     public Mono<Optional<Vacation>> retrieveVacation(AccountId accountId) {
         return cassandraAsyncExecutor.executeSingleRowOptional(readStatement.bind()
-                .setString(CassandraVacationTable.ACCOUNT_ID, accountId.getIdentifier()))
+                .setString(CassandraVacationTable.ACCOUNT_ID, accountId.getIdentifier())
+                .setExecutionProfile(readProfile))
             .map(optional -> optional.map(row -> Vacation.builder()
                 .enabled(row.getBoolean(CassandraVacationTable.IS_ENABLED))
                 .fromDate(retrieveDate(row, CassandraVacationTable.FROM_DATE))
@@ -101,7 +110,7 @@ public class CassandraVacationDAO {
     }
 
     private Optional<ZonedDateTime> retrieveDate(Row row, String dateField) {
-        return CassandraZonedDateTimeModule.fromUDTOptional(row.getUdtValue(dateField));
+        return CassandraZonedDateTimeDataDefinition.fromUDTOptional(row.getUdtValue(dateField));
     }
 
     private RegularInsert createSpecificUpdate(VacationPatch vacationPatch, RegularInsert baseInsert) {
@@ -118,7 +127,7 @@ public class CassandraVacationDAO {
     public BiFunction<VacationPatch, RegularInsert, RegularInsert> applyPatchForFieldZonedDateTime(String field, Function<VacationPatch, ValuePatch<ZonedDateTime>> getter) {
         return (vacation, insert) ->
             getter.apply(vacation)
-                .mapNotKeptToOptional(optionalValue -> applyPatchForField(field, CassandraZonedDateTimeModule.toUDT(zonedDateTimeUserType, optionalValue), insert))
+                .mapNotKeptToOptional(optionalValue -> applyPatchForField(field, CassandraZonedDateTimeDataDefinition.toUDT(zonedDateTimeUserType, optionalValue), insert))
                 .orElse(insert);
     }
 

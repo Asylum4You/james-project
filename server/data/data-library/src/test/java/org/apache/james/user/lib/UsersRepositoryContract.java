@@ -26,6 +26,7 @@ import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Stream;
 
 import org.apache.james.core.Domain;
@@ -140,6 +141,14 @@ public interface UsersRepositoryContract {
             return admin;
         }
 
+        public Username getUser1() {
+            return user1;
+        }
+
+        public Username getUser2() {
+            return user2;
+        }
+
         public Username getUserWithUnknownDomain() {
             return userWithUnknownDomain;
         }
@@ -149,6 +158,7 @@ public interface UsersRepositoryContract {
 
     UsersRepository testee(Optional<Username> administrator) throws Exception;
 
+    UsersRepository testee(Set<Username> administrators) throws Exception;
 
     interface ReadOnlyContract extends UsersRepositoryContract {
         @Test
@@ -529,10 +539,18 @@ public interface UsersRepositoryContract {
         }
 
         @Test
-        default void isAdministratorShouldReturnFalseWhenConfiguredAndUserIsNotAdmin(TestSystem testSystem) throws Exception {
-            UsersRepository testee = testee(Optional.of(testSystem.admin));
+        default void isAdministratorShouldReturnTrueWhenConfiguredMultipleAdminsAndUserIsAdmin(TestSystem testSystem) throws Exception {
+            UsersRepository testee = testee(Set.of(testSystem.admin, testSystem.user1));
 
-            assertThat(testee.isAdministrator(testSystem.user1)).isFalse();
+            assertThat(testee.isAdministrator(testSystem.admin)).isTrue();
+            assertThat(testee.isAdministrator(testSystem.user1)).isTrue();
+        }
+
+        @Test
+        default void isAdministratorShouldReturnFalseWhenConfiguredAndUserIsNotAdmin(TestSystem testSystem) throws Exception {
+            UsersRepository testee = testee(Set.of(testSystem.admin, testSystem.user1));
+
+            assertThat(testee.isAdministrator(testSystem.user2)).isFalse();
         }
     }
 
@@ -562,6 +580,28 @@ public interface UsersRepositoryContract {
                 .collectList()
                 .block())
                 .containsOnly(Username.of("user1@domain1.tld"));
+        }
+
+        @Test
+        default void listUsersOfADomainShouldReturnEmptyWhenNoneInDomain(TestSystem testSystem) throws Exception {
+            testSystem.domainList.addDomain(Domain.of("empty.tld"));
+
+            assertThat(Flux.from(testee().listUsersOfADomainReactive(Domain.of("empty.tld")))
+                .collectList()
+                .block())
+                .isEmpty();
+        }
+
+        @Test
+        default void listUsersOfADomainShouldReturnAllUsersOfDomain(TestSystem testSystem) throws Exception {
+            testSystem.domainList.addDomain(Domain.of("domain.tld"));
+            testee().addUser(Username.of("alice@domain.tld"), "password");
+            testee().addUser(Username.of("bob@domain.tld"), "password");
+
+            assertThat(Flux.from(testee().listUsersOfADomainReactive(Domain.of("domain.tld")))
+                .collectList()
+                .block())
+                .containsExactlyInAnyOrder(Username.of("alice@domain.tld"), Username.of("bob@domain.tld"));
         }
 
         @Test
@@ -641,6 +681,14 @@ public interface UsersRepositoryContract {
         }
 
         @Test
+        default void virtualHostedUsersRepositoryShouldUseFullMailAddressAsUsernameButStripSubAddressingDetails() throws Exception {
+            // Some implementations do not support changing virtual hosting value
+            Assumptions.assumeTrue(testee().supportVirtualHosting());
+
+            assertThat(testee().getUsername(new MailAddress("local+details@domain"))).isEqualTo(Username.of("local@domain"));
+        }
+
+        @Test
         default void getMailAddressForShouldBeIdentityWhenVirtualHosting() throws Exception {
             // Some implementations do not support changing virtual hosting value
             Assumptions.assumeTrue(testee().supportVirtualHosting());
@@ -652,7 +700,7 @@ public interface UsersRepositoryContract {
 
         @Test
         default void getUserShouldBeCaseInsensitive() throws Exception {
-            assertThat(testee().getUsername(new MailAddress("lowerUPPER", TestSystem.DOMAIN)))
+            assertThat(testee().getUsername(MailAddress.of("lowerUPPER", TestSystem.DOMAIN)))
                 .isEqualTo(Username.fromLocalPartWithDomain("lowerupper", TestSystem.DOMAIN));
         }
 
@@ -693,18 +741,26 @@ public interface UsersRepositoryContract {
         }
 
         @Test
+        default void nonVirtualHostedUsersRepositoryShouldUseLocalPartWithoutSubAddressingDetailsAsUsername() throws Exception {
+            // Some implementations do not support changing virtual hosting value
+            Assumptions.assumeFalse(testee().supportVirtualHosting());
+
+            assertThat(testee().getUsername(new MailAddress("local+details@domain"))).isEqualTo(Username.of("local"));
+        }
+
+        @Test
         default void getMailAddressForShouldAppendDefaultDomainWhenNoVirtualHosting(TestSystem testSystem) throws Exception {
             // Some implementations do not support changing virtual hosting value
             Assumptions.assumeFalse(testee().supportVirtualHosting());
 
             String username = "user";
             assertThat(testee().getMailAddressFor(Username.of(username)))
-                .isEqualTo(new MailAddress(username, testSystem.domainList.getDefaultDomain()));
+                .isEqualTo(MailAddress.of(username, testSystem.domainList.getDefaultDomain()));
         }
 
         @Test
         default void getUserShouldBeCaseInsensitive() throws Exception {
-            assertThat(testee().getUsername(new MailAddress("lowerUPPER", TestSystem.DOMAIN)))
+            assertThat(testee().getUsername(MailAddress.of("lowerUPPER", TestSystem.DOMAIN)))
                 .isEqualTo(Username.fromLocalPartWithoutDomain("lowerupper"));
         }
 
@@ -732,5 +788,16 @@ public interface UsersRepositoryContract {
     }
 
     interface WithOutVirtualHostingContract extends WithOutVirtualHostingReadOnlyContract, ReadWriteContract {
+        @Test
+        default void listUsersOfADomainShouldReturnAllUsers(TestSystem testSystem) throws Exception {
+            testSystem.domainList.addDomain(Domain.of("domain1.tld"));
+            testee().addUser(Username.of("user1"), "password");
+            testee().addUser(Username.of("user2"), "password");
+
+            assertThat(Flux.from(testee().listUsersOfADomainReactive(Domain.of("domain1.tld")))
+                .collectList()
+                .block())
+                .containsOnly(Username.of("user1"), Username.of("user2"));
+        }
     }
 }

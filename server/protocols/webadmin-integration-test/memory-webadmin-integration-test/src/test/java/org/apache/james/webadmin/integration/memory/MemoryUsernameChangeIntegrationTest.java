@@ -51,11 +51,11 @@ import org.apache.james.core.quota.QuotaCountLimit;
 import org.apache.james.core.quota.QuotaCountUsage;
 import org.apache.james.core.quota.QuotaSizeLimit;
 import org.apache.james.core.quota.QuotaSizeUsage;
+import org.apache.james.jmap.JmapGuiceProbe;
 import org.apache.james.jmap.api.filtering.FilteringManagement;
 import org.apache.james.jmap.api.filtering.Rule;
 import org.apache.james.jmap.api.filtering.Rules;
 import org.apache.james.jmap.api.filtering.Version;
-import org.apache.james.jmap.JmapGuiceProbe;
 import org.apache.james.mailbox.MessageManager;
 import org.apache.james.mailbox.model.MailboxACL;
 import org.apache.james.mailbox.model.MailboxPath;
@@ -106,7 +106,7 @@ class MemoryUsernameChangeIntegrationTest {
     }
 
     private static final String NAME = "a name";
-    private static final Rule.Condition CONDITION = Rule.Condition.of(Rule.Condition.Field.CC, Rule.Condition.Comparator.CONTAINS, "something");
+    private static final Rule.Condition CONDITION = Rule.Condition.of(Rule.Condition.FixedField.CC, Rule.Condition.Comparator.CONTAINS, "something");
     private static final Rule.Action ACTION = Rule.Action.of(Rule.Action.AppendInMailboxes.withMailboxIds("id-01"));
     private static final Rule.Builder RULE_BUILDER = Rule.builder().name(NAME).conditionGroup(CONDITION).action(ACTION);
     private static final Rule RULE_1 = RULE_BUILDER.id(Rule.Id.of("1")).build();

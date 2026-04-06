@@ -1,0 +1,23 @@
+= Distributed James Server &mdash; Configuration
+:navtitle: Configuration
+
+This section presents how to configure the Distributed server.
+
+The Distributed Server relies on separated files for configuring various components. Some files follow a *xml* format
+and some others follow a *property* format. Some files can be omitted, in which case the functionality can be disabled,
+or rely on reasonable defaults.
+
+The following configuration files are exposed:
+
+:sample-configuration-prefix-url: https://github.com/apache/james-project/blob/master/server/apps/distributed-app/sample-configuration
+:xref-base: distributed/configure
+:server-name: Distributed James Server
+
+include::partial$configure/forProtocolsPartial.adoc[]
+
+include::partial$configure/forStorageDependenciesPartial.adoc[]
+** xref:distributed/configure/cassandra.adoc[*cassandra.properties*] allows to configure the Cassandra driver link:{sample-configuration-prefix-url}/sample-configuration/cassandra.properties[example]
+
+include::partial$configure/forCoreComponentsPartial.adoc[]
+include::partial$configure/forExtensionsPartial.adoc[]
+include::partial$configure/systemPropertiesPartial.adoc[]

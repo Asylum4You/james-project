@@ -23,9 +23,9 @@ import java.util.Optional;
 import org.apache.commons.configuration2.HierarchicalConfiguration;
 import org.apache.commons.configuration2.ex.ConfigurationException;
 import org.apache.commons.configuration2.tree.ImmutableNode;
+import org.apache.james.jwt.OidcSASLConfiguration;
 import org.apache.james.lmtpserver.CoreCmdHandlerLoader;
 import org.apache.james.lmtpserver.jmx.JMXHandlersLoader;
-import org.apache.james.protocols.api.OidcSASLConfiguration;
 import org.apache.james.protocols.api.ProtocolSession;
 import org.apache.james.protocols.api.ProtocolTransport;
 import org.apache.james.protocols.lib.handler.HandlersPackage;
@@ -33,6 +33,7 @@ import org.apache.james.protocols.lib.netty.AbstractProtocolAsyncServer;
 import org.apache.james.protocols.lmtp.LMTPConfiguration;
 import org.apache.james.protocols.netty.AbstractChannelPipelineFactory;
 import org.apache.james.protocols.netty.ChannelHandlerFactory;
+import org.apache.james.protocols.netty.Encryption;
 import org.apache.james.protocols.netty.LineDelimiterBasedChannelHandlerFactory;
 import org.apache.james.protocols.smtp.SMTPProtocol;
 import org.apache.james.smtpserver.ExtendedSMTPSession;
@@ -41,6 +42,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.channel.group.ChannelGroup;
+import io.netty.channel.group.DefaultChannelGroup;
+import io.netty.util.concurrent.GlobalEventExecutor;
 
 public class LMTPServer extends AbstractProtocolAsyncServer implements LMTPServerMBean {
     private static final Logger LOGGER = LoggerFactory.getLogger(LMTPServer.class);
@@ -52,10 +56,12 @@ public class LMTPServer extends AbstractProtocolAsyncServer implements LMTPServe
     private long maxMessageSize = 0;
     private final LMTPConfigurationImpl lmtpConfig = new LMTPConfigurationImpl();
     private final LMTPMetricsImpl lmtpMetrics;
+    private final ChannelGroup lmtpChannelGroup;
     private String lmtpGreeting;
 
     public LMTPServer(LMTPMetricsImpl lmtpMetrics) {
         this.lmtpMetrics = lmtpMetrics;
+        this.lmtpChannelGroup = new DefaultChannelGroup(GlobalEventExecutor.INSTANCE);
     }
 
     @Override
@@ -96,7 +102,13 @@ public class LMTPServer extends AbstractProtocolAsyncServer implements LMTPServe
         protected LMTPConfigurationImpl() {
             super("JAMES Protocols Server");
         }
-        
+
+        @Override
+        public SenderVerificationConfiguration senderVerificationConfiguration() {
+            boolean allowUnauthenticatedSender = true;
+            return new SenderVerificationConfiguration(SenderVerificationMode.DISABLED, allowUnauthenticatedSender);
+        }
+
         @Override
         public String getHelloName() {
             return LMTPServer.this.getHelloName();
@@ -150,7 +162,9 @@ public class LMTPServer extends AbstractProtocolAsyncServer implements LMTPServe
                 return new ExtendedSMTPSession(lmtpConfig, transport);
             }
         };
-        return new SMTPChannelInboundHandler(transport, lmtpMetrics);
+        boolean proxyRequired = true;
+        Encryption noEncryption = null;
+        return new SMTPChannelInboundHandler(transport, noEncryption, !proxyRequired, lmtpMetrics, lmtpChannelGroup);
     }
 
     @Override

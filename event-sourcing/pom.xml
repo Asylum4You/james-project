@@ -23,7 +23,7 @@
     <parent>
         <groupId>org.apache.james</groupId>
         <artifactId>james-project</artifactId>
-        <version>3.9.0-SNAPSHOT</version>
+        <version>3.10.0-SNAPSHOT</version>
     </parent>
     <artifactId>event-sourcing</artifactId>
 
@@ -36,7 +36,9 @@
         <module>event-sourcing-pojo</module>
         <module>event-store-api</module>
         <module>event-store-cassandra</module>
+        <module>event-store-jpa</module>
         <module>event-store-memory</module>
+        <module>event-store-postgres</module>
     </modules>
 
 </project>

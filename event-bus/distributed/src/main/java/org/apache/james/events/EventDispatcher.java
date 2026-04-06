@@ -25,11 +25,14 @@ import static org.apache.james.backends.rabbitmq.Constants.DIRECT_EXCHANGE;
 import static org.apache.james.backends.rabbitmq.Constants.DURABLE;
 import static org.apache.james.backends.rabbitmq.Constants.EMPTY_ROUTING_KEY;
 import static org.apache.james.backends.rabbitmq.Constants.EXCLUSIVE;
-import static org.apache.james.backends.rabbitmq.QueueArguments.NO_ARGUMENTS;
+import static org.apache.james.backends.rabbitmq.Constants.evaluateAutoDelete;
+import static org.apache.james.backends.rabbitmq.Constants.evaluateDurable;
+import static org.apache.james.backends.rabbitmq.Constants.evaluateExclusive;
 import static org.apache.james.events.RabbitMQEventBus.EVENT_BUS_ID;
 
 import java.time.Duration;
 import java.util.Collection;
+import java.util.List;
 import java.util.Set;
 
 import org.apache.james.backends.rabbitmq.RabbitMQConfiguration;
@@ -98,10 +101,11 @@ public class EventDispatcher {
                 .durable(DURABLE)
                 .type(DIRECT_EXCHANGE)),
             sender.declareQueue(namingStrategy.deadLetterQueue()
-                .durable(DURABLE)
-                .exclusive(!EXCLUSIVE)
-                .autoDelete(!AUTO_DELETE)
-                .arguments(NO_ARGUMENTS)),
+                .durable(evaluateDurable(DURABLE, configuration.isQuorumQueuesUsed()))
+                .exclusive(evaluateExclusive(!EXCLUSIVE, configuration.isQuorumQueuesUsed()))
+                .autoDelete(evaluateAutoDelete(!AUTO_DELETE, configuration.isQuorumQueuesUsed()))
+                .arguments(configuration.workQueueArgumentsBuilder()
+                    .build())),
             sender.bind(BindingSpecification.binding()
                 .exchange(namingStrategy.deadLetterExchange())
                 .queue(namingStrategy.deadLetterQueue().getName())
@@ -119,12 +123,23 @@ public class EventDispatcher {
             .then();
     }
 
+    Mono<Void> dispatch(Collection<EventBus.EventWithRegistrationKey> events) {
+        return Flux
+            .concat(
+                Flux.fromIterable(events)
+                    .concatMap(e -> dispatchToLocalListeners(e.event(), e.keys()))
+                    .then(),
+                dispatchToRemoteListeners(events))
+            .doOnError(throwable -> LOGGER.error("error while dispatching event", throwable))
+            .then();
+    }
+
     private Mono<Void> dispatchToLocalListeners(Event event, Set<RegistrationKey> keys) {
         return Flux.fromIterable(keys)
             .flatMap(key -> Flux.fromIterable(localListenerRegistry.getLocalListeners(key))
-                .map(listener -> Tuples.of(key, listener)), EventBus.EXECUTION_RATE)
+                .map(listener -> Tuples.of(key, listener)), EventBus.DEFAULT_MAX_CONCURRENCY)
             .filter(pair -> pair.getT2().getExecutionMode() == EventListener.ExecutionMode.SYNCHRONOUS)
-            .flatMap(pair -> executeListener(event, pair.getT2(), pair.getT1()), EventBus.EXECUTION_RATE)
+            .flatMap(pair -> executeListener(event, pair.getT2(), pair.getT1()), EventBus.DEFAULT_MAX_CONCURRENCY)
             .then();
     }
 
@@ -156,6 +171,22 @@ public class EventDispatcher {
             .then();
     }
 
+    private Mono<Void> dispatchToRemoteListeners(Collection<EventBus.EventWithRegistrationKey> events) {
+        ImmutableList<Event> underlyingEvents = events.stream()
+            .map(EventBus.EventWithRegistrationKey::event)
+            .collect(ImmutableList.toImmutableList());
+
+        ImmutableSet<RegistrationKey> keys = events.stream()
+            .flatMap(event -> event.keys().stream())
+            .collect(ImmutableSet.toImmutableSet());
+
+        return Mono.fromCallable(() -> eventSerializer.toJsonBytes(underlyingEvents))
+            .flatMap(serializedEvent -> Mono.zipDelayError(
+                remoteGroupsDispatch(serializedEvent, underlyingEvents),
+                remoteKeysDispatch(serializedEvent, keys)))
+            .then();
+    }
+
     private Mono<Void> remoteGroupsDispatch(byte[] serializedEvent, Event event) {
         return remoteDispatchWithAcks(serializedEvent)
             .doOnError(ex -> LOGGER.error(
@@ -165,7 +196,29 @@ public class EventDispatcher {
                 event.getEventId().getId(),
                 ex))
             .onErrorResume(ex -> deadLetters.store(dispatchingFailureGroup, event)
-                .then(Mono.error(ex)));
+                .then(propagateErrorIfNeeded(ex)));
+    }
+
+    private Mono<Void> remoteGroupsDispatch(byte[] serializedEvent, List<Event> events) {
+        return remoteDispatchWithAcks(serializedEvent)
+            .onErrorResume(ex -> Flux.fromIterable(events)
+                .map(event -> {
+                    LOGGER.error(
+                        "cannot dispatch event of type '{}' belonging '{}' with id '{}' to remote groups, store it into dead letter",
+                        event.getClass().getSimpleName(),
+                        event.getUsername().asString(),
+                        event.getEventId().getId(),
+                        ex);
+                    return deadLetters.store(dispatchingFailureGroup, event);
+                })
+                .then(propagateErrorIfNeeded(ex)));
+    }
+
+    private Mono<Void> propagateErrorIfNeeded(Throwable throwable) {
+        if (configuration.eventBusPropagateDispatchError()) {
+            return Mono.error(throwable);
+        }
+        return Mono.empty();
     }
 
     private Mono<Void> remoteKeysDispatch(byte[] serializedEvent, Set<RegistrationKey> keys) {

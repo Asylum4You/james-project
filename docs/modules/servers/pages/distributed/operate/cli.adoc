@@ -1,0 +1,6 @@
+= Distributed James Server &mdash; Command Line Interface
+:navtitle: Command Line Interface
+
+:xref-base: distributed
+:server-name: Distributed James Server
+include::partial$operate/cli.adoc[]

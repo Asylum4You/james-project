@@ -38,6 +38,7 @@ import org.apache.james.mailbox.model.Mailbox;
 import org.apache.james.mailbox.model.MailboxId;
 import org.apache.james.mailbox.model.MessageId;
 import org.apache.james.mailbox.model.MessageRange;
+import org.apache.james.mailbox.model.SearchOptions;
 import org.apache.james.mailbox.model.SearchQuery;
 import org.apache.james.mailbox.model.UpdatedFlags;
 import org.apache.james.mailbox.store.MailboxSessionMapperFactory;
@@ -104,6 +105,11 @@ public class LazyMessageSearchIndex extends ListeningMessageSearchIndex {
         return index.deleteAll(session, mailboxId);
     }
 
+    @Override
+    public void postReindexing() {
+        index.postReindexing();
+    }
+
     /**
      * Lazy index the mailbox on first search request if it was not indexed before. After indexing is done it delegate the search request to the wrapped
      * {@link MessageSearchIndex}. Be aware that concurrent search requests are blocked on the same "not-yet-indexed" mailbox till it the index process was 
@@ -145,7 +151,7 @@ public class LazyMessageSearchIndex extends ListeningMessageSearchIndex {
     
 
     @Override
-    public Flux<MessageId> search(MailboxSession session, Collection<MailboxId> mailboxIds, SearchQuery searchQuery, long limit) throws MailboxException {
+    public Flux<MessageId> search(MailboxSession session, Collection<MailboxId> mailboxIds, SearchQuery searchQuery, SearchOptions searchOptions) throws MailboxException {
         throw new UnsupportedSearchException();
     }
 

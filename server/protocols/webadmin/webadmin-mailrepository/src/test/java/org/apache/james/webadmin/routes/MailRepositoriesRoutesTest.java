@@ -41,6 +41,7 @@ import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
+import java.util.Calendar;
 import java.util.Date;
 import java.util.List;
 
@@ -54,7 +55,6 @@ import org.apache.james.json.DTOConverter;
 import org.apache.james.mailrepository.api.MailKey;
 import org.apache.james.mailrepository.api.MailRepository;
 import org.apache.james.mailrepository.api.MailRepositoryPath;
-import org.apache.james.mailrepository.api.MailRepositoryStore;
 import org.apache.james.mailrepository.api.MailRepositoryUrl;
 import org.apache.james.mailrepository.api.Protocol;
 import org.apache.james.mailrepository.memory.MailRepositoryStoreConfiguration;
@@ -513,6 +513,323 @@ class MailRepositoriesRoutesTest {
     }
 
     @Test
+    void listingKeysShouldReturnContainedKeysThatMeetUpdatedBeforeCondition() throws Exception {
+        MailRepository mailRepository = mailRepositoryStore.create(URL_MY_REPO);
+
+        mailRepository.store(FakeMail.builder()
+            .name("name1")
+            .lastUpdated(getDateBeforeCurrentTime(3))
+            .build());
+        mailRepository.store(FakeMail.builder()
+            .name("name2")
+            .lastUpdated(getDateBeforeCurrentTime(2))
+            .build());
+        mailRepository.store(FakeMail.builder()
+            .name("name3")
+            .lastUpdated(getDateBeforeCurrentTime(1))
+            .build());
+
+        given()
+            .param("updatedBefore", "2d")
+        .when()
+            .get(MY_REPO_MAILS)
+        .then()
+            .statusCode(HttpStatus.OK_200)
+            .body("", hasSize(2))
+            .body("", containsInAnyOrder("name1", "name2"));
+    }
+
+    @Test
+    void listingKeysShouldReturnContainedKeysThatMeetUpdatedAfterCondition() throws Exception {
+        MailRepository mailRepository = mailRepositoryStore.create(URL_MY_REPO);
+
+        mailRepository.store(FakeMail.builder()
+            .name("name1")
+            .lastUpdated(getDateBeforeCurrentTime(3))
+            .build());
+        mailRepository.store(FakeMail.builder()
+            .name("name2")
+            .lastUpdated(getDateBeforeCurrentTime(2))
+            .build());
+        mailRepository.store(FakeMail.builder()
+            .name("name3")
+            .lastUpdated(getDateBeforeCurrentTime(1))
+            .build());
+
+        given()
+            .param("updatedAfter", "2d")
+        .when()
+            .get(MY_REPO_MAILS)
+        .then()
+            .statusCode(HttpStatus.OK_200)
+            .body("", hasSize(1))
+            .body("", containsInAnyOrder("name3"));
+    }
+
+    @Test
+    void listingKeysShouldReturnContainedKeysThatMeetExactSenderCondition() throws Exception {
+        MailRepository mailRepository = mailRepositoryStore.create(URL_MY_REPO);
+
+        mailRepository.store(FakeMail.builder()
+            .name("name1")
+            .sender("sender@domain.com")
+            .build());
+        mailRepository.store(FakeMail.builder()
+            .name("name2")
+            .sender("sender@domain.com")
+            .build());
+        mailRepository.store(FakeMail.builder()
+            .name("name3")
+            .sender("sender2@domain.com")
+            .build());
+
+        given()
+            .param("sender", "sender@domain.com")
+        .when()
+            .get(MY_REPO_MAILS)
+        .then()
+            .statusCode(HttpStatus.OK_200)
+            .body("", hasSize(2))
+            .body("", containsInAnyOrder("name1", "name2"));
+    }
+
+    @Test
+    void listingKeysShouldReturnContainedKeysThatMeetPrefixSenderCondition() throws Exception {
+        MailRepository mailRepository = mailRepositoryStore.create(URL_MY_REPO);
+
+        mailRepository.store(FakeMail.builder()
+            .name("name1")
+            .sender("sender@domain.com")
+            .build());
+        mailRepository.store(FakeMail.builder()
+            .name("name2")
+            .sender("sender2@domain.com")
+            .build());
+        mailRepository.store(FakeMail.builder()
+            .name("name3")
+            .sender("sender@domain2.com")
+            .build());
+
+        given()
+            .param("sender", "*@domain.com")
+        .when()
+            .get(MY_REPO_MAILS)
+        .then()
+            .statusCode(HttpStatus.OK_200)
+            .body("", hasSize(2))
+            .body("", containsInAnyOrder("name1", "name2"));
+    }
+
+    @Test
+    void listingKeysShouldReturnContainedKeysThatMeetExactRecipientCondition() throws Exception {
+        MailRepository mailRepository = mailRepositoryStore.create(URL_MY_REPO);
+
+        mailRepository.store(FakeMail.builder()
+            .name("name1")
+            .recipient("recipient@domain.com")
+            .build());
+        mailRepository.store(FakeMail.builder()
+            .name("name2")
+            .recipient("recipient@domain.com")
+            .build());
+        mailRepository.store(FakeMail.builder()
+            .name("name3")
+            .recipient("recipient2@domain.com")
+            .build());
+
+        given()
+            .param("recipient", "recipient@domain.com")
+        .when()
+            .get(MY_REPO_MAILS)
+        .then()
+            .statusCode(HttpStatus.OK_200)
+            .body("", hasSize(2))
+            .body("", containsInAnyOrder("name1", "name2"));
+    }
+
+    @Test
+    void listingKeysShouldReturnContainedKeysThatMeetPrefixRecipientCondition() throws Exception {
+        MailRepository mailRepository = mailRepositoryStore.create(URL_MY_REPO);
+
+        mailRepository.store(FakeMail.builder()
+            .name("name1")
+            .recipient("recipient@domain.com")
+            .build());
+        mailRepository.store(FakeMail.builder()
+            .name("name2")
+            .recipient("recipient2@domain.com")
+            .build());
+        mailRepository.store(FakeMail.builder()
+            .name("name3")
+            .recipient("recipient@domain2.com")
+            .build());
+
+        given()
+            .param("recipient", "*@domain.com")
+        .when()
+            .get(MY_REPO_MAILS)
+        .then()
+            .statusCode(HttpStatus.OK_200)
+            .body("", hasSize(2))
+            .body("", containsInAnyOrder("name1", "name2"));
+    }
+
+    @Test
+    void listingKeysShouldReturnContainedKeysThatMeetRemoteHostCondition() throws Exception {
+        MailRepository mailRepository = mailRepositoryStore.create(URL_MY_REPO);
+
+        mailRepository.store(FakeMail.builder()
+            .name("name1")
+            .remoteHost("host1")
+            .build());
+        mailRepository.store(FakeMail.builder()
+            .name("name2")
+            .remoteHost("host2")
+            .build());
+        mailRepository.store(FakeMail.builder()
+            .name("name3")
+            .remoteHost("host2")
+            .build());
+
+        given()
+            .param("remoteHost", "host2")
+        .when()
+            .get(MY_REPO_MAILS)
+        .then()
+            .statusCode(HttpStatus.OK_200)
+            .body("", hasSize(2))
+            .body("", containsInAnyOrder("name2", "name3"));
+    }
+
+    @Test
+    void listingKeysShouldReturnContainedKeysThatMeetRemoteAddressCondition() throws Exception {
+        MailRepository mailRepository = mailRepositoryStore.create(URL_MY_REPO);
+
+        mailRepository.store(FakeMail.builder()
+            .name("name1")
+            .remoteAddr("1.1.1.1")
+            .build());
+        mailRepository.store(FakeMail.builder()
+            .name("name2")
+            .remoteAddr("1.1.1.1")
+            .build());
+        mailRepository.store(FakeMail.builder()
+            .name("name3")
+            .remoteAddr("1.1.1.2")
+            .build());
+
+        given()
+            .param("remoteAddress", "1.1.1.1")
+        .when()
+            .get(MY_REPO_MAILS)
+        .then()
+            .statusCode(HttpStatus.OK_200)
+            .body("", hasSize(2))
+            .body("", containsInAnyOrder("name1", "name2"));
+    }
+
+    @Test
+    void listingKeysShouldReturnContainedKeysThatMeetUpdatedBeforeAndUpdateAfterCondition() throws Exception {
+        MailRepository mailRepository = mailRepositoryStore.create(URL_MY_REPO);
+
+        mailRepository.store(FakeMail.builder()
+            .name("name1")
+            .lastUpdated(getDateBeforeCurrentTime(1))
+            .build());
+        mailRepository.store(FakeMail.builder()
+            .name("name2")
+            .lastUpdated(getDateBeforeCurrentTime(3))
+            .build());
+        mailRepository.store(FakeMail.builder()
+            .name("name3")
+            .lastUpdated(getDateBeforeCurrentTime(3))
+            .build());
+        mailRepository.store(FakeMail.builder()
+            .name("name4")
+            .lastUpdated(getDateBeforeCurrentTime(5))
+            .build());
+
+        given()
+            .param("updatedBefore", "2d")
+            .param("updatedAfter", "4d")
+        .when()
+            .get(MY_REPO_MAILS)
+        .then()
+            .statusCode(HttpStatus.OK_200)
+            .body("", hasSize(2))
+            .body("", containsInAnyOrder("name2", "name3"));
+    }
+
+    @Test
+    void listingKeysShouldReturnContainedKeysThatMeetUpdatedBeforeAndOffsetAndLimitCondition() throws Exception {
+        MailRepository mailRepository = mailRepositoryStore.create(URL_MY_REPO);
+
+        mailRepository.store(FakeMail.builder()
+            .name("name1")
+            .lastUpdated(getDateBeforeCurrentTime(3))
+            .build());
+        mailRepository.store(FakeMail.builder()
+            .name("name2")
+            .lastUpdated(getDateBeforeCurrentTime(3))
+            .build());
+        mailRepository.store(FakeMail.builder()
+            .name("name3")
+            .lastUpdated(getDateBeforeCurrentTime(3))
+            .build());
+        mailRepository.store(FakeMail.builder()
+            .name("name4")
+            .lastUpdated(getDateBeforeCurrentTime(3))
+            .build());
+
+        given()
+            .param("updatedBefore", "2d")
+            .param("offset", "1")
+            .param("limit", "2")
+        .when()
+            .get(MY_REPO_MAILS)
+        .then()
+            .statusCode(HttpStatus.OK_200)
+            .body("", hasSize(2))
+            .body("", containsInAnyOrder("name2", "name3"));
+    }
+
+    @Test
+    void listingKeysShouldReturn400WhenUpdatedBeforeParaIsInvalid() throws Exception {
+        MailRepository mailRepository = mailRepositoryStore.create(URL_MY_REPO);
+        mailRepository.store(FakeMail.builder()
+            .name("name1")
+            .build());
+
+        given()
+            .param("updatedBefore", "invalid")
+        .when()
+            .get(MY_REPO_MAILS)
+        .then()
+            .statusCode(HttpStatus.BAD_REQUEST_400)
+            .body("statusCode", is(400))
+            .body("type", is(ErrorResponder.ErrorType.INVALID_ARGUMENT.getType()))
+            .body("message", is("Invalid arguments supplied in the user request"));
+    }
+
+    @Test
+    void listingKeysShouldReturn400WhenUpdatedAfterParaIsInvalid() throws Exception {
+        MailRepository mailRepository = mailRepositoryStore.create(URL_MY_REPO);
+        mailRepository.store(FakeMail.builder()
+            .name("name1")
+            .build());
+
+        given()
+            .param("updatedAfter", "invalid")
+        .when()
+            .get(MY_REPO_MAILS)
+        .then()
+            .statusCode(HttpStatus.BAD_REQUEST_400)
+            .body("statusCode", is(400))
+            .body("type", is(ErrorResponder.ErrorType.INVALID_ARGUMENT.getType()))
+            .body("message", is("Invalid arguments supplied in the user request"));
+    }
+
+    @Test
     void retrievingRepositoryShouldReturnNotFoundWhenNone() {
         given()
             .get(PATH_ESCAPED_MY_REPO)
@@ -895,7 +1212,7 @@ class MailRepositoriesRoutesTest {
             .get(PATH_ESCAPED_MY_REPO + "/mails/" + name)
         .then()
             .statusCode(HttpStatus.OK_200)
-            .header("Content-Length", "471")
+            .header("Content-Length", Integer.toString(expectedContent.length()))
             .contentType(Constants.RFC822_CONTENT_TYPE)
             .extract()
             .body()
@@ -1139,6 +1456,39 @@ class MailRepositoriesRoutesTest {
             .body("startedDate", is(notNullValue()))
             .body("submitDate", is(notNullValue()))
             .body("completedDate", is(notNullValue()));
+    }
+
+    @Test
+    void reprocessingAllTaskShouldAllowFilteringByRecipient() throws Exception {
+        MailRepository mailRepository = mailRepositoryStore.create(URL_MY_REPO);
+        String recipient1 = "recipient1@domain";
+        String recipient2 = "recipient2@domain";
+        mailRepository.store(FakeMail.builder()
+            .name(NAME_1)
+            .recipient(recipient1)
+            .mimeMessage(MimeMessageUtil.mimeMessageFromBytes(MESSAGE_BYTES))
+            .build());
+        mailRepository.store(FakeMail.builder()
+            .name(NAME_2)
+            .recipient(recipient2)
+            .mimeMessage(MimeMessageUtil.mimeMessageFromBytes(MESSAGE_BYTES))
+            .build());
+
+        String taskId = with()
+            .param("action", "reprocess")
+            .param("forRecipient", recipient1)
+            .patch(PATH_ESCAPED_MY_REPO + "/mails")
+            .jsonPath()
+            .get("taskId");
+
+        given()
+            .basePath(TasksRoutes.BASE)
+        .when()
+            .get(taskId + "/await");
+
+        assertThat(mailRepository.list())
+            .toIterable()
+            .containsOnly(new MailKey(NAME_2));
     }
 
     @Test
@@ -2008,6 +2358,207 @@ class MailRepositoriesRoutesTest {
             .body("status", is("failed"));
     }
 
+    @Test
+    void moveAllMailsShouldReturn404WhenSourceRepositoryDoesNotExist() {
+        given()
+            .body("{\"mailRepository\": \"myTargetRepo\"}")
+            .contentType(io.restassured.http.ContentType.JSON)
+        .when()
+            .patch(PATH_ESCAPED_MY_REPO + "/mails")
+        .then()
+            .statusCode(HttpStatus.NOT_FOUND_404)
+            .body("statusCode", is(404))
+            .body("type", is(ErrorResponder.ErrorType.NOT_FOUND.getType()));
+    }
+
+    @Test
+    void moveAllMailsShouldReturn400WhenTargetRepositoryDoesNotExist() throws Exception {
+        mailRepositoryStore.create(URL_MY_REPO);
+
+        given()
+            .body("{\"mailRepository\": \"nonExistingTarget\"}")
+            .contentType(io.restassured.http.ContentType.JSON)
+        .when()
+            .patch(PATH_ESCAPED_MY_REPO + "/mails")
+        .then()
+            .statusCode(HttpStatus.BAD_REQUEST_400)
+            .body("statusCode", is(400))
+            .body("type", is(ErrorResponder.ErrorType.INVALID_ARGUMENT.getType()))
+            .body("message", is("The target repository 'nonExistingTarget' does not exist"));
+    }
+
+    @Test
+    void moveAllMailsShouldReturn400WhenMailRepositoryFieldIsMissing() throws Exception {
+        mailRepositoryStore.create(URL_MY_REPO);
+
+        given()
+            .body("{}")
+            .contentType(io.restassured.http.ContentType.JSON)
+        .when()
+            .patch(PATH_ESCAPED_MY_REPO + "/mails")
+        .then()
+            .statusCode(HttpStatus.BAD_REQUEST_400)
+            .body("statusCode", is(400))
+            .body("type", is(ErrorResponder.ErrorType.INVALID_ARGUMENT.getType()))
+            .body("message", is("'mailRepository' field is mandatory in request body"));
+    }
+
+    @Test
+    void moveAllMailsShouldReturn400WhenBodyIsInvalidJson() throws Exception {
+        mailRepositoryStore.create(URL_MY_REPO);
+
+        given()
+            .body("not-json")
+            .contentType(io.restassured.http.ContentType.JSON)
+        .when()
+            .patch(PATH_ESCAPED_MY_REPO + "/mails")
+        .then()
+            .statusCode(HttpStatus.BAD_REQUEST_400)
+            .body("statusCode", is(400))
+            .body("type", is(ErrorResponder.ErrorType.INVALID_ARGUMENT.getType()))
+            .body("message", is("Invalid JSON body"));
+    }
+
+    @Test
+    void moveAllMailsShouldMoveMailsFromSourceToTarget() throws Exception {
+        MailRepository sourceRepo = mailRepositoryStore.create(URL_MY_REPO);
+        MailRepository targetRepo = mailRepositoryStore.create(MailRepositoryUrl.from("memory://myTargetRepo"));
+
+        sourceRepo.store(FakeMail.builder().name(NAME_1).build());
+        sourceRepo.store(FakeMail.builder().name(NAME_2).build());
+
+        given()
+            .body("{\"mailRepository\": \"myTargetRepo\"}")
+            .contentType(io.restassured.http.ContentType.JSON)
+        .when()
+            .patch(PATH_ESCAPED_MY_REPO + "/mails")
+        .then()
+            .statusCode(HttpStatus.NO_CONTENT_204);
+
+        assertThat(sourceRepo.list()).toIterable().isEmpty();
+        assertThat(targetRepo.list()).toIterable()
+            .containsExactlyInAnyOrder(new MailKey(NAME_1), new MailKey(NAME_2));
+    }
+
+    @Test
+    void moveAllMailsShouldReturn204WhenSourceRepositoryIsEmpty() throws Exception {
+        mailRepositoryStore.create(URL_MY_REPO);
+        mailRepositoryStore.create(MailRepositoryUrl.from("memory://myTargetRepo"));
+
+        given()
+            .body("{\"mailRepository\": \"myTargetRepo\"}")
+            .contentType(io.restassured.http.ContentType.JSON)
+        .when()
+            .patch(PATH_ESCAPED_MY_REPO + "/mails")
+        .then()
+            .statusCode(HttpStatus.NO_CONTENT_204);
+    }
+
+    @Test
+    void moveOneMailShouldReturn404WhenSourceRepositoryDoesNotExist() {
+        given()
+            .body("{\"mailRepository\": \"myTargetRepo\"}")
+            .contentType(io.restassured.http.ContentType.JSON)
+        .when()
+            .patch(PATH_ESCAPED_MY_REPO + "/mails/" + NAME_1)
+        .then()
+            .statusCode(HttpStatus.NOT_FOUND_404)
+            .body("statusCode", is(404))
+            .body("type", is(ErrorResponder.ErrorType.NOT_FOUND.getType()));
+    }
+
+    @Test
+    void moveOneMailShouldReturn400WhenTargetRepositoryDoesNotExist() throws Exception {
+        MailRepository sourceRepo = mailRepositoryStore.create(URL_MY_REPO);
+        sourceRepo.store(FakeMail.builder().name(NAME_1).build());
+
+        given()
+            .body("{\"mailRepository\": \"nonExistingTarget\"}")
+            .contentType(io.restassured.http.ContentType.JSON)
+        .when()
+            .patch(PATH_ESCAPED_MY_REPO + "/mails/" + NAME_1)
+        .then()
+            .statusCode(HttpStatus.BAD_REQUEST_400)
+            .body("statusCode", is(400))
+            .body("type", is(ErrorResponder.ErrorType.INVALID_ARGUMENT.getType()))
+            .body("message", is("The target repository 'nonExistingTarget' does not exist"));
+    }
+
+    @Test
+    void moveOneMailShouldReturn400WhenMailRepositoryFieldIsMissing() throws Exception {
+        MailRepository sourceRepo = mailRepositoryStore.create(URL_MY_REPO);
+        sourceRepo.store(FakeMail.builder().name(NAME_1).build());
+
+        given()
+            .body("{}")
+            .contentType(io.restassured.http.ContentType.JSON)
+        .when()
+            .patch(PATH_ESCAPED_MY_REPO + "/mails/" + NAME_1)
+        .then()
+            .statusCode(HttpStatus.BAD_REQUEST_400)
+            .body("statusCode", is(400))
+            .body("type", is(ErrorResponder.ErrorType.INVALID_ARGUMENT.getType()))
+            .body("message", is("'mailRepository' field is mandatory in request body"));
+    }
+
+    @Test
+    void moveOneMailShouldReturn400WhenBodyIsInvalidJson() throws Exception {
+        MailRepository sourceRepo = mailRepositoryStore.create(URL_MY_REPO);
+        sourceRepo.store(FakeMail.builder().name(NAME_1).build());
+
+        given()
+            .body("not-json")
+            .contentType(io.restassured.http.ContentType.JSON)
+        .when()
+            .patch(PATH_ESCAPED_MY_REPO + "/mails/" + NAME_1)
+        .then()
+            .statusCode(HttpStatus.BAD_REQUEST_400)
+            .body("statusCode", is(400))
+            .body("type", is(ErrorResponder.ErrorType.INVALID_ARGUMENT.getType()))
+            .body("message", is("Invalid JSON body"));
+    }
+
+    @Test
+    void moveOneMailShouldMoveMailFromSourceToTarget() throws Exception {
+        MailRepository sourceRepo = mailRepositoryStore.create(URL_MY_REPO);
+        MailRepository targetRepo = mailRepositoryStore.create(MailRepositoryUrl.from("memory://myTargetRepo"));
+
+        sourceRepo.store(FakeMail.builder().name(NAME_1).build());
+        sourceRepo.store(FakeMail.builder().name(NAME_2).build());
+
+        given()
+            .body("{\"mailRepository\": \"myTargetRepo\"}")
+            .contentType(io.restassured.http.ContentType.JSON)
+        .when()
+            .patch(PATH_ESCAPED_MY_REPO + "/mails/" + NAME_1)
+        .then()
+            .statusCode(HttpStatus.NO_CONTENT_204);
+
+        assertThat(sourceRepo.list()).toIterable()
+            .containsOnly(new MailKey(NAME_2));
+        assertThat(targetRepo.list()).toIterable()
+            .containsOnly(new MailKey(NAME_1));
+    }
+
+    @Test
+    void moveOneMailShouldReturn204WhenMailKeyDoesNotExist() throws Exception {
+        MailRepository sourceRepo = mailRepositoryStore.create(URL_MY_REPO);
+        mailRepositoryStore.create(MailRepositoryUrl.from("memory://myTargetRepo"));
+
+        sourceRepo.store(FakeMail.builder().name(NAME_1).build());
+
+        given()
+            .body("{\"mailRepository\": \"myTargetRepo\"}")
+            .contentType(io.restassured.http.ContentType.JSON)
+        .when()
+            .patch(PATH_ESCAPED_MY_REPO + "/mails/unknown")
+        .then()
+            .statusCode(HttpStatus.NO_CONTENT_204);
+
+        assertThat(sourceRepo.list()).toIterable()
+            .containsOnly(new MailKey(NAME_1));
+    }
+
     private void createMailRepositoryStore() throws Exception {
         MemoryMailRepositoryUrlStore urlStore = new MemoryMailRepositoryUrlStore();
         MailRepositoryStoreConfiguration configuration = MailRepositoryStoreConfiguration.forItems(
@@ -2022,5 +2573,11 @@ class MailRepositoriesRoutesTest {
         mailRepositoryStore = new MemoryMailRepositoryStore(urlStore, new SimpleMailRepositoryLoader(), configuration);
 
         mailRepositoryStore.init();
+    }
+
+    private Date getDateBeforeCurrentTime(int dayInterval) {
+        Calendar calendar = Calendar.getInstance();
+        calendar.add(Calendar.DAY_OF_MONTH, -dayInterval);
+        return calendar.getTime();
     }
 }

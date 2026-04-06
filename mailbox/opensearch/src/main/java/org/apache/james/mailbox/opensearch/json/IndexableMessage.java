@@ -27,17 +27,24 @@ import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import org.apache.james.mailbox.ModSeq;
 import org.apache.james.mailbox.extractor.TextExtractor;
-import org.apache.james.mailbox.model.MessageAttachmentMetadata;
 import org.apache.james.mailbox.opensearch.IndexAttachments;
 import org.apache.james.mailbox.opensearch.IndexBody;
 import org.apache.james.mailbox.opensearch.IndexHeaders;
 import org.apache.james.mailbox.store.mail.model.MailboxMessage;
 import org.apache.james.mailbox.store.search.SearchUtil;
+import org.apache.james.mailbox.store.search.mime.EMailers;
+import org.apache.james.mailbox.store.search.mime.HeaderCollection;
+import org.apache.james.mailbox.store.search.mime.MimePart;
+import org.apache.james.mailbox.store.search.mime.MimePartParser;
+import org.apache.james.mailbox.store.search.mime.Subjects;
 import org.apache.james.mime4j.MimeException;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
@@ -64,6 +71,7 @@ public class IndexableMessage {
         private MailboxMessage message;
         private TextExtractor textExtractor;
         private ZoneId zoneId;
+        private String user = null;
 
         private Builder() {
         }
@@ -112,6 +120,13 @@ public class IndexableMessage {
             return this;
         }
 
+        public Builder user(MessageToOpenSearchJson.IndexUser indexUser, String user) {
+            if (indexUser == MessageToOpenSearchJson.IndexUser.YES) {
+                this.user = user;
+            }
+            return this;
+        }
+
         private Mono<IndexableMessage> instantiateIndexedMessage() throws IOException, MimeException {
             String messageId = SearchUtil.getSerializedMessageIdIfSupportedByUnderlyingStorageOrNull(message);
             String threadId = SearchUtil.getSerializedThreadIdIfSupportedByUnderlyingStorageOrNull(message);
@@ -120,17 +135,18 @@ public class IndexableMessage {
                 .asMimePart(textExtractor)
                 .map(parsingResult -> {
 
-                    Optional<String> bodyText = parsingResult.locateFirstTextBody();
+                    Optional<String> bodyText = parsingResult.locateFirstTextBody().map(SearchUtil::removeGreaterThanCharactersAtBeginningOfLine);
                     Optional<String> bodyHtml = parsingResult.locateFirstHtmlBody();
 
-                    boolean hasAttachment = MessageAttachmentMetadata.hasNonInlinedAttachment(message.getAttachments());
                     List<MimePart> attachments = setFlattenedAttachments(parsingResult, indexAttachments);
+                    boolean hasAttachment = attachments.stream()
+                        .anyMatch(mimePart -> !mimePart.isInlinedWithCid() && mimePart.getContentDisposition().isPresent());
 
                     HeaderCollection headerCollection = parsingResult.getHeaderCollection();
                     ZonedDateTime internalDate = getSanitizedInternalDate(message, zoneId);
 
                     List<HeaderCollection.Header> headers = headerCollection.getHeaders();
-                    Subjects subjects = Subjects.from(headerCollection.getSubjectSet());
+                    Subjects subjects = Subjects.from(limitSubjectsLength(headerCollection.getSubjectSet()));
                     EMailers from = EMailers.from(headerCollection.getFromAddressSet());
                     EMailers to = EMailers.from(headerCollection.getToAddressSet());
                     EMailers cc = EMailers.from(headerCollection.getCcAddressSet());
@@ -175,6 +191,7 @@ public class IndexableMessage {
                         mediaType,
                         messageId,
                         threadId,
+                        user,
                         modSeq,
                         sentDate,
                         saveDate,
@@ -183,8 +200,7 @@ public class IndexableMessage {
                         subType,
                         to,
                         uid,
-                        userFlags,
-                        mimeMessageID);
+                        userFlags, mimeMessageID);
                 });
         }
 
@@ -211,21 +227,27 @@ public class IndexableMessage {
                 return ImmutableList.of();
             }
         }
+
+        private Set<String> limitSubjectsLength(Set<String> subjects) {
+            return subjects.stream()
+                .map(SearchUtil::truncateSubjectField)
+                .collect(Collectors.toSet());
+        }
     }
 
     public static Builder builder() {
         return new Builder();
     }
 
-    private final List<MimePart> attachments;
-    private final EMailers bcc;
+    private final List<MimePartDto> attachments;
+    private final EMailersDto bcc;
     private final Optional<String> bodyHtml;
     private final Optional<String> bodyText;
-    private final EMailers cc;
+    private final EMailersDto cc;
     private final String date;
-    private final EMailers from;
+    private final EMailersDto from;
     private final boolean hasAttachment;
-    private final List<HeaderCollection.Header> headers;
+    private final List<HeaderDto> headers;
     private final boolean isAnswered;
     private final boolean isDeleted;
     private final boolean isDraft;
@@ -236,13 +258,14 @@ public class IndexableMessage {
     private final String mediaType;
     private final String messageId;
     private final String threadId;
+    private final String user;
     private final long modSeq;
     private final String sentDate;
     private final Optional<String> saveDate;
     private final long size;
-    private final Subjects subjects;
+    private final SubjectsDto subjects;
     private final String subType;
-    private final EMailers to;
+    private final EMailersDto to;
     private final long uid;
     private final String[] userFlags;
     private final Optional<String> mimeMessageID;
@@ -264,7 +287,7 @@ public class IndexableMessage {
                              boolean isUnRead,
                              String mailboxId,
                              String mediaType, String messageId,
-                             String threadId,
+                             String threadId, String user,
                              ModSeq modSeq,
                              String sentDate,
                              Optional<String> saveDate, long size,
@@ -274,15 +297,19 @@ public class IndexableMessage {
                              long uid,
                              String[] userFlags,
                              Optional<String> mimeMessageID) {
-        this.attachments = attachments;
-        this.bcc = bcc;
+        this.attachments = attachments.stream()
+            .map(MimePartDto::from)
+            .toList();
+        this.bcc = EMailersDto.from(bcc);
         this.bodyHtml = bodyHtml;
         this.bodyText = bodyText;
-        this.cc = cc;
+        this.cc = EMailersDto.from(cc);
         this.date = date;
-        this.from = from;
+        this.from = EMailersDto.from(from);
         this.hasAttachment = hasAttachment;
-        this.headers = headers;
+        this.headers = headers.stream()
+            .map(HeaderDto::from)
+            .collect(Collectors.toList());
         this.isAnswered = isAnswered;
         this.isDeleted = isDeleted;
         this.isDraft = isDraft;
@@ -293,25 +320,26 @@ public class IndexableMessage {
         this.mediaType = mediaType;
         this.messageId = messageId;
         this.threadId = threadId;
+        this.user = user;
         this.modSeq = modSeq.asLong();
         this.sentDate = sentDate;
         this.saveDate = saveDate;
         this.size = size;
-        this.subjects = subjects;
+        this.subjects = SubjectsDto.from(subjects.getSubjects());
         this.subType = subType;
-        this.to = to;
+        this.to = EMailersDto.from(to);
         this.uid = uid;
         this.userFlags = userFlags;
         this.mimeMessageID = mimeMessageID;
     }
 
     @JsonProperty(JsonMessageConstants.ATTACHMENTS)
-    public List<MimePart> getAttachments() {
+    public List<MimePartDto> getAttachments() {
         return attachments;
     }
 
     @JsonProperty(JsonMessageConstants.BCC)
-    public EMailers getBcc() {
+    public EMailersDto getBcc() {
         return bcc;
     }
 
@@ -326,7 +354,7 @@ public class IndexableMessage {
     }
 
     @JsonProperty(JsonMessageConstants.CC)
-    public EMailers getCc() {
+    public EMailersDto getCc() {
         return cc;
     }
 
@@ -336,7 +364,7 @@ public class IndexableMessage {
     }
 
     @JsonProperty(JsonMessageConstants.FROM)
-    public EMailers getFrom() {
+    public EMailersDto getFrom() {
         return from;
     }
 
@@ -346,7 +374,7 @@ public class IndexableMessage {
     }
 
     @JsonProperty(JsonMessageConstants.HEADERS)
-    public List<HeaderCollection.Header> getHeaders() {
+    public List<HeaderDto> getHeaders() {
         return headers;
     }
 
@@ -391,7 +419,7 @@ public class IndexableMessage {
     }
 
     @JsonProperty(JsonMessageConstants.SUBJECT)
-    public Subjects getSubjects() {
+    public SubjectsDto getSubjects() {
         return subjects;
     }
 
@@ -401,7 +429,7 @@ public class IndexableMessage {
     }
 
     @JsonProperty(JsonMessageConstants.TO)
-    public EMailers getTo() {
+    public EMailersDto getTo() {
         return to;
     }
 
@@ -443,6 +471,12 @@ public class IndexableMessage {
     @JsonProperty(JsonMessageConstants.IS_UNREAD)
     public boolean isUnRead() {
         return isUnRead;
+    }
+
+    @JsonProperty(JsonMessageConstants.USER)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public String getUser() {
+        return user;
     }
 
     @JsonProperty(JsonMessageConstants.MIME_MESSAGE_ID)

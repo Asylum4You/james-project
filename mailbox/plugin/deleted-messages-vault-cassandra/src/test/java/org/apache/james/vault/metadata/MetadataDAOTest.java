@@ -21,7 +21,7 @@ package org.apache.james.vault.metadata;
 
 import static org.apache.james.vault.DeletedMessageFixture.MESSAGE_ID;
 import static org.apache.james.vault.DeletedMessageFixture.USERNAME;
-import static org.apache.james.vault.metadata.DeletedMessageMetadataModule.MODULE;
+import static org.apache.james.vault.metadata.DeletedMessageMetadataDataDefinition.MODULE;
 import static org.apache.james.vault.metadata.DeletedMessageVaultMetadataFixture.BUCKET_NAME;
 import static org.apache.james.vault.metadata.DeletedMessageVaultMetadataFixture.DELETED_MESSAGE;
 import static org.apache.james.vault.metadata.DeletedMessageVaultMetadataFixture.DELETED_MESSAGE_2;
@@ -31,7 +31,7 @@ import java.util.stream.Stream;
 
 import org.apache.james.backends.cassandra.CassandraCluster;
 import org.apache.james.backends.cassandra.CassandraClusterExtension;
-import org.apache.james.blob.api.HashBlobId;
+import org.apache.james.blob.api.PlainBlobId;
 import org.apache.james.mailbox.inmemory.InMemoryId;
 import org.apache.james.mailbox.inmemory.InMemoryMessageId;
 import org.apache.james.mailbox.model.MessageId;
@@ -49,7 +49,7 @@ class MetadataDAOTest {
     @BeforeEach
     void setUp(CassandraCluster cassandra) {
         DeletedMessageWithStorageInformationConverter dtoConverter = new DeletedMessageWithStorageInformationConverter(
-            new HashBlobId.Factory(), new InMemoryMessageId.Factory(), new InMemoryId.Factory());
+            new PlainBlobId.Factory(), new InMemoryMessageId.Factory(), new InMemoryId.Factory());
 
         testee = new MetadataDAO(cassandra.getConf(), new InMemoryMessageId.Factory(),
             new MetadataSerializer(dtoConverter));

@@ -29,6 +29,7 @@ import static org.mockito.Mockito.mock;
 import org.apache.commons.configuration2.HierarchicalConfiguration;
 import org.apache.commons.configuration2.tree.ImmutableNode;
 import org.apache.james.domainlist.api.DomainList;
+import org.apache.james.metrics.api.NoopGaugeRegistry;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -83,9 +84,10 @@ class ReadOnlyUsersLDAPRepositoryInvalidDnTest {
         assertThat(ldapRepository.countUsers()).isEqualTo(0);
     }
 
-    private ReadOnlyUsersLDAPRepository startUsersRepository(HierarchicalConfiguration<ImmutableNode> ldapRepositoryConfiguration) throws Exception {
-        ReadOnlyUsersLDAPRepository ldapRepository = new ReadOnlyUsersLDAPRepository(domainList);
-        ldapRepository.configure(ldapRepositoryConfiguration);
+    private ReadOnlyUsersLDAPRepository startUsersRepository(HierarchicalConfiguration<ImmutableNode> configuration) throws Exception {
+        ReadOnlyUsersLDAPRepository ldapRepository = new ReadOnlyUsersLDAPRepository(domainList, new NoopGaugeRegistry(),
+            LdapRepositoryConfiguration.from(configuration));
+        ldapRepository.configure(configuration);
         ldapRepository.init();
         return ldapRepository;
     }

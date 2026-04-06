@@ -129,39 +129,68 @@ public class Rule {
 
     public static class Condition {
 
-        public enum Field {
-            FROM("from"),
-            TO("to"),
-            CC("cc"),
-            SUBJECT("subject"),
-            RECIPIENT("recipient");
-            
-            public static Optional<Field> find(String fieldName) {
-                return Arrays.stream(values())
-                        .filter(value -> value.fieldName.equalsIgnoreCase(fieldName))
-                        .findAny();
+        public interface Field {
+            static Optional<Field> find(String fieldName) {
+                return FixedField.find(fieldName)
+                    .or(() -> CustomHeaderField.find(fieldName));
             }
             
-            public static Field of(String fieldName) {
+            static Field of(String fieldName) {
                 return find(fieldName).orElseThrow(() -> new IllegalArgumentException("'" + fieldName + "' is not a valid field name"));
             }
             
-            private final String fieldName;
-            
-            Field(String fieldName) {
-                this.fieldName = fieldName;
+            String asString();
+        }
+
+        public record FixedField(String fieldName) implements Field {
+            public static Field FROM = new FixedField("from");
+            public static Field TO = new FixedField("to");
+            public static Field CC = new FixedField("cc");
+            public static Field SUBJECT = new FixedField("subject");
+            public static Field RECIPIENT = new FixedField("recipient");
+            public static Field SENT_DATE = new FixedField("sentDate");
+            public static Field SAVED_DATE = new FixedField("savedDate");
+            public static Field INTERNAL_DATE = new FixedField("internalDate");
+            public static Field FLAG = new FixedField("flag");
+            public static final ImmutableList<Field> VALUES = ImmutableList.of(FROM, TO, CC, SUBJECT, RECIPIENT, SENT_DATE, SAVED_DATE, INTERNAL_DATE, FLAG);
+
+            public static Optional<Field> find(String fieldName) {
+                return VALUES.stream()
+                    .filter(value -> value.asString().equalsIgnoreCase(fieldName))
+                    .findAny();
             }
-            
+
             public String asString() {
                 return fieldName;
+            }
+        }
+
+        public record CustomHeaderField(String headerName) implements Field {
+            public static final String PREFIX = "header:";
+
+            public static Optional<Field> find(String fieldName) {
+                if (fieldName.startsWith(PREFIX)) {
+                    return Optional.of(new CustomHeaderField(fieldName.substring(PREFIX.length())));
+                }
+                return Optional.empty();
+            }
+
+            public String asString() {
+                return PREFIX + headerName;
             }
         }
         
         public enum Comparator {
             CONTAINS("contains"),
+            IS_OLDER_THAN("isOlderThan"),
+            IS_NEWER_THAN("isNewerThan"),
             NOT_CONTAINS("not-contains"),
             EXACTLY_EQUALS("exactly-equals"),
-            NOT_EXACTLY_EQUALS("not-exactly-equals");
+            NOT_EXACTLY_EQUALS("not-exactly-equals"),
+            START_WITH("start-with"),
+            IS_SET("isSet"),
+            IS_UNSET("isUnset"),
+            ANY("any");
             
             public static Optional<Comparator> find(String comparatorName) {
                 return Arrays.stream(values())
@@ -351,6 +380,39 @@ public class Rule {
             }
         }
 
+        public static class MoveTo {
+            private final String mailboxName;
+
+            public MoveTo(String mailboxName) {
+                this.mailboxName = mailboxName;
+            }
+
+            public String getMailboxName() {
+                return mailboxName;
+            }
+
+            @Override
+            public final boolean equals(Object o) {
+                if (o instanceof MoveTo) {
+                    MoveTo moveTo = (MoveTo) o;
+                    return Objects.equals(mailboxName, moveTo.mailboxName);
+                }
+                return false;
+            }
+
+            @Override
+            public final int hashCode() {
+                return Objects.hash(mailboxName);
+            }
+
+            @Override
+            public String toString() {
+                return MoreObjects.toStringHelper(this)
+                    .add("mailboxName", mailboxName)
+                    .toString();
+            }
+        }
+
         public static class Builder {
             private AppendInMailboxes appendInMailboxes;
             private boolean markAsSeen;
@@ -358,6 +420,7 @@ public class Rule {
             private boolean reject;
             private List<String> withKeywords;
             private Optional<Forward> forward;
+            private Optional<MoveTo> moveTo;
 
             public Builder setAppendInMailboxes(AppendInMailboxes appendInMailboxes) {
                 this.appendInMailboxes = appendInMailboxes;
@@ -394,6 +457,11 @@ public class Rule {
                 return this;
             }
 
+            public Builder setMoveTo(Optional<MoveTo> moveTo) {
+                this.moveTo = moveTo;
+                return this;
+            }
+
             public Action build() {
                 appendInMailboxes = Optional.ofNullable(appendInMailboxes)
                     .orElse(Rule.Action.AppendInMailboxes.withMailboxIds(ImmutableList.of()));
@@ -401,8 +469,10 @@ public class Rule {
                     .orElse(ImmutableList.of());
                 forward = Optional.ofNullable(forward)
                     .orElse(Optional.empty());
+                moveTo = Optional.ofNullable(moveTo)
+                    .orElse(Optional.empty());
 
-                return new Action(appendInMailboxes, markAsSeen, markAsImportant, reject, withKeywords, forward);
+                return new Action(appendInMailboxes, markAsSeen, markAsImportant, reject, withKeywords, forward, moveTo);
             }
         }
 
@@ -411,16 +481,18 @@ public class Rule {
         }
 
         public static Action of(AppendInMailboxes appendInMailboxes) {
-            return new Action(appendInMailboxes, false, false, false, ImmutableList.of(), Optional.empty());
+            return new Action(appendInMailboxes, false, false, false, ImmutableList.of(), Optional.empty(),
+                Optional.empty());
         }
 
         public static Action of(AppendInMailboxes appendInMailboxes, boolean markAsSeen, boolean markAsImportant, boolean reject, List<String> withKeywords) {
-            return new Action(appendInMailboxes, markAsSeen, markAsImportant, reject, withKeywords, Optional.empty());
+            return new Action(appendInMailboxes, markAsSeen, markAsImportant, reject, withKeywords, Optional.empty(), Optional.empty());
         }
 
         public static Action of(AppendInMailboxes appendInMailboxes, boolean markAsSeen, boolean markAsImportant,
-                                boolean reject, List<String> withKeywords, Optional<Forward> forward) {
-            return new Action(appendInMailboxes, markAsSeen, markAsImportant, reject, withKeywords, forward);
+                                boolean reject, List<String> withKeywords, Optional<Forward> forward,
+                                Optional<MoveTo> moveTo) {
+            return new Action(appendInMailboxes, markAsSeen, markAsImportant, reject, withKeywords, forward, moveTo);
         }
 
         private final AppendInMailboxes appendInMailboxes;
@@ -429,15 +501,18 @@ public class Rule {
         private final boolean reject;
         private final List<String> withKeywords;
         private final Optional<Forward> forward;
+        private final Optional<MoveTo> moveTo;
 
         private Action(AppendInMailboxes appendInMailboxes, boolean markAsSeen, boolean markAsImportant,
-                       boolean reject, List<String> withKeywords, Optional<Forward> forward) {
+                       boolean reject, List<String> withKeywords, Optional<Forward> forward,
+                       Optional<MoveTo> moveTo) {
             this.appendInMailboxes = appendInMailboxes;
             this.markAsSeen = markAsSeen;
             this.markAsImportant = markAsImportant;
             this.reject = reject;
             this.withKeywords = withKeywords;
             this.forward = forward;
+            this.moveTo = moveTo;
         }
         
         public AppendInMailboxes getAppendInMailboxes() {
@@ -464,6 +539,10 @@ public class Rule {
             return forward;
         }
 
+        public Optional<MoveTo> getMoveTo() {
+            return moveTo;
+        }
+
         @Override
         public final boolean equals(Object o) {
             if (o instanceof Action) {
@@ -473,14 +552,15 @@ public class Rule {
                     && Objects.equals(markAsImportant, action.markAsImportant)
                     && Objects.equals(reject, action.reject)
                     && Objects.equals(withKeywords, action.withKeywords)
-                    && Objects.equals(forward, action.forward);
+                    && Objects.equals(forward, action.forward)
+                    && Objects.equals(moveTo, action.moveTo);
             }
             return false;
         }
 
         @Override
         public final int hashCode() {
-            return Objects.hash(appendInMailboxes, markAsImportant, markAsSeen, reject, withKeywords, forward);
+            return Objects.hash(appendInMailboxes, markAsImportant, markAsSeen, reject, withKeywords, forward, moveTo);
         }
 
         @Override
@@ -492,6 +572,7 @@ public class Rule {
                 .add("reject", reject)
                 .add("withKeywords", withKeywords)
                 .add("forward", forward)
+                .add("moveTo", moveTo)
                 .toString();
         }
     }
@@ -515,6 +596,11 @@ public class Rule {
 
         public Builder conditionGroup(Condition condition) {
             this.conditionGroup = Rule.ConditionGroup.of(condition);
+            return this;
+        }
+
+        public Builder conditionGroup(ConditionCombiner combiner, Condition... condition) {
+            this.conditionGroup = Rule.ConditionGroup.of(combiner, condition);
             return this;
         }
 

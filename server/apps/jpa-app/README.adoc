@@ -1,6 +1,6 @@
 = Guice-JPA Server How-to
 
-This server target single node James deployments. By default, the derby database is used.
+This server target single node James deployments. By default, the H2 database is used.
 
 == Requirements
 
@@ -25,7 +25,7 @@ Once everything is set up, you just have to run the jar with:
 
 [source]
 ----
-$ java -javaagent:james-server-jpa-app.lib/openjpa-3.1.2.jar \
+$ java -javaagent:james-server-jpa-app.lib/openjpa-4.1.1.jar \
   -Dworking.directory=. \
   -Djdk.tls.ephemeralDHKeySize=2048 \
   -Dlogback.configurationFile=conf/logback.xml \
@@ -109,7 +109,7 @@ This can be done with the following command:
 
 ....
 java \
-   -javaagent:james-server-jpa-app.lib/openjpa-3.2.0.jar \
+   -javaagent:james-server-jpa-app.lib/openjpa-4.1.1.jar \
    -Dworking.directory=. \
    -Djdk.tls.ephemeralDHKeySize=2048 \
    -Dlogback.configurationFile=conf/logback.xml \
@@ -124,7 +124,7 @@ With `jdbc-driver.jar` being the JAR file of your driver, placed in the current 
 In `james-database.properties`, one can specify any JDBC driver on the class path.
 
 With docker, such drivers can be added to the classpath by placing the driver JAR in a volume
-and mounting it within `/root/libs` directory.
+and mounting it at `/root/libs/james-jdbc-driver.jar`.
 
 We do ship a [docker-compose](https://github.com/apache/james-project/blob/master/server/apps/jpa-smtp-app/docker-compose.yml)
 file demonstrating James JPA app usage with MariaDB. In order to run it:

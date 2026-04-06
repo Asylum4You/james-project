@@ -23,7 +23,6 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import org.apache.commons.configuration2.ex.ConfigurationException;
-import org.apache.james.jmap.JMAPModule;
 import org.apache.james.jmap.mailet.filter.JMAPFiltering;
 import org.apache.james.mailetcontainer.impl.MatcherMailetPair;
 import org.apache.james.modules.server.MailetContainerModule;
@@ -186,6 +185,48 @@ class MailetPreconditionTest {
                 .mailetName(BCC)
                 .mailetContext(MAILET_CONTEXT)
                 .setProperty("name", BCC)
+                .build());
+
+            ImmutableMultimap<String, MatcherMailetPair> pairs = ImmutableMultimap.of("transport", new MatcherMailetPair(new All(), removeMimeHeader));
+            assertThatCode(() -> MailetContainerModule.BCC_Check.check(pairs))
+                .doesNotThrowAnyException();
+        }
+
+        @Test
+        void bccMailetCheckShouldNotThrowOnValidPairWithOtherNames() throws Exception {
+            RemoveMimeHeader removeMimeHeader = new RemoveMimeHeader();
+            removeMimeHeader.init(FakeMailetConfig.builder()
+                .mailetName(BCC)
+                .mailetContext(MAILET_CONTEXT)
+                .setProperty("name", "header1,bcc,header2")
+                .build());
+
+            ImmutableMultimap<String, MatcherMailetPair> pairs = ImmutableMultimap.of("transport", new MatcherMailetPair(new All(), removeMimeHeader));
+            assertThatCode(() -> MailetContainerModule.BCC_Check.check(pairs))
+                .doesNotThrowAnyException();
+        }
+
+        @Test
+        void bccMailetCheckShouldThrowOnInvalidNameWithPairIncluded() throws Exception {
+            RemoveMimeHeader removeMimeHeader = new RemoveMimeHeader();
+            removeMimeHeader.init(FakeMailetConfig.builder()
+                .mailetName(BCC)
+                .mailetContext(MAILET_CONTEXT)
+                .setProperty("name", "x-bcc-bug")
+                .build());
+
+            ImmutableMultimap<String, MatcherMailetPair> pairs = ImmutableMultimap.of("transport", new MatcherMailetPair(new All(), removeMimeHeader));
+            assertThatThrownBy(() -> MailetContainerModule.BCC_Check.check(pairs))
+                .isInstanceOf(ConfigurationException.class);
+        }
+
+        @Test
+        void bccMailetCheckShouldNotThrowOnValidInsensitivePair() throws Exception {
+            RemoveMimeHeader removeMimeHeader = new RemoveMimeHeader();
+            removeMimeHeader.init(FakeMailetConfig.builder()
+                .mailetName(BCC)
+                .mailetContext(MAILET_CONTEXT)
+                .setProperty("name", "BcC")
                 .build());
 
             ImmutableMultimap<String, MatcherMailetPair> pairs = ImmutableMultimap.of("transport", new MatcherMailetPair(new All(), removeMimeHeader));

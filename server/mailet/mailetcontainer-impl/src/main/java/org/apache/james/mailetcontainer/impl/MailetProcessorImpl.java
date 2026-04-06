@@ -114,16 +114,19 @@ public class MailetProcessorImpl extends AbstractStateMailetProcessor {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(MailetProcessorImpl.class);
 
+    private final String name;
     private final MetricFactory metricFactory;
     private List<MatcherMailetPair> pairs;
     private Map<MatcherSplitter, ProcessorImpl> pairsToBeProcessed;
 
-    public MailetProcessorImpl(MetricFactory metricFactory) {
+    public MailetProcessorImpl(String name, MetricFactory metricFactory) {
+        this.name = name;
         this.metricFactory = metricFactory;
     }
 
     @Override
     public void service(Mail mail) {
+        LOGGER.debug("Executing {} on {}", mail.getName(), name);
         ProcessingStep lastStep = pairsToBeProcessed.entrySet().stream()
             .reduce(ProcessingStep.initial(mail), (processingStep, pair) -> {
                 if (processingStep.test()) {
@@ -164,6 +167,7 @@ public class MailetProcessorImpl extends AbstractStateMailetProcessor {
         afterMatching.stream()
             .filter(mail -> !mail.getState().equals(getState()))
             .filter(mail -> !mail.getState().equals(Mail.GHOST))
+            .peek(mail -> LOGGER.debug("Switching processor to {} for {} after {}", mail.getState(), mail.getName(), pair.getValue().mailetName()))
             .forEach(Throwing.consumer(this::toProcessor).sneakyThrow());
 
         return step.nextStepBuilder()
@@ -198,7 +202,7 @@ public class MailetProcessorImpl extends AbstractStateMailetProcessor {
             this.pairs = pairs;
             this.pairsToBeProcessed = pairs.stream()
                 .map(pair -> Pair.of(new MatcherSplitter(metricFactory, this, pair),
-                    new ProcessorImpl(metricFactory, this, pair.getMailet())))
+                    new ProcessorImpl(metricFactory, pair.getMailet(), pair.processingErrorConfig(), this.getListeners())))
                 .collect(ImmutableMap.toImmutableMap(Pair::getKey, Pair::getValue));
         } catch (Exception e) {
             throw new MessagingException("Unable to setup routing for MailetMatcherPairs", e);

@@ -24,7 +24,7 @@
     <parent>
         <groupId>org.apache.james</groupId>
         <artifactId>james-server</artifactId>
-        <version>3.9.0-SNAPSHOT</version>
+        <version>3.10.0-SNAPSHOT</version>
         <relativePath>../../pom.xml</relativePath>
     </parent>
 
@@ -35,6 +35,7 @@
     <modules>
         <module>distributed-webadmin-integration-test</module>
         <module>memory-webadmin-integration-test</module>
+        <module>postgres-webadmin-integration-test</module>
         <module>webadmin-integration-test-common</module>
     </modules>
 </project>

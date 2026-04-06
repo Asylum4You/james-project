@@ -34,7 +34,7 @@
       <p>Consult <a href="https://github.com/apache/james-project/tree/master/server/apps/spring-app/src/main/resources/mailrepositorystore.xml">mailrepositorystore.xml</a> in GIT to get some examples and hints.</p>
 
       <p>Mail Repository Stores are distinguished by where they store data.  There are several types of
-        storage: File, Database, Cassandra, DBFile, and MBox.</p>
+        storage: File, Database, Cassandra and DBFile.</p>
         
     </subsection>
         
@@ -89,6 +89,12 @@
 
     <subsection name="CassandraMailRepository">
       <p>Cassandra Guice wiring allows to use the <code>cassandra://</code> protocol for your ToRepository mailets.</p>
+    </subsection>
+
+    <subsection name="PostgresMailRepository">
+      <p>Postgres Guice wiring allows to use the <code>postgres://</code> protocol for your ToRepository mailets.</p>
+
+      <p>This repository stores mail metadata in the Postgres database while the headers and body to the blob store.</p>
     </subsection>
   </section>
 

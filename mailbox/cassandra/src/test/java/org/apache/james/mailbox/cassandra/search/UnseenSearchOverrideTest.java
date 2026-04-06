@@ -20,19 +20,20 @@
 package org.apache.james.mailbox.cassandra.search;
 
 import static jakarta.mail.Flags.Flag.SEEN;
+import static org.apache.james.mailbox.model.SearchQuery.DEFAULT_SORTS;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import org.apache.james.backends.cassandra.CassandraCluster;
 import org.apache.james.backends.cassandra.CassandraClusterExtension;
-import org.apache.james.backends.cassandra.components.CassandraModule;
-import org.apache.james.backends.cassandra.versions.CassandraSchemaVersionModule;
+import org.apache.james.backends.cassandra.components.CassandraDataDefinition;
+import org.apache.james.backends.cassandra.versions.CassandraSchemaVersionDataDefinition;
 import org.apache.james.core.Username;
 import org.apache.james.mailbox.MailboxSession;
 import org.apache.james.mailbox.MailboxSessionUtil;
 import org.apache.james.mailbox.MessageUid;
 import org.apache.james.mailbox.cassandra.ids.CassandraId;
 import org.apache.james.mailbox.cassandra.mail.CassandraFirstUnseenDAO;
-import org.apache.james.mailbox.cassandra.modules.CassandraFirstUnseenModule;
+import org.apache.james.mailbox.cassandra.modules.CassandraFirstUnseenDataDefinition;
 import org.apache.james.mailbox.model.Mailbox;
 import org.apache.james.mailbox.model.MailboxPath;
 import org.apache.james.mailbox.model.SearchQuery;
@@ -44,9 +45,9 @@ import org.junit.jupiter.api.extension.RegisterExtension;
 class UnseenSearchOverrideTest {
     private static final MailboxSession MAILBOX_SESSION = MailboxSessionUtil.create(Username.of("benwa"));
     private static final Mailbox MAILBOX = new Mailbox(MailboxPath.inbox(MAILBOX_SESSION), UidValidity.of(12), CassandraId.timeBased());
-    private static final CassandraModule MODULE = CassandraModule.aggregateModules(
-        CassandraFirstUnseenModule.MODULE,
-        CassandraSchemaVersionModule.MODULE);
+    private static final CassandraDataDefinition MODULE = CassandraDataDefinition.aggregateModules(
+        CassandraFirstUnseenDataDefinition.MODULE,
+        CassandraSchemaVersionDataDefinition.MODULE);
 
     @RegisterExtension
     static CassandraClusterExtension cassandraCluster = new CassandraClusterExtension(MODULE);
@@ -65,6 +66,7 @@ class UnseenSearchOverrideTest {
         assertThat(testee.applicable(
             SearchQuery.builder()
                 .andCriteria(SearchQuery.flagIsUnSet(SEEN))
+                .sorts(DEFAULT_SORTS)
                 .build(),
             MAILBOX_SESSION))
             .isTrue();
@@ -75,6 +77,7 @@ class UnseenSearchOverrideTest {
         assertThat(testee.applicable(
             SearchQuery.builder()
                 .andCriteria(SearchQuery.not(SearchQuery.flagIsSet(SEEN)))
+                .sorts(DEFAULT_SORTS)
                 .build(),
             MAILBOX_SESSION))
             .isTrue();
@@ -86,6 +89,7 @@ class UnseenSearchOverrideTest {
             SearchQuery.builder()
                 .andCriteria(SearchQuery.flagIsUnSet(SEEN))
                 .andCriteria(SearchQuery.all())
+                .sorts(DEFAULT_SORTS)
                 .build(),
             MAILBOX_SESSION))
             .isTrue();
@@ -97,6 +101,7 @@ class UnseenSearchOverrideTest {
             SearchQuery.builder()
                 .andCriteria(SearchQuery.not(SearchQuery.flagIsSet(SEEN)))
                 .andCriteria(SearchQuery.all())
+                .sorts(DEFAULT_SORTS)
                 .build(),
             MAILBOX_SESSION))
             .isTrue();
@@ -108,6 +113,7 @@ class UnseenSearchOverrideTest {
             SearchQuery.builder()
                 .andCriteria(SearchQuery.flagIsUnSet(SEEN))
                 .andCriteria(SearchQuery.uid(new SearchQuery.UidRange(MessageUid.MIN_VALUE, MessageUid.MAX_VALUE)))
+                .sorts(DEFAULT_SORTS)
                 .build(),
             MAILBOX_SESSION))
             .isTrue();
@@ -119,6 +125,7 @@ class UnseenSearchOverrideTest {
             SearchQuery.builder()
                 .andCriteria(SearchQuery.not(SearchQuery.flagIsSet(SEEN)))
                 .andCriteria(SearchQuery.uid(new SearchQuery.UidRange(MessageUid.MIN_VALUE, MessageUid.MAX_VALUE)))
+                .sorts(DEFAULT_SORTS)
                 .build(),
             MAILBOX_SESSION))
             .isTrue();
@@ -129,6 +136,7 @@ class UnseenSearchOverrideTest {
         assertThat(testee.applicable(
             SearchQuery.builder()
                 .andCriteria(SearchQuery.sizeEquals(12))
+                .sorts(DEFAULT_SORTS)
                 .build(),
             MAILBOX_SESSION))
             .isFalse();
@@ -139,6 +147,7 @@ class UnseenSearchOverrideTest {
         assertThat(testee.search(MAILBOX_SESSION, MAILBOX,
             SearchQuery.builder()
                 .andCriteria(SearchQuery.flagIsUnSet(SEEN))
+                .sorts(DEFAULT_SORTS)
                 .build()).collectList().block())
             .isEmpty();
     }
@@ -156,6 +165,7 @@ class UnseenSearchOverrideTest {
         assertThat(testee.search(MAILBOX_SESSION, MAILBOX,
             SearchQuery.builder()
                 .andCriteria(SearchQuery.flagIsUnSet(SEEN))
+                .sorts(DEFAULT_SORTS)
                 .build()).collectList().block())
             .containsOnly(messageUid, messageUid2, messageUid3);
     }
@@ -174,6 +184,7 @@ class UnseenSearchOverrideTest {
             SearchQuery.builder()
                 .andCriteria(SearchQuery.flagIsUnSet(SEEN))
                 .andCriterion(SearchQuery.uid(new SearchQuery.UidRange(MessageUid.of(2), MessageUid.of(3))))
+                .sorts(DEFAULT_SORTS)
                 .build()).collectList().block())
             .containsOnly(messageUid2, messageUid3);
     }

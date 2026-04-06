@@ -1,0 +1,13 @@
+= Distributed James Server &mdash; Architecture
+:navtitle: Architecture
+
+:backend-name: cassandra
+:server-name: Distributed James Server
+:backend-storage-introduce: Cassandra is used for metadata storage. Cassandra is efficient for a very high workload of small queries following a known pattern.
+:storage-picture-file-name: storage_james_distributed.png
+:mailet-repository-path-prefix: cassandra
+:xref-base: distributed
+:mailqueue-combined-extend-backend: , Cassandra
+:mailqueue-combined-extend: servers:distributed/architecture/mailqueue_combined_extend.adoc
+
+include::partial$architecture/index.adoc[]

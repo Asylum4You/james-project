@@ -31,95 +31,34 @@ import static org.apache.james.backends.cassandra.components.CassandraQuotaLimit
 import static org.apache.james.backends.cassandra.components.CassandraQuotaLimitTable.QUOTA_TYPE;
 import static org.apache.james.backends.cassandra.components.CassandraQuotaLimitTable.TABLE_NAME;
 
-import java.util.Objects;
-
 import jakarta.inject.Inject;
 
 import org.apache.james.backends.cassandra.utils.CassandraAsyncExecutor;
+import org.apache.james.backends.cassandra.utils.ProfileLocator;
 import org.apache.james.core.quota.QuotaComponent;
 import org.apache.james.core.quota.QuotaLimit;
 import org.apache.james.core.quota.QuotaScope;
 import org.apache.james.core.quota.QuotaType;
 
 import com.datastax.oss.driver.api.core.CqlSession;
+import com.datastax.oss.driver.api.core.config.DriverExecutionProfile;
 import com.datastax.oss.driver.api.core.cql.PreparedStatement;
 import com.datastax.oss.driver.api.core.cql.Row;
 import com.datastax.oss.driver.api.querybuilder.delete.Delete;
 import com.datastax.oss.driver.api.querybuilder.insert.Insert;
 import com.datastax.oss.driver.api.querybuilder.select.Select;
-import com.google.common.base.MoreObjects;
 
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 public class CassandraQuotaLimitDao {
-
-    public static class QuotaLimitKey {
-
-        public static QuotaLimitKey of(QuotaComponent component, QuotaScope scope, String identifier, QuotaType quotaType) {
-            return new QuotaLimitKey(component, scope, identifier, quotaType);
-        }
-
-        private final QuotaComponent quotaComponent;
-        private final QuotaScope quotaScope;
-        private final String identifier;
-        private final QuotaType quotaType;
-
-        public QuotaComponent getQuotaComponent() {
-            return quotaComponent;
-        }
-
-        public QuotaScope getQuotaScope() {
-            return quotaScope;
-        }
-
-        public String getIdentifier() {
-            return identifier;
-        }
-
-        public QuotaType getQuotaType() {
-            return quotaType;
-        }
-
-        private QuotaLimitKey(QuotaComponent quotaComponent, QuotaScope quotaScope, String identifier, QuotaType quotaType) {
-            this.quotaComponent = quotaComponent;
-            this.quotaScope = quotaScope;
-            this.identifier = identifier;
-            this.quotaType = quotaType;
-        }
-
-        @Override
-        public final int hashCode() {
-            return Objects.hash(quotaComponent, quotaScope, identifier, quotaType);
-        }
-
-        @Override
-        public final boolean equals(Object o) {
-            if (o instanceof QuotaLimitKey) {
-                QuotaLimitKey other = (QuotaLimitKey) o;
-                return Objects.equals(quotaComponent, other.quotaComponent)
-                    && Objects.equals(quotaScope, other.quotaScope)
-                    && Objects.equals(identifier, other.identifier)
-                    && Objects.equals(quotaType, other.quotaType);
-            }
-            return false;
-        }
-
-        public String toString() {
-            return MoreObjects.toStringHelper(this)
-                .add("quotaComponent", quotaComponent)
-                .add("quotaScope", quotaScope)
-                .add("identifier", identifier)
-                .add("quotaType", quotaType)
-                .toString();
-        }
-    }
-
     private final CassandraAsyncExecutor queryExecutor;
     private final PreparedStatement getQuotaLimitStatement;
     private final PreparedStatement getQuotaLimitsStatement;
     private final PreparedStatement setQuotaLimitStatement;
     private final PreparedStatement deleteQuotaLimitStatement;
+    private final DriverExecutionProfile readProfile;
+    private final DriverExecutionProfile writeProfile;
 
     @Inject
     public CassandraQuotaLimitDao(CqlSession session) {
@@ -128,14 +67,17 @@ public class CassandraQuotaLimitDao {
         this.getQuotaLimitsStatement = session.prepare(getQuotaLimitsStatement().build());
         this.setQuotaLimitStatement = session.prepare(setQuotaLimitStatement().build());
         this.deleteQuotaLimitStatement = session.prepare((deleteQuotaLimitStatement().build()));
+        this.readProfile = ProfileLocator.READ.locateProfile(session, "QUOTA-LIMITS");
+        this.writeProfile = ProfileLocator.WRITE.locateProfile(session, "QUOTA-LIMITS");
     }
 
-    public Mono<QuotaLimit> getQuotaLimit(QuotaLimitKey quotaKey) {
+    public Mono<QuotaLimit> getQuotaLimit(QuotaLimit.QuotaLimitKey quotaKey) {
         return queryExecutor.executeSingleRow(getQuotaLimitStatement.bind()
             .setString(QUOTA_COMPONENT, quotaKey.getQuotaComponent().getValue())
             .setString(QUOTA_SCOPE, quotaKey.getQuotaScope().getValue())
             .setString(IDENTIFIER, quotaKey.getIdentifier())
-            .setString(QUOTA_TYPE, quotaKey.getQuotaType().getValue()))
+            .setString(QUOTA_TYPE, quotaKey.getQuotaType().getValue())
+            .setExecutionProfile(readProfile))
             .map(this::convertRowToModel);
     }
 
@@ -143,7 +85,8 @@ public class CassandraQuotaLimitDao {
         return queryExecutor.executeRows(getQuotaLimitsStatement.bind()
             .setString(QUOTA_COMPONENT, quotaComponent.getValue())
             .setString(QUOTA_SCOPE, quotaScope.getValue())
-            .setString(IDENTIFIER, identifier))
+            .setString(IDENTIFIER, identifier)
+            .setExecutionProfile(readProfile))
             .map(this::convertRowToModel);
     }
 
@@ -153,15 +96,17 @@ public class CassandraQuotaLimitDao {
             .setString(QUOTA_SCOPE, quotaLimit.getQuotaScope().getValue())
             .setString(IDENTIFIER, quotaLimit.getIdentifier())
             .setString(QUOTA_TYPE, quotaLimit.getQuotaType().getValue())
-            .set(QUOTA_LIMIT, quotaLimit.getQuotaLimit().orElse(null), Long.class));
+            .set(QUOTA_LIMIT, quotaLimit.getQuotaLimit().orElse(null), Long.class)
+            .setExecutionProfile(writeProfile));
     }
 
-    public Mono<Void> deleteQuotaLimit(QuotaLimitKey quotaKey) {
+    public Mono<Void> deleteQuotaLimit(QuotaLimit.QuotaLimitKey quotaKey) {
         return queryExecutor.executeVoid(deleteQuotaLimitStatement.bind()
             .setString(QUOTA_COMPONENT, quotaKey.getQuotaComponent().getValue())
             .setString(QUOTA_SCOPE, quotaKey.getQuotaScope().getValue())
             .setString(IDENTIFIER, quotaKey.getIdentifier())
-            .setString(QUOTA_TYPE, quotaKey.getQuotaType().getValue()));
+            .setString(QUOTA_TYPE, quotaKey.getQuotaType().getValue())
+            .setExecutionProfile(writeProfile));
     }
 
     private Select getQuotaLimitStatement() {
@@ -203,7 +148,8 @@ public class CassandraQuotaLimitDao {
             .quotaScope(QuotaScope.of(row.get(QUOTA_SCOPE, String.class)))
             .identifier(row.get(IDENTIFIER, String.class))
             .quotaType(QuotaType.of(row.get(QUOTA_TYPE, String.class)))
-            .quotaLimit(row.get(QUOTA_LIMIT, Long.class)).build();
+            .quotaLimit(row.get(QUOTA_LIMIT, Long.class))
+            .build();
     }
 
 }

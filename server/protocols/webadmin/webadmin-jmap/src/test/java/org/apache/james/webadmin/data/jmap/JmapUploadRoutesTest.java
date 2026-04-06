@@ -35,10 +35,12 @@ import java.util.Map;
 
 import org.apache.commons.io.IOUtils;
 import org.apache.james.backends.cassandra.CassandraClusterExtension;
-import org.apache.james.backends.cassandra.components.CassandraModule;
+import org.apache.james.backends.cassandra.components.CassandraDataDefinition;
+import org.apache.james.blob.api.BlobId;
 import org.apache.james.blob.api.BlobStore;
+import org.apache.james.blob.api.BlobStoreDAO;
 import org.apache.james.blob.api.BucketName;
-import org.apache.james.blob.api.HashBlobId;
+import org.apache.james.blob.api.PlainBlobId;
 import org.apache.james.blob.memory.MemoryBlobStoreDAO;
 import org.apache.james.core.Username;
 import org.apache.james.jmap.api.model.UploadId;
@@ -46,7 +48,7 @@ import org.apache.james.jmap.api.model.UploadMetaData;
 import org.apache.james.jmap.api.model.UploadNotFoundException;
 import org.apache.james.jmap.cassandra.upload.CassandraUploadRepository;
 import org.apache.james.jmap.cassandra.upload.UploadDAO;
-import org.apache.james.jmap.cassandra.upload.UploadModule;
+import org.apache.james.jmap.cassandra.upload.UploadDataDefinition;
 import org.apache.james.json.DTOConverter;
 import org.apache.james.mailbox.model.ContentType;
 import org.apache.james.server.blob.deduplication.PassThroughBlobStore;
@@ -90,19 +92,21 @@ class JmapUploadRoutesTest {
     private UpdatableTickingClock clock;
 
     @RegisterExtension
-    static CassandraClusterExtension cassandraCluster = new CassandraClusterExtension(CassandraModule.aggregateModules(
-        UploadModule.MODULE));
+    static CassandraClusterExtension cassandraCluster = new CassandraClusterExtension(CassandraDataDefinition.aggregateModules(
+        UploadDataDefinition.MODULE));
 
     @BeforeEach
     void setUp() {
         taskManager = new MemoryTaskManager(new Hostname("foo"));
         clock = new UpdatableTickingClock(TIMESTAMP.toInstant());
-        blobStore = new PassThroughBlobStore(new MemoryBlobStoreDAO(),
+        BlobStoreDAO blobStoreDAO = new MemoryBlobStoreDAO();
+        BlobId.Factory blobIdFactory = new PlainBlobId.Factory();
+        blobStore = new PassThroughBlobStore(blobStoreDAO,
             BucketName.of("default"),
-            new HashBlobId.Factory());
+            blobIdFactory);
 
         cassandraUploadRepository = new CassandraUploadRepository(new UploadDAO(cassandraCluster.getCassandraCluster().getConf(),
-            new HashBlobId.Factory()), blobStore, clock);
+            blobIdFactory), blobIdFactory, blobStoreDAO, clock);
 
         JsonTransformer jsonTransformer = new JsonTransformer();
         TasksRoutes tasksRoutes = new TasksRoutes(taskManager, jsonTransformer, DTOConverter.of(UploadCleanupTaskAdditionalInformationDTO.SERIALIZATION_MODULE));
@@ -242,7 +246,7 @@ class JmapUploadRoutesTest {
 
         given()
             .basePath(TasksRoutes.BASE)
-            .when()
+        .when()
             .get(taskId + "/await");
 
         assertThat(cassandraUploadRepository.listUploads(USERNAME).collectList().block())

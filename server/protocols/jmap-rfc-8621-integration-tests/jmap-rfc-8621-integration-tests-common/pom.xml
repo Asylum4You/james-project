@@ -23,7 +23,7 @@
     <parent>
         <groupId>org.apache.james</groupId>
         <artifactId>jmap-rfc-8621-integration-tests</artifactId>
-        <version>3.9.0-SNAPSHOT</version>
+        <version>3.10.0-SNAPSHOT</version>
     </parent>
     <artifactId>jmap-rfc-8621-integration-tests-common</artifactId>
     <name>Apache James :: Server :: JMAP RFC-8621 :: Contract for Integration Testing</name>
@@ -73,7 +73,7 @@
         <dependency>
             <groupId>com.softwaremill.sttp.client3</groupId>
             <artifactId>okhttp-backend_${scala.base}</artifactId>
-            <version>3.8.16</version>
+            <version>3.11.0</version>
         </dependency>
         <dependency>
             <groupId>com.typesafe.play</groupId>
@@ -82,6 +82,10 @@
         <dependency>
             <groupId>io.rest-assured</groupId>
             <artifactId>rest-assured</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>net.javacrumbs.json-unit</groupId>
+            <artifactId>json-unit</artifactId>
         </dependency>
         <dependency>
             <groupId>net.javacrumbs.json-unit</groupId>

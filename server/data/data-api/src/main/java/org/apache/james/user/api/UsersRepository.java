@@ -26,9 +26,13 @@ import org.apache.james.core.Domain;
 import org.apache.james.core.MailAddress;
 import org.apache.james.core.Username;
 import org.apache.james.user.api.model.User;
+import org.apache.james.util.ReactorUtils;
 import org.reactivestreams.Publisher;
 
+import com.github.fge.lambdas.Throwing;
+
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
 /**
  * Interface for a repository of users. A repository represents a logical
@@ -36,6 +40,8 @@ import reactor.core.publisher.Flux;
  * email server or the members of a mailing list.
  */
 public interface UsersRepository {
+
+    String LOCALPART_DETAIL_DELIMITER = "+";
 
     /**
      * Adds a user to the repository with the specified password
@@ -136,7 +142,7 @@ public interface UsersRepository {
      * 
      * @return true or false
      */
-    boolean supportVirtualHosting() throws UsersRepositoryException;
+    boolean supportVirtualHosting();
 
     /**
      * Returns username to be used for a given MailAddress
@@ -145,9 +151,9 @@ public interface UsersRepository {
      */
     default Username getUsername(MailAddress mailAddress) throws UsersRepositoryException {
         if (supportVirtualHosting()) {
-            return Username.of(mailAddress.asString());
+            return Username.of(mailAddress.stripDetails(LOCALPART_DETAIL_DELIMITER).asString());
         } else {
-            return Username.of(mailAddress.getLocalPart());
+            return Username.of(mailAddress.stripDetails(LOCALPART_DETAIL_DELIMITER).getLocalPart());
         }
     }
 
@@ -175,10 +181,16 @@ public interface UsersRepository {
         }
     }
 
+    default Mono<Void> assertValidReactive(Username username) {
+        return Mono.fromRunnable(Throwing.runnable(() -> assertValid(username)).sneakyThrow())
+            .subscribeOn(ReactorUtils.BLOCKING_CALL_WRAPPER)
+            .then();
+    }
+
     default Publisher<Username> listUsersOfADomainReactive(Domain domain) {
         return Flux.from(listReactive())
             .filter(username -> username.getDomainPart()
                 .map(domain::equals)
-                .orElse(false));
+                .orElse(!supportVirtualHosting()));
     }
 }

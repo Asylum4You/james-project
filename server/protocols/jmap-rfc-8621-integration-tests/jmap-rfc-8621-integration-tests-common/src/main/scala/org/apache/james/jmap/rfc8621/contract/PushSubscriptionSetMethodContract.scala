@@ -24,6 +24,8 @@ import java.security.KeyPair
 import java.security.interfaces.ECPublicKey
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
+import java.util.concurrent.TimeUnit
+import java.util.function.Consumer
 import java.util.{Base64, UUID}
 
 import com.google.common.collect.ImmutableSet
@@ -34,8 +36,10 @@ import com.google.inject.multibindings.Multibinder
 import io.netty.handler.codec.http.HttpHeaderNames.ACCEPT
 import io.restassured.RestAssured.{`given`, requestSpecification}
 import io.restassured.http.ContentType.JSON
+import io.restassured.path.json.JsonPath
 import jakarta.inject.Inject
 import net.javacrumbs.jsonunit.assertj.JsonAssertions.assertThatJson
+import net.javacrumbs.jsonunit.core.Option.IGNORING_ARRAY_ORDER
 import org.apache.http.HttpStatus.SC_OK
 import org.apache.james.GuiceJamesServer
 import org.apache.james.core.Username
@@ -47,18 +51,17 @@ import org.apache.james.jmap.core.UTCDate
 import org.apache.james.jmap.http.UserCredential
 import org.apache.james.jmap.rfc8621.contract.Fixture.{ACCEPT_RFC8621_VERSION_HEADER, BOB, BOB_PASSWORD, DOMAIN, authScheme, baseRequestSpecBuilder}
 import org.apache.james.jmap.rfc8621.contract.PushSubscriptionSetMethodContract.TIME_FORMATTER
-import org.apache.james.utils.{DataProbeImpl, GuiceProbe}
+import org.apache.james.jmap.rfc8621.contract.probe.TypeStateProbe
+import org.apache.james.utils.{DataProbeImpl, GuiceProbe, UpdatableTickingClock}
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.SoftAssertions
+import org.awaitility.Awaitility
 import org.junit.jupiter.api.{BeforeEach, Test}
 import org.mockserver.integration.ClientAndServer
 import org.mockserver.model.HttpRequest.request
 import org.mockserver.model.HttpResponse.response
-import org.mockserver.model.JsonBody.json
-import org.mockserver.model.Not.not
 import org.mockserver.model.NottableString.string
 import org.mockserver.model.{HttpRequest, HttpResponse}
-import org.mockserver.verify.VerificationTimes
 import reactor.core.scala.publisher.SMono
 
 import scala.jdk.CollectionConverters._
@@ -71,7 +74,7 @@ class PushSubscriptionProbe @Inject()(pushSubscriptionRepository: PushSubscripti
     SMono(pushSubscriptionRepository.save(username, PushSubscriptionCreationRequest(
       deviceClientId = deviceId,
       url = url,
-      types = types)))
+      types = Some(types))))
       .block()
 
   def retrievePushSubscription(username: Username, id: PushSubscriptionId): PushSubscription =
@@ -90,6 +93,9 @@ class PushSubscriptionProbeModule extends AbstractModule {
 }
 
 trait PushSubscriptionSetMethodContract {
+  private lazy val awaitAtMostTenSeconds = Awaitility.`with`
+    .await.atMost(10, TimeUnit.SECONDS)
+
   @BeforeEach
   def setUp(server: GuiceJamesServer, pushServer: ClientAndServer): Unit = {
     server.getProbe(classOf[DataProbeImpl])
@@ -251,6 +257,128 @@ trait PushSubscriptionSetMethodContract {
 
     assertThat(probe.retrievePushSubscription(BOB, pushSubscription.id).types.asJava)
       .containsExactlyInAnyOrder(MailboxTypeName, EmailTypeName)
+  }
+
+  @Test
+  def updateWithMissingTypesPropertyShouldNotUpdateTypes(server: GuiceJamesServer): Unit = {
+    val probe = server.getProbe(classOf[PushSubscriptionProbe])
+    val pushSubscription = probe
+      .createPushSubscription(username = BOB,
+        url = PushSubscriptionServerURL(new URI("https://example.com/push/?device=X8980fc&client=12c6d086").toURL),
+        deviceId = DeviceClientId("12c6d086"),
+        types = Seq(MailboxTypeName))
+
+    val validExpiresString = UTCDate(ZonedDateTime.now().plusDays(1)).asUTC.format(TIME_FORMATTER)
+    val request: String =
+      s"""{
+         |    "using": ["urn:ietf:params:jmap:core"],
+         |    "methodCalls": [
+         |      [
+         |        "PushSubscription/set",
+         |        {
+         |            "update": {
+         |                "${pushSubscription.id.serialise}": {
+         |                 "expires": "$validExpiresString"
+         |                }
+         |              }
+         |        },
+         |        "c1"
+         |      ]
+         |    ]
+         |  }""".stripMargin
+
+    val response: String = `given`
+      .body(request)
+    .when
+      .post
+    .`then`
+      .statusCode(SC_OK)
+      .contentType(JSON)
+      .extract
+      .body
+      .asString
+
+    assertThatJson(response)
+      .isEqualTo(
+        s"""{
+           |    "sessionState": "${SESSION_STATE.value}",
+           |    "methodResponses": [
+           |        [
+           |            "PushSubscription/set",
+           |            {
+           |                "updated": {
+           |                    "${pushSubscription.id.serialise}": {}
+           |                }
+           |            },
+           |            "c1"
+           |        ]
+           |    ]
+           |}""".stripMargin)
+
+    // Types are not updated
+    assertThat(probe.retrievePushSubscription(BOB, pushSubscription.id).types.asJava)
+      .containsOnly(MailboxTypeName)
+  }
+
+  @Test
+  def updateShouldAcceptNullTypesAndUpdateToAllTypes(server: GuiceJamesServer): Unit = {
+    val subscriptionProbe = server.getProbe(classOf[PushSubscriptionProbe])
+    val typeStateProbe = server.getProbe(classOf[TypeStateProbe])
+    val pushSubscription = subscriptionProbe
+      .createPushSubscription(username = BOB,
+        url = PushSubscriptionServerURL(new URI("https://example.com/push/?device=X8980fc&client=12c6d086").toURL),
+        deviceId = DeviceClientId("12c6d086"),
+        types = Seq(MailboxTypeName))
+
+    val request: String =
+      s"""{
+         |    "using": ["urn:ietf:params:jmap:core"],
+         |    "methodCalls": [
+         |      [
+         |        "PushSubscription/set",
+         |        {
+         |            "update": {
+         |                "${pushSubscription.id.serialise}": {
+         |                  "types": null
+         |                }
+         |              }
+         |        },
+         |        "c1"
+         |      ]
+         |    ]
+         |  }""".stripMargin
+
+    val response: String = `given`
+      .body(request)
+    .when
+      .post
+    .`then`
+      .statusCode(SC_OK)
+      .contentType(JSON)
+      .extract
+      .body
+      .asString
+
+    assertThatJson(response)
+      .isEqualTo(
+        s"""{
+           |    "sessionState": "${SESSION_STATE.value}",
+           |    "methodResponses": [
+           |        [
+           |            "PushSubscription/set",
+           |            {
+           |                "updated": {
+           |                    "${pushSubscription.id.serialise}": {}
+           |                }
+           |            },
+           |            "c1"
+           |        ]
+           |    ]
+           |}""".stripMargin)
+
+    // All types are registered
+    assertThat(subscriptionProbe.retrievePushSubscription(BOB, pushSubscription.id).types.asJava)
+      .containsExactlyInAnyOrderElementsOf(typeStateProbe.typesNames())
   }
 
   @Test
@@ -434,25 +562,31 @@ trait PushSubscriptionSetMethodContract {
   }
 
   @Test
-  def setMethodShouldNotCreatedWhenMissingTypesPropertyInCreationRequest(): Unit = {
+  def setCreateShouldAcceptNullTypesPropertyInCreationRequest(server: GuiceJamesServer, pushServer: ClientAndServer): Unit = {
+    val subscriptionProbe = server.getProbe(classOf[PushSubscriptionProbe])
+    val typeStateProbe = server.getProbe(classOf[TypeStateProbe])
+
     val request: String =
-      """{
-        |    "using": ["urn:ietf:params:jmap:core"],
+      s"""{
+        |    "using": [
+        |        "urn:ietf:params:jmap:core"
+        |    ],
         |    "methodCalls": [
-        |      [
-        |        "PushSubscription/set",
-        |        {
-        |            "create": {
-        |                "4f29": {
-        |                  "deviceClientId": "a889-ffea-910",
-        |                  "url": "https://example.com/push/?device=X8980fc&client=12c6d086"
+        |        [
+        |            "PushSubscription/set",
+        |            {
+        |                "create": {
+        |                    "4f29": {
+        |                        "deviceClientId": "a889-ffea-910",
+        |                        "url": "${getPushServerUrl(pushServer)}",
+        |                        "expires": "${UTCDate(ZonedDateTime.now().plusDays(1)).asUTC.format(TIME_FORMATTER)}"
+        |                    }
         |                }
-        |              }
-        |        },
-        |        "c1"
-        |      ]
+        |            },
+        |            "c1"
+        |        ]
         |    ]
-        |  }""".stripMargin
+        |}""".stripMargin
 
     val response: String = `given`
       .body(request)
@@ -473,10 +607,10 @@ trait PushSubscriptionSetMethodContract {
            |        [
            |            "PushSubscription/set",
            |            {
-           |                "notCreated": {
+           |                "created": {
            |                    "4f29": {
-           |                        "type": "invalidArguments",
-           |                        "description": "Missing '/types' property"
+           |                        "id": "$${json-unit.ignore}",
+           |                        "expires": "$${json-unit.ignore}"
            |                    }
            |                }
            |            },
@@ -484,6 +618,12 @@ trait PushSubscriptionSetMethodContract {
            |        ]
            |    ]
            |}""".stripMargin)
+
+    // All types are registered
+    val subscriptionId: PushSubscriptionId = PushSubscriptionId.parse(JsonPath.from(response)
+      .getString("methodResponses[0][1].created.4f29.id")).toOption.get
+    assertThat(subscriptionProbe.retrievePushSubscription(BOB, subscriptionId).types.asJava)
+      .containsExactlyInAnyOrderElementsOf(typeStateProbe.typesNames())
   }
 
   @Test
@@ -607,6 +747,7 @@ trait PushSubscriptionSetMethodContract {
       .asString
 
     assertThatJson(response)
+      .withOptions(IGNORING_ARRAY_ORDER)
       .isEqualTo(
         s"""{
            |    "sessionState": "${SESSION_STATE.value}",
@@ -687,6 +828,49 @@ trait PushSubscriptionSetMethodContract {
   }
 
   @Test
+  def getShouldNotReturnExpiredSubscriptionAndTriggerTheDeletion(server: GuiceJamesServer, clock: UpdatableTickingClock): Unit = {
+    val probe = server.getProbe(classOf[PushSubscriptionProbe])
+    val pushSubscription1 = probe
+      .createPushSubscription(username = BOB,
+        url = PushSubscriptionServerURL(new URI("https://example.com/push/?device=X8980fc&client=12c6d086").toURL()),
+        deviceId = DeviceClientId("12c6d086"),
+        types = Seq(MailboxTypeName))
+    probe.validatePushSubscription(BOB, pushSubscription1.id)
+
+    clock.setInstant(ZonedDateTime.now().plusDays(100).toInstant)
+
+    assertThatJson(`given`
+      .body("""{
+              |    "using": ["urn:ietf:params:jmap:core"],
+              |    "methodCalls": [ [ "PushSubscription/get", { }, "c1" ] ]
+              |}""".stripMargin)
+      .when
+        .post
+      .`then`
+        .statusCode(SC_OK)
+        .contentType(JSON)
+        .extract
+        .body
+        .asString)
+        .isEqualTo(
+          s"""{
+             |    "sessionState": "${SESSION_STATE.value}",
+             |    "methodResponses": [
+             |        [
+             |            "PushSubscription/get",
+             |            {
+             |                "list": []
+             |            },
+             |            "c1"
+             |        ]
+             |    ]
+             |}""".stripMargin)
+
+    assertThat(probe.retrievePushSubscription(BOB, pushSubscription1.id))
+      .isNull()
+  }
+
+  @Test
   def getByIdShouldReturnRecords(server: GuiceJamesServer): Unit = {
     val probe = server.getProbe(classOf[PushSubscriptionProbe])
     val pushSubscription1 = probe
@@ -725,6 +909,7 @@ trait PushSubscriptionSetMethodContract {
       .asString
 
     assertThatJson(response)
+      .withOptions(IGNORING_ARRAY_ORDER)
       .isEqualTo(
         s"""{
            |    "sessionState": "${SESSION_STATE.value}",
@@ -867,6 +1052,7 @@ trait PushSubscriptionSetMethodContract {
       .asString
 
     assertThatJson(response)
+      .withOptions(IGNORING_ARRAY_ORDER)
       .isEqualTo(
         s"""{
            |    "sessionState": "${SESSION_STATE.value}",
@@ -2257,14 +2443,18 @@ trait PushSubscriptionSetMethodContract {
       .jsonPath()
       .get("methodResponses[0][1].created.4f29.id")
 
-    pushServer.verify(HttpRequest.request()
-      .withPath("/subscribe")
-      .withBody(json(s"""{
-                        |    "@type": "PushVerification",
-                        |    "pushSubscriptionId": "$pushSubscriptionId",
-                        |    "verificationCode": "$${json-unit.any-string}"
-                        |}""".stripMargin)),
-      VerificationTimes.atLeast(1))
+    awaitAtMostTenSeconds.untilAsserted { () =>
+      val bodyAssert: Consumer[HttpRequest] = request => assertThatJson(request.getBodyAsString)
+        .isEqualTo(
+          s"""{
+             |    "@type": "PushVerification",
+             |    "pushSubscriptionId": "$pushSubscriptionId",
+             |    "verificationCode": "$${json-unit.any-string}"
+             |}""".stripMargin)
+
+      assertThat(pushServer.retrieveRecordedRequests(HttpRequest.request().withPath("/subscribe")).toSeq.asJava)
+        .anySatisfy(bodyAssert)
+    }
   }
 
   @Test
@@ -2319,7 +2509,7 @@ trait PushSubscriptionSetMethodContract {
            |                "notCreated": {
            |                    "4f29": {
            |                        "type": "serverFail",
-           |                        "description": "Error when call to Push Server. "
+           |                        "description": "Error when call to Push Server: code 500. "
            |                    }
            |                }
            |            },
@@ -2521,15 +2711,19 @@ trait PushSubscriptionSetMethodContract {
     .`then`
       .statusCode(SC_OK)
 
-    pushServer.verify(HttpRequest.request()
-      .withPath("/subscribe")
-      .withBody(not(json(
-        s"""{
-           |    "@type": "PushVerification",
-           |    "pushSubscriptionId": "$${json-unit.any-string}",
-           |    "verificationCode": "$${json-unit.any-string}"
-           |}""".stripMargin))),
-      VerificationTimes.atLeast(1))
+    awaitAtMostTenSeconds.untilAsserted { () =>
+      val bodyAssert: Consumer[HttpRequest] = request => assertThatJson(request.getBodyAsString)
+        .isNotEqualTo(
+          s"""{
+             |    "@type": "PushVerification",
+             |    "pushSubscriptionId": "$${json-unit.any-string}",
+             |    "verificationCode": "$${json-unit.any-string}"
+             |}""".stripMargin)
+
+      assertThat(pushServer.retrieveRecordedRequests(HttpRequest.request().withPath("/subscribe")).toSeq.asJava)
+        .hasSizeGreaterThanOrEqualTo(1)
+        .allSatisfy(bodyAssert)
+    }
   }
 
   @Test

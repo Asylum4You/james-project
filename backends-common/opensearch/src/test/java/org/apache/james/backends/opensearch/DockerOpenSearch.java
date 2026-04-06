@@ -143,7 +143,7 @@ public interface DockerOpenSearch {
 
         static DockerContainer defaultContainer(String imageName) {
             return DockerContainer.fromName(imageName)
-                .withTmpFs(ImmutableMap.of("/usr/share/opensearch/data/nodes/0", "rw,size=200m"))
+                .withTmpFs(ImmutableMap.of("/usr/share/opensearch/data/nodes/0", "rw,size=200m,mode=1777"))
                 .withExposedPorts(OS_HTTP_PORT)
                 .withEnv("discovery.type", "single-node")
                 .withEnv("DISABLE_INSTALL_DEMO_CONFIG", "true")
@@ -226,6 +226,7 @@ public interface DockerOpenSearch {
             this.openSearch = new DockerOpenSearch.NoAuth(
                 DockerOpenSearch.NoAuth
                     .defaultContainer(imageName)
+                    .withEnv("OPENSEARCH_INITIAL_ADMIN_PASSWORD", DEFAULT_PASSWORD)
                     .withLogConsumer(frame -> LOGGER.debug("[OpenSearch] " + frame.getUtf8String()))
                     .withNetwork(network)
                     .withNetworkAliases("elasticsearch"));
@@ -238,7 +239,7 @@ public interface DockerOpenSearch {
                         .withFileFromClasspath("conf/default.key", "auth-es/default.key")
                         .withFileFromClasspath("Dockerfile", "auth-es/NginxDockerfile")))
                 .withExposedPorts(OS_HTTP_PORT)
-                .withTmpFs(ImmutableMap.of("/usr/share/opensearch/data/nodes/0", "rw,size=200m"))
+                .withTmpFs(ImmutableMap.of("/usr/share/opensearch/data/nodes/0", "rw,size=200m,mode=1777"))
                 .withLogConsumer(frame -> LOGGER.debug("[NGINX] " + frame.getUtf8String()))
                 .withNetwork(network)
                 .withName("james-testing-nginx-" + UUID.randomUUID());

@@ -19,6 +19,9 @@
 
 package org.apache.james.mailbox.opensearch.search;
 
+import static org.apache.james.mailbox.opensearch.search.OpenSearchSearchHighlighter.ATTACHMENT_TEXT_CONTENT_FIELD;
+
+import java.io.IOException;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -30,12 +33,20 @@ import org.apache.james.backends.opensearch.ReadAliasName;
 import org.apache.james.backends.opensearch.RoutingKey;
 import org.apache.james.backends.opensearch.search.ScrolledSearch;
 import org.apache.james.mailbox.model.MailboxId;
+import org.apache.james.mailbox.model.SearchOptions;
 import org.apache.james.mailbox.model.SearchQuery;
+import org.apache.james.mailbox.opensearch.json.JsonMessageConstants;
 import org.apache.james.mailbox.opensearch.query.QueryConverter;
 import org.apache.james.mailbox.opensearch.query.SortConverter;
+import org.apache.james.mailbox.searchhighligt.SearchHighlighterConfiguration;
 import org.opensearch.client.opensearch._types.SortOptions;
 import org.opensearch.client.opensearch._types.Time;
 import org.opensearch.client.opensearch.core.SearchRequest;
+import org.opensearch.client.opensearch.core.search.BuiltinHighlighterType;
+import org.opensearch.client.opensearch.core.search.Highlight;
+import org.opensearch.client.opensearch.core.search.HighlightField;
+import org.opensearch.client.opensearch.core.search.HighlighterEncoder;
+import org.opensearch.client.opensearch.core.search.HighlighterType;
 import org.opensearch.client.opensearch.core.search.Hit;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -44,6 +55,7 @@ import reactor.core.publisher.Flux;
 
 public class OpenSearchSearcher {
     public static final int DEFAULT_SEARCH_SIZE = 100;
+    public static final boolean SEARCH_HIGHLIGHT = true;
     private static final Time TIMEOUT = new Time.Builder().time("1m").build();
     private static final int MAX_ROUTING_KEY = 5;
 
@@ -52,24 +64,66 @@ public class OpenSearchSearcher {
     private final int size;
     private final AliasName aliasName;
     private final RoutingKey.Factory<MailboxId> routingKeyFactory;
+    private final Highlight highlightQuery;
 
     public OpenSearchSearcher(ReactorOpenSearchClient client, QueryConverter queryConverter, int size,
                               ReadAliasName aliasName, RoutingKey.Factory<MailboxId> routingKeyFactory) {
+        this(client, queryConverter, size, aliasName, routingKeyFactory, SearchHighlighterConfiguration.DEFAULT);
+    }
+
+    public OpenSearchSearcher(ReactorOpenSearchClient client, QueryConverter queryConverter, int size,
+                              ReadAliasName aliasName, RoutingKey.Factory<MailboxId> routingKeyFactory,
+                              SearchHighlighterConfiguration searchHighlighterConfiguration) {
         this.client = client;
         this.queryConverter = queryConverter;
         this.size = size;
         this.aliasName = aliasName;
         this.routingKeyFactory = routingKeyFactory;
+
+        HighlightField highlightField = new HighlightField.Builder()
+            .forceSource(true)
+            .preTags(searchHighlighterConfiguration.preTagFormatter())
+            .postTags(searchHighlighterConfiguration.postTagFormatter())
+            .fragmentSize(searchHighlighterConfiguration.fragmentSize())
+            .numberOfFragments(2)
+            .type(new HighlighterType.Builder().builtin(BuiltinHighlighterType.Plain).build())
+            .build();
+
+        this.highlightQuery = new Highlight.Builder()
+            .encoder(HighlighterEncoder.Html)
+            .fields(JsonMessageConstants.SUBJECT, highlightField)
+            .fields(JsonMessageConstants.TEXT_BODY, highlightField)
+            .fields(JsonMessageConstants.HTML_BODY, highlightField)
+            .fields(ATTACHMENT_TEXT_CONTENT_FIELD, highlightField)
+            .build();
     }
 
     public Flux<Hit<ObjectNode>> search(Collection<MailboxId> mailboxIds, SearchQuery query,
-                                        Optional<Integer> limit, List<String> fields) {
-        SearchRequest searchRequest = prepareSearch(mailboxIds, query, limit, fields);
+                                        Optional<Integer> limit, List<String> fields,
+                                        boolean searchHighlight) {
+        SearchRequest searchRequest = prepareSearch(mailboxIds, query, limit, fields, searchHighlight);
         return new ScrolledSearch(client, searchRequest)
             .searchHits();
     }
 
-    private SearchRequest prepareSearch(Collection<MailboxId> mailboxIds, SearchQuery query, Optional<Integer> limit, List<String> fields) {
+    public Flux<Hit<ObjectNode>> search(Collection<MailboxId> mailboxIds, SearchQuery query,
+                                        SearchOptions searchOptions, List<String> fields,
+                                        boolean searchHighlight) {
+        SearchRequest searchRequest = prepareCollapsedSearch(mailboxIds, query, searchOptions, fields, searchHighlight);
+        return search(searchRequest);
+    }
+
+    private Flux<Hit<ObjectNode>> search(SearchRequest searchRequest) {
+        try {
+            return client.search(searchRequest)
+                .flatMapMany(response -> Flux.fromIterable(response.hits().hits()));
+        } catch (IOException e) {
+            return Flux.error(e);
+        }
+    }
+
+    private SearchRequest prepareSearch(Collection<MailboxId> mailboxIds, SearchQuery query,
+                                        Optional<Integer> limit, List<String> fields, boolean highlight) {
         List<SortOptions> sorts = query.getSorts()
             .stream()
             .flatMap(SortConverter::convertSort)
@@ -84,10 +138,51 @@ public class OpenSearchSearcher {
             .storedFields(fields)
             .sort(sorts);
 
+        if (highlight) {
+            request.highlight(highlightQuery);
+        }
+
         return toRoutingKey(mailboxIds)
             .map(request::routing)
             .orElse(request)
             .build();
+    }
+
+    private SearchRequest prepareCollapsedSearch(Collection<MailboxId> mailboxIds, SearchQuery query,
+                                                 SearchOptions searchOptions, List<String> fields, boolean highlight) {
+        List<SortOptions> sorts = query.getSorts()
+            .stream()
+            .flatMap(SortConverter::convertSort)
+            .map(fieldSort -> new SortOptions.Builder().field(fieldSort).build())
+            .collect(Collectors.toList());
+
+        int from = searchOptions.offset().getOffset();
+        int size = searchOptions.limit().getLimit().orElseThrow();
+
+        SearchRequest.Builder request = new SearchRequest.Builder()
+            .index(aliasName.getValue())
+            .query(queryConverter.from(mailboxIds, query))
+            .from(from)
+            .size(size)
+            .storedFields(fields)
+            .sort(sorts)
+            .collapse(collapse -> collapse.field(retrieveCollapseField(query)));
+
+        if (highlight) {
+            request.highlight(highlightQuery);
+        }
+
+        return toRoutingKey(mailboxIds)
+            .map(request::routing)
+            .orElse(request)
+            .build();
+    }
+
+    private String retrieveCollapseField(SearchQuery query) {
+        if (query.shouldCollapseThreads()) {
+            return JsonMessageConstants.THREAD_ID;
+        }
+        return JsonMessageConstants.MESSAGE_ID;
     }
 
     private Optional<String> toRoutingKey(Collection<MailboxId> mailboxIds) {
@@ -101,7 +196,7 @@ public class OpenSearchSearcher {
     }
 
     private int computeRequiredSize(Optional<Integer> limit) {
-        return limit.map(value -> Math.min(value.intValue(), size))
+        return limit.map(value -> Math.min(value, size))
             .orElse(size);
     }
 

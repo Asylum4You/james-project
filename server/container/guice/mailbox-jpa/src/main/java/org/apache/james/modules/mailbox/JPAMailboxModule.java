@@ -33,6 +33,7 @@ import org.apache.james.mailbox.AttachmentContentLoader;
 import org.apache.james.mailbox.AttachmentIdFactory;
 import org.apache.james.mailbox.Authenticator;
 import org.apache.james.mailbox.Authorizator;
+import org.apache.james.mailbox.MailboxCounterCorrector;
 import org.apache.james.mailbox.MailboxManager;
 import org.apache.james.mailbox.MailboxPathLocker;
 import org.apache.james.mailbox.SessionProvider;
@@ -64,6 +65,8 @@ import org.apache.james.mailbox.store.mail.NaiveThreadIdGuessingAlgorithm;
 import org.apache.james.mailbox.store.mail.ThreadIdGuessingAlgorithm;
 import org.apache.james.mailbox.store.mail.UidProvider;
 import org.apache.james.mailbox.store.mail.model.DefaultMessageId;
+import org.apache.james.mailbox.store.mail.model.impl.MessageParser;
+import org.apache.james.mailbox.store.mail.model.impl.MessageParserImpl;
 import org.apache.james.mailbox.store.user.SubscriptionMapperFactory;
 import org.apache.james.modules.data.JPAEntityManagerModule;
 import org.apache.james.user.api.DeleteUserDataTaskStep;
@@ -120,6 +123,8 @@ public class JPAMailboxModule extends AbstractModule {
         bind(MailboxACLResolver.class).to(UnionMailboxACLResolver.class);
         bind(AttachmentIdFactory.class).to(StringBackedAttachmentIdFactory.class);
         bind(AttachmentContentLoader.class).to(JPAAttachmentContentLoader.class);
+        bind(MailboxCounterCorrector.class).toInstance(MailboxCounterCorrector.DEFAULT);
+        bind(MessageParser.class).toInstance(new MessageParserImpl());
 
         bind(ReIndexer.class).to(ReIndexerImpl.class);
         

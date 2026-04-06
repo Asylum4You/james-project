@@ -19,15 +19,18 @@
 
 package org.apache.james.events;
 
-import static org.apache.james.backends.rabbitmq.Constants.ALLOW_QUORUM;
 import static org.apache.james.backends.rabbitmq.Constants.AUTO_DELETE;
 import static org.apache.james.backends.rabbitmq.Constants.DURABLE;
 import static org.apache.james.backends.rabbitmq.Constants.EMPTY_ROUTING_KEY;
 import static org.apache.james.backends.rabbitmq.Constants.EXCLUSIVE;
 import static org.apache.james.backends.rabbitmq.Constants.REQUEUE;
+import static org.apache.james.backends.rabbitmq.Constants.evaluateAutoDelete;
+import static org.apache.james.backends.rabbitmq.Constants.evaluateDurable;
+import static org.apache.james.backends.rabbitmq.Constants.evaluateExclusive;
 import static org.apache.james.events.GroupRegistration.DEFAULT_RETRY_COUNT;
 
 import java.util.Collection;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -35,7 +38,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Predicate;
 
 import org.apache.commons.lang3.tuple.Pair;
-import org.apache.james.backends.rabbitmq.RabbitMQConfiguration;
 import org.apache.james.backends.rabbitmq.ReactorRabbitMQChannelPool;
 import org.apache.james.backends.rabbitmq.ReceiverProvider;
 import org.apache.james.util.ReactorUtils;
@@ -55,16 +57,15 @@ import reactor.rabbitmq.ConsumeOptions;
 import reactor.rabbitmq.QueueSpecification;
 import reactor.rabbitmq.Receiver;
 import reactor.rabbitmq.Sender;
-import reactor.util.retry.Retry;
 
-class GroupRegistrationHandler {
+public class GroupRegistrationHandler {
     private static final Logger LOGGER = LoggerFactory.getLogger(GroupRegistrationHandler.class);
 
     public static class GroupRegistrationHandlerGroup extends Group {
 
     }
 
-    static final Group GROUP = new GroupRegistrationHandlerGroup();
+    public static final Group GROUP = new GroupRegistrationHandlerGroup();
 
     private final NamingStrategy namingStrategy;
     private final Map<Group, GroupRegistration> groupRegistrations;
@@ -72,30 +73,28 @@ class GroupRegistrationHandler {
     private final ReactorRabbitMQChannelPool channelPool;
     private final Sender sender;
     private final ReceiverProvider receiverProvider;
-    private final RetryBackoffConfiguration retryBackoff;
+    private final RabbitMQEventBus.Configurations configurations;
     private final EventDeadLetters eventDeadLetters;
     private final ListenerExecutor listenerExecutor;
-    private final RabbitMQConfiguration configuration;
     private final GroupRegistration.WorkQueueName queueName;
-    private Scheduler scheduler;
+    private final Scheduler scheduler;
     private Optional<Disposable> consumer;
 
-    GroupRegistrationHandler(NamingStrategy namingStrategy, EventSerializer eventSerializer, ReactorRabbitMQChannelPool channelPool, Sender sender, ReceiverProvider receiverProvider,
-                             RetryBackoffConfiguration retryBackoff,
-                             EventDeadLetters eventDeadLetters, ListenerExecutor listenerExecutor, EventBusId eventBusId, RabbitMQConfiguration configuration) {
+    GroupRegistrationHandler(NamingStrategy namingStrategy, EventSerializer eventSerializer, ReactorRabbitMQChannelPool channelPool,
+                             Sender sender, ReceiverProvider receiverProvider, EventDeadLetters eventDeadLetters,
+                             ListenerExecutor listenerExecutor, RabbitMQEventBus.Configurations configurations) {
         this.namingStrategy = namingStrategy;
         this.eventSerializer = eventSerializer;
         this.channelPool = channelPool;
         this.sender = sender;
         this.receiverProvider = receiverProvider;
-        this.retryBackoff = retryBackoff;
         this.eventDeadLetters = eventDeadLetters;
         this.listenerExecutor = listenerExecutor;
-        this.configuration = configuration;
+        this.configurations = configurations;
         this.groupRegistrations = new ConcurrentHashMap<>();
         this.queueName = namingStrategy.workQueue(GROUP);
+        this.scheduler = Schedulers.newBoundedElastic(configurations.eventBusConfiguration().maxConcurrency(), ReactorUtils.DEFAULT_BOUNDED_ELASTIC_QUEUESIZE, "groups-handler");
         this.consumer = Optional.empty();
-
     }
 
     GroupRegistration retrieveGroupRegistration(Group group) {
@@ -104,20 +103,19 @@ class GroupRegistrationHandler {
     }
 
     public void start() {
-        scheduler = Schedulers.newBoundedElastic(EventBus.EXECUTION_RATE, ReactorUtils.DEFAULT_BOUNDED_ELASTIC_QUEUESIZE, "groups-handler");
         channelPool.createWorkQueue(
             QueueSpecification.queue(queueName.asString())
-                .durable(DURABLE)
-                .exclusive(!EXCLUSIVE)
-                .autoDelete(!AUTO_DELETE)
-                .arguments(configuration.workQueueArgumentsBuilder(!ALLOW_QUORUM)
+                .durable(evaluateDurable(DURABLE, configurations.rabbitMQConfiguration().isQuorumQueuesUsed()))
+                .exclusive(evaluateExclusive(!EXCLUSIVE, configurations.rabbitMQConfiguration().isQuorumQueuesUsed()))
+                .autoDelete(evaluateAutoDelete(!AUTO_DELETE, configurations.rabbitMQConfiguration().isQuorumQueuesUsed()))
+                .arguments(configurations.rabbitMQConfiguration().workQueueArgumentsBuilder()
                     .deadLetter(namingStrategy.deadLetterExchange())
                     .build()),
             BindingSpecification.binding()
                 .exchange(namingStrategy.exchange())
                 .queue(queueName.asString())
                 .routingKey(EMPTY_ROUTING_KEY))
-            .retryWhen(Retry.backoff(retryBackoff.getMaxRetries(), retryBackoff.getFirstBackoff()).jitter(retryBackoff.getJitterFactor()).scheduler(Schedulers.boundedElastic()))
+            .retryWhen(configurations.retryBackoff().asReactorRetry().scheduler(Schedulers.boundedElastic()))
             .block();
 
         this.consumer = Optional.of(consumeWorkQueue());
@@ -126,10 +124,10 @@ class GroupRegistrationHandler {
     private Disposable consumeWorkQueue() {
         return Flux.using(
                 receiverProvider::createReceiver,
-            receiver -> receiver.consumeManualAck(queueName.asString(), new ConsumeOptions().qos(EventBus.EXECUTION_RATE)),
+            receiver -> receiver.consumeManualAck(queueName.asString(), new ConsumeOptions().qos(configurations.eventBusConfiguration().maxConcurrency())),
             Receiver::close)
             .filter(delivery -> Objects.nonNull(delivery.getBody()))
-            .flatMap(this::deliver, EventBus.EXECUTION_RATE)
+            .flatMap(this::deliver, configurations.eventBusConfiguration().maxConcurrency())
             .subscribeOn(scheduler)
             .subscribe();
     }
@@ -137,10 +135,10 @@ class GroupRegistrationHandler {
     private Mono<Void> deliver(AcknowledgableDelivery acknowledgableDelivery) {
         byte[] eventAsBytes = acknowledgableDelivery.getBody();
 
-        return deserializeEvent(eventAsBytes)
-            .flatMapIterable(aa -> groupRegistrations.values()
+        return deserializeEvents(eventAsBytes)
+            .flatMapIterable(events -> groupRegistrations.values()
                 .stream()
-                .map(group -> Pair.of(group, aa))
+                .map(group -> Pair.of(group, events))
                 .collect(ImmutableList.toImmutableList()))
             .flatMap(event -> event.getLeft().runListenerReliably(DEFAULT_RETRY_COUNT, event.getRight()))
             .then(Mono.<Void>fromRunnable(acknowledgableDelivery::ack).subscribeOn(Schedulers.boundedElastic()))
@@ -153,8 +151,8 @@ class GroupRegistrationHandler {
             });
     }
 
-    private Mono<Event> deserializeEvent(byte[] eventAsBytes) {
-        return Mono.fromCallable(() -> eventSerializer.fromBytes(eventAsBytes));
+    private Mono<List<Event>> deserializeEvents(byte[] eventAsBytes) {
+        return Mono.fromCallable(() -> eventSerializer.asEventsFromBytes(eventAsBytes));
     }
 
     void stop() {
@@ -195,10 +193,9 @@ class GroupRegistrationHandler {
             eventSerializer,
             listener,
             group,
-            retryBackoff,
             eventDeadLetters,
             () -> groupRegistrations.remove(group),
-            listenerExecutor, configuration);
+            listenerExecutor, configurations);
     }
 
     Collection<Group> registeredGroups() {

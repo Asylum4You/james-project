@@ -31,7 +31,6 @@ import java.util.List;
 import jakarta.inject.Inject;
 
 import org.apache.james.blob.api.BlobStore;
-import org.apache.james.mailbox.AttachmentIdFactory;
 import org.apache.james.mailbox.cassandra.mail.CassandraAttachmentDAOV2.DAOAttachment;
 import org.apache.james.mailbox.exception.AttachmentNotFoundException;
 import org.apache.james.mailbox.model.AttachmentId;
@@ -39,6 +38,7 @@ import org.apache.james.mailbox.model.AttachmentMetadata;
 import org.apache.james.mailbox.model.MessageAttachmentMetadata;
 import org.apache.james.mailbox.model.MessageId;
 import org.apache.james.mailbox.model.ParsedAttachment;
+import org.apache.james.mailbox.store.mail.AttachmentIdAssignationStrategy;
 import org.apache.james.mailbox.store.mail.AttachmentMapper;
 import org.apache.james.util.ReactorUtils;
 import org.slf4j.Logger;
@@ -56,13 +56,13 @@ public class CassandraAttachmentMapper implements AttachmentMapper {
 
     private final CassandraAttachmentDAOV2 attachmentDAOV2;
     private final BlobStore blobStore;
-    private final AttachmentIdFactory attachmentIdFactory;
+    private final AttachmentIdAssignationStrategy attachmentIdAssignationStrategy;
 
     @Inject
-    public CassandraAttachmentMapper(CassandraAttachmentDAOV2 attachmentDAOV2, BlobStore blobStore, AttachmentIdFactory attachmentIdFactory) {
+    public CassandraAttachmentMapper(CassandraAttachmentDAOV2 attachmentDAOV2, BlobStore blobStore, AttachmentIdAssignationStrategy attachmentIdAssignationStrategy) {
         this.attachmentDAOV2 = attachmentDAOV2;
         this.blobStore = blobStore;
-        this.attachmentIdFactory = attachmentIdFactory;
+        this.attachmentIdAssignationStrategy = attachmentIdAssignationStrategy;
     }
 
     @Override
@@ -130,7 +130,7 @@ public class CassandraAttachmentMapper implements AttachmentMapper {
 
     private Mono<MessageAttachmentMetadata> storeAttachmentAsync(ParsedAttachment parsedAttachment, MessageId ownerMessageId) {
         try {
-            AttachmentId attachmentId = attachmentIdFactory.random();
+            AttachmentId attachmentId = attachmentIdAssignationStrategy.assign(parsedAttachment, ownerMessageId);
             ByteSource content = parsedAttachment.getContent();
             long size = content.size();
             return Mono.from(blobStore.save(blobStore.getDefaultBucketName(), content, LOW_COST))

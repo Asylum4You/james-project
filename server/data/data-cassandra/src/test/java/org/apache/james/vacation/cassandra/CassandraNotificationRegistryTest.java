@@ -36,16 +36,18 @@ import org.junit.jupiter.api.extension.RegisterExtension;
 
 class CassandraNotificationRegistryTest implements NotificationRegistryContract {
     @RegisterExtension
-    static CassandraClusterExtension cassandraCluster = new CassandraClusterExtension(CassandraNotificationRegistryModule.MODULE);
+    static CassandraClusterExtension cassandraCluster = new CassandraClusterExtension(CassandraNotificationRegistryDataDefinition.MODULE);
 
     NotificationRegistry notificationRegistry;
     RecipientId recipientId;
 
     @BeforeEach
     public void setUp(CassandraCluster cassandra) throws Exception {
-        notificationRegistry = new CassandraNotificationRegistry(zonedDateTimeProvider, new CassandraNotificationRegistryDAO(cassandra.getConf()));;
+        notificationRegistry = new CassandraNotificationRegistry(zonedDateTimeProvider, new CassandraNotificationRegistryDAO(cassandra.getConf()));
+
         recipientId = RecipientId.fromMailAddress(new MailAddress("benwa@apache.org"));
     }
+
     @Override
     public NotificationRegistry notificationRegistry() {
         return notificationRegistry;

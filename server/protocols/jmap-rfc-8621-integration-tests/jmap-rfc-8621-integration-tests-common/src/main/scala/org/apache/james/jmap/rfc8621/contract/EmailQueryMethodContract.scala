@@ -22,7 +22,7 @@ package org.apache.james.jmap.rfc8621.contract
 import java.io.ByteArrayOutputStream
 import java.nio.charset.StandardCharsets
 import java.time.format.DateTimeFormatter
-import java.time.{Instant, ZonedDateTime}
+import java.time.{Duration, Instant, ZonedDateTime}
 import java.util.Date
 import java.util.concurrent.TimeUnit
 import java.util.stream.Stream
@@ -34,13 +34,13 @@ import io.restassured.http.ContentType.JSON
 import jakarta.mail.Flags
 import net.javacrumbs.jsonunit.assertj.JsonAssertions.assertThatJson
 import net.javacrumbs.jsonunit.core.Option.IGNORING_ARRAY_ORDER
-import net.javacrumbs.jsonunit.core.internal.Options
 import org.apache.http.HttpStatus.SC_OK
 import org.apache.james.GuiceJamesServer
 import org.apache.james.jmap.core.ResponseObject.SESSION_STATE
 import org.apache.james.jmap.core.UTCDate
 import org.apache.james.jmap.http.UserCredential
 import org.apache.james.jmap.rfc8621.contract.Fixture.{ACCEPT_RFC8621_VERSION_HEADER, ANDRE, ANDRE_PASSWORD, BOB, BOB_PASSWORD, DOMAIN, authScheme, baseRequestSpecBuilder}
+import org.apache.james.jmap.rfc8621.contract.tags.CategoryTags
 import org.apache.james.mailbox.FlagsBuilder
 import org.apache.james.mailbox.MessageManager.AppendCommand
 import org.apache.james.mailbox.model.MailboxACL.Right
@@ -55,7 +55,7 @@ import org.apache.james.util.ClassLoaderUtils
 import org.apache.james.utils.DataProbeImpl
 import org.awaitility.Awaitility
 import org.awaitility.Durations.ONE_HUNDRED_MILLISECONDS
-import org.junit.jupiter.api.{BeforeEach, Test}
+import org.junit.jupiter.api.{BeforeEach, Tag, Test}
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.{Arguments, MethodSource, ValueSource}
 import org.threeten.extra.Seconds
@@ -138,6 +138,15 @@ trait EmailQueryMethodContract {
   private def buildTestMessage = {
     Message.Builder
       .of
+      .setSubject("test")
+      .setBody("testmail", StandardCharsets.UTF_8)
+      .build
+  }
+
+  private def buildTestMessage(sentAt: Date): Message = {
+    Message.Builder
+      .of
+      .setDate(sentAt)
       .setSubject("test")
       .setBody("testmail", StandardCharsets.UTF_8)
       .build
@@ -1186,34 +1195,37 @@ trait EmailQueryMethodContract {
          |	]
          |}""".stripMargin
 
-      val response = `given`
-        .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
-        .body(request)
-      .when
-        .post
-      .`then`
-        .statusCode(SC_OK)
-        .contentType(JSON)
-        .extract
-        .body
-        .asString
+    Awaitility.await().atMost(Duration.ofSeconds(5))
+      .untilAsserted(() => {
+        val response = `given`
+          .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
+          .body(request)
+        .when
+          .post
+        .`then`
+          .statusCode(SC_OK)
+          .contentType(JSON)
+          .extract
+          .body
+          .asString
 
-      assertThatJson(response).isEqualTo(
-        s"""{
-           |    "sessionState": "${SESSION_STATE.value}",
-           |    "methodResponses": [[
-           |            "Email/query",
-           |            {
-           |                "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
-           |                "queryState": "${generateQueryState(messageId1)}",
-           |                "canCalculateChanges": false,
-           |                "ids": ["${messageId1.serialize()}"],
-           |                "position": 0,
-           |                "limit": 256
-           |            },
-           |            "c1"
-           |        ]]
-           |}""".stripMargin)
+        assertThatJson(response).isEqualTo(
+          s"""{
+             |    "sessionState": "${SESSION_STATE.value}",
+             |    "methodResponses": [[
+             |            "Email/query",
+             |            {
+             |                "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+             |                "queryState": "${generateQueryState(messageId1)}",
+             |                "canCalculateChanges": false,
+             |                "ids": ["${messageId1.serialize()}"],
+             |                "position": 0,
+             |                "limit": 256
+             |            },
+             |            "c1"
+             |        ]]
+             |}""".stripMargin)
+      })
   }
 
   @Test
@@ -2492,7 +2504,7 @@ trait EmailQueryMethodContract {
         .asString
 
       assertThatJson(response)
-        .withOptions(new Options(IGNORING_ARRAY_ORDER))
+        .withOptions(IGNORING_ARRAY_ORDER)
         .inPath("$.methodResponses[0][1].ids")
         .isEqualTo(
         s"""["${messageId2.serialize}", "${messageId1.serialize}"]""".stripMargin)
@@ -3647,63 +3659,6 @@ trait EmailQueryMethodContract {
        """)
   }
 
-  @ParameterizedTest
-  @ValueSource(strings = Array(
-    "true",
-    "false"
-  ))
-  def collapseThreadsParameterShouldNoop(collapseThreads: Boolean, server: GuiceJamesServer): Unit = {
-    val message: Message = Message.Builder
-      .of
-      .setSubject("test")
-      .setBody("testmail", StandardCharsets.UTF_8)
-      .build
-    server.getProbe(classOf[MailboxProbeImpl]).createMailbox(MailboxPath.inbox(BOB))
-    val otherMailboxPath = MailboxPath.forUser(BOB, "other")
-    val otherMailboxId = server.getProbe(classOf[MailboxProbeImpl]).createMailbox(otherMailboxPath)
-    server.getProbe(classOf[MailboxProbeImpl])
-      .appendMessage(BOB.asString, MailboxPath.inbox(BOB), AppendCommand.from(message))
-      .getMessageId
-    val messageId2: MessageId = server.getProbe(classOf[MailboxProbeImpl])
-      .appendMessage(BOB.asString, otherMailboxPath, AppendCommand.from(message))
-      .getMessageId
-
-    val request =
-      s"""{
-         |  "using": [
-         |    "urn:ietf:params:jmap:core",
-         |    "urn:ietf:params:jmap:mail"],
-         |  "methodCalls": [[
-         |    "Email/query",
-         |    {
-         |      "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
-         |      "filter": {
-         |        "inMailbox": "${otherMailboxId.serialize}"
-         |       },
-         |       "collapseThreads": $collapseThreads
-         |    },
-         |    "c1"]]
-         |}""".stripMargin
-
-    awaitAtMostTenSeconds.untilAsserted { () =>
-      val response = `given`
-        .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
-        .body(request)
-      .when
-        .post
-      .`then`
-        .statusCode(SC_OK)
-        .contentType(JSON)
-        .extract
-        .body
-        .asString
-
-      assertThatJson(response)
-        .inPath("$.methodResponses[0][1].ids")
-        .isEqualTo(s"""["${messageId2.serialize}"]""")
-    }
-  }
-
   @Test
   def listMailsShouldReturnInvalidArgumentsWhenAnchorParameterIsPresent(): Unit = {
     val request =
@@ -3888,7 +3843,7 @@ trait EmailQueryMethodContract {
         .asString
 
       assertThatJson(response)
-        .withOptions(new Options(IGNORING_ARRAY_ORDER))
+        .withOptions(IGNORING_ARRAY_ORDER)
         .inPath("$.methodResponses[0][1].ids")
         .isEqualTo(
           s"""[
@@ -3945,7 +3900,7 @@ trait EmailQueryMethodContract {
         .asString
 
       assertThatJson(response)
-        .withOptions(new Options(IGNORING_ARRAY_ORDER))
+        .withOptions(IGNORING_ARRAY_ORDER)
         .inPath("$.methodResponses[0][1].ids")
         .isEqualTo(
           s"""[
@@ -4157,7 +4112,7 @@ trait EmailQueryMethodContract {
         .asString
 
       assertThatJson(response)
-        .withOptions(new Options(IGNORING_ARRAY_ORDER))
+        .withOptions(IGNORING_ARRAY_ORDER)
         .inPath("$.methodResponses[0][1].ids")
         .isEqualTo(s"""["${messageId2.serialize}", "${messageId1.serialize}"]""")
     }
@@ -5072,21 +5027,17 @@ trait EmailQueryMethodContract {
   @Test
   def combiningSortPositionAndLimitShouldYieldExpectedResult(server: GuiceJamesServer): Unit = {
     val mailboxId = server.getProbe(classOf[MailboxProbeImpl]).createMailbox(MailboxPath.inbox(BOB))
-    val message: Message = buildTestMessage
     val messageId1: MessageId = server.getProbe(classOf[MailboxProbeImpl])
       .appendMessage(BOB.asString, MailboxPath.inbox(BOB), AppendCommand.builder()
-        .withInternalDate(Date.from(ZonedDateTime.now().minusDays(2).toInstant))
-        .build(message))
+        .build(buildTestMessage(Date.from(ZonedDateTime.now().minusDays(3).toInstant))))
       .getMessageId
     val messageId2: MessageId = server.getProbe(classOf[MailboxProbeImpl])
       .appendMessage(BOB.asString, MailboxPath.inbox(BOB), AppendCommand.builder()
-        .withInternalDate(Date.from(ZonedDateTime.now().minusDays(2).toInstant))
-        .build(message))
+        .build(buildTestMessage(Date.from(ZonedDateTime.now().minusDays(2).toInstant))))
       .getMessageId
     val messageId3: MessageId = server.getProbe(classOf[MailboxProbeImpl])
       .appendMessage(BOB.asString, MailboxPath.inbox(BOB), AppendCommand.builder()
-        .withInternalDate(Date.from(ZonedDateTime.now().minusDays(2).toInstant))
-        .build(message))
+        .build(buildTestMessage(Date.from(ZonedDateTime.now().minusDays(1).toInstant))))
       .getMessageId
 
     val request =
@@ -5604,7 +5555,7 @@ trait EmailQueryMethodContract {
         .asString
 
       assertThatJson(response)
-        .withOptions(new Options(IGNORING_ARRAY_ORDER))
+        .withOptions(IGNORING_ARRAY_ORDER)
         .inPath("$.methodResponses[0][1].ids")
         .isEqualTo(s"""["${messageId7.serialize}", "${messageId6.serialize}", "${messageId4.serialize}", "${messageId1.serialize}"]""")
     }
@@ -5670,7 +5621,7 @@ trait EmailQueryMethodContract {
         .asString
 
       assertThatJson(response)
-        .withOptions(new Options(IGNORING_ARRAY_ORDER))
+        .withOptions(IGNORING_ARRAY_ORDER)
         .inPath("$.methodResponses[0][1].ids")
         .isEqualTo(s"""["${messageId2.serialize}", "${messageId3.serialize}"]""")
     }
@@ -5754,7 +5705,7 @@ trait EmailQueryMethodContract {
         .asString
 
       assertThatJson(response)
-        .withOptions(new Options(IGNORING_ARRAY_ORDER))
+        .withOptions(IGNORING_ARRAY_ORDER)
         .inPath("$.methodResponses[0][1].ids")
         .isEqualTo(s"""["${messageId7.serialize}", "${messageId6.serialize}", "${messageId4.serialize}", "${messageId1.serialize}"]""")
     }
@@ -5820,7 +5771,7 @@ trait EmailQueryMethodContract {
         .asString
 
       assertThatJson(response)
-        .withOptions(new Options(IGNORING_ARRAY_ORDER))
+        .withOptions(IGNORING_ARRAY_ORDER)
         .inPath("$.methodResponses[0][1].ids")
         .isEqualTo(s"""["${messageId2.serialize}", "${messageId3.serialize}"]""")
     }
@@ -5905,7 +5856,7 @@ trait EmailQueryMethodContract {
         .asString
 
       assertThatJson(response)
-        .withOptions(new Options(IGNORING_ARRAY_ORDER))
+        .withOptions(IGNORING_ARRAY_ORDER)
         .inPath("$.methodResponses[0][1].ids")
         .isEqualTo(s"""["${messageId7.serialize}", "${messageId6.serialize}", "${messageId4.serialize}", "${messageId1.serialize}"]""")
     }
@@ -5971,7 +5922,7 @@ trait EmailQueryMethodContract {
         .asString
 
       assertThatJson(response)
-        .withOptions(new Options(IGNORING_ARRAY_ORDER))
+        .withOptions(IGNORING_ARRAY_ORDER)
         .inPath("$.methodResponses[0][1].ids")
         .isEqualTo(s"""["${messageId2.serialize}", "${messageId3.serialize}"]""")
     }
@@ -6056,7 +6007,7 @@ trait EmailQueryMethodContract {
         .asString
 
       assertThatJson(response)
-        .withOptions(new Options(IGNORING_ARRAY_ORDER))
+        .withOptions(IGNORING_ARRAY_ORDER)
         .inPath("$.methodResponses[0][1].ids")
         .isEqualTo(s"""["${messageId7.serialize}", "${messageId6.serialize}", "${messageId4.serialize}", "${messageId1.serialize}"]""")
     }
@@ -6122,7 +6073,7 @@ trait EmailQueryMethodContract {
         .asString
 
       assertThatJson(response)
-        .withOptions(new Options(IGNORING_ARRAY_ORDER))
+        .withOptions(IGNORING_ARRAY_ORDER)
         .inPath("$.methodResponses[0][1].ids")
         .isEqualTo(s"""["${messageId2.serialize}", "${messageId3.serialize}"]""")
     }
@@ -6181,7 +6132,7 @@ trait EmailQueryMethodContract {
         .asString
 
       assertThatJson(response)
-        .withOptions(new Options(IGNORING_ARRAY_ORDER))
+        .withOptions(IGNORING_ARRAY_ORDER)
         .inPath("$.methodResponses[0][1].ids")
         .isEqualTo(s"""["${messageId1.serialize}"]""")
     }
@@ -6246,7 +6197,7 @@ trait EmailQueryMethodContract {
         .asString
 
       assertThatJson(response)
-        .withOptions(new Options(IGNORING_ARRAY_ORDER))
+        .withOptions(IGNORING_ARRAY_ORDER)
         .inPath("$.methodResponses[0][1].ids")
         .isEqualTo(s"""["${messageId1.serialize}", "${messageId4.serialize}"]""")
     }
@@ -6427,7 +6378,7 @@ trait EmailQueryMethodContract {
         .asString
 
       assertThatJson(response)
-        .withOptions(new Options(IGNORING_ARRAY_ORDER))
+        .withOptions(IGNORING_ARRAY_ORDER)
         .inPath("$.methodResponses[0][1].ids")
         .isEqualTo(
           s"""[
@@ -6663,9 +6614,9 @@ trait EmailQueryMethodContract {
   }
 
   @Test
-  def emailQueryFilterByTextShouldIgnoreAttachmentName(server: GuiceJamesServer): Unit = {
+  def emailQueryFilterByTextShouldIncludeAttachmentName(server: GuiceJamesServer): Unit = {
     server.getProbe(classOf[MailboxProbeImpl]).createMailbox(inbox(BOB))
-    server.getProbe(classOf[MailboxProbeImpl])
+    val messageId = server.getProbe(classOf[MailboxProbeImpl])
       .appendMessage(BOB.asString, MailboxPath.inbox(BOB), AppendCommand.from(
         ClassLoaderUtils.getSystemResourceAsSharedStream("eml/multipart_simple.eml")))
       .getMessageId
@@ -6702,7 +6653,51 @@ trait EmailQueryMethodContract {
       assertThatJson(response)
         .inPath("$.methodResponses[0][1].ids")
         .isEqualTo(
-          s"""[]""".stripMargin)
+          s"""["${messageId.serialize()}"]""".stripMargin)
+    }
+  }
+
+  @Test
+  def attachmentFilenameShouldBeSearchableWhenMissingInContentDispositionAndExistsInContentType(server: GuiceJamesServer): Unit = {
+    server.getProbe(classOf[MailboxProbeImpl]).createMailbox(inbox(BOB))
+    val messageId = server.getProbe(classOf[MailboxProbeImpl])
+      .appendMessage(BOB.asString, MailboxPath.inbox(BOB), AppendCommand.from(
+        ClassLoaderUtils.getSystemResourceAsSharedStream("eml/attachment-filename-in-content-type.eml")))
+      .getMessageId
+
+    val request =
+      s"""{
+         |  "using": [
+         |    "urn:ietf:params:jmap:core",
+         |    "urn:ietf:params:jmap:mail"],
+         |  "methodCalls": [[
+         |    "Email/query",
+         |    {
+         |      "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+         |      "filter": {
+         |        "text": "filename"
+         |      }
+         |    },
+         |    "c1"]]
+         |}""".stripMargin
+
+    awaitAtMostTenSeconds.untilAsserted { () =>
+      val response = `given`
+        .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
+        .body(request)
+      .when
+        .post
+      .`then`
+        .statusCode(SC_OK)
+        .contentType(JSON)
+        .extract
+        .body
+        .asString
+
+      assertThatJson(response)
+        .inPath("$.methodResponses[0][1].ids")
+        .isEqualTo(
+          s"""["${messageId.serialize()}"]""".stripMargin)
     }
   }
 
@@ -6819,7 +6814,7 @@ trait EmailQueryMethodContract {
         .asString
 
       assertThatJson(response)
-        .withOptions(new Options(IGNORING_ARRAY_ORDER))
+        .withOptions(IGNORING_ARRAY_ORDER)
         .inPath("$.methodResponses[0][1].ids")
         .isEqualTo(s"""["${messageId3.serialize}", "${messageId2.serialize}", "${messageId1.serialize}"]""")
     }
@@ -6884,7 +6879,7 @@ trait EmailQueryMethodContract {
         .asString
 
       assertThatJson(response)
-        .withOptions(new Options(IGNORING_ARRAY_ORDER))
+        .withOptions(IGNORING_ARRAY_ORDER)
         .inPath("$.methodResponses[0][1].ids")
         .isEqualTo(s"""["${messageId4.serialize}"]""")
     }
@@ -7034,22 +7029,24 @@ trait EmailQueryMethodContract {
          |    "c1"]]
          |}""".stripMargin
 
-    val response = `given`
-      .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
-      .body(request)
-    .when
-      .post
-    .`then`
-      .statusCode(SC_OK)
-      .contentType(JSON)
-      .extract
-      .body
-      .asString
+    awaitAtMostTenSeconds.untilAsserted { () =>
+      val response = `given`
+        .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
+        .body(request)
+      .when
+        .post
+      .`then`
+        .statusCode(SC_OK)
+        .contentType(JSON)
+        .extract
+        .body
+        .asString
 
-    assertThatJson(response)
-      .withOptions(new Options(IGNORING_ARRAY_ORDER))
-      .inPath("$.methodResponses[0][1].ids")
-      .isEqualTo(s"""["${messageId1.serialize}","${messageId2.serialize}"]""")
+      assertThatJson(response)
+        .withOptions(IGNORING_ARRAY_ORDER)
+        .inPath("$.methodResponses[0][1].ids")
+        .isEqualTo(s"""["${messageId1.serialize}","${messageId2.serialize}"]""")
+    }
   }
 
   @Test
@@ -7189,7 +7186,7 @@ trait EmailQueryMethodContract {
         .asString
 
       assertThatJson(response)
-        .withOptions(new Options(IGNORING_ARRAY_ORDER))
+        .withOptions(IGNORING_ARRAY_ORDER)
         .inPath("$.methodResponses[0][1].ids")
         .isEqualTo(s"""["${messageId.serialize}"]""")
     }
@@ -7476,9 +7473,441 @@ trait EmailQueryMethodContract {
         .asString
 
       assertThatJson(response)
-        .withOptions(new Options(IGNORING_ARRAY_ORDER))
+        .withOptions(IGNORING_ARRAY_ORDER)
         .inPath("$.methodResponses[0][1].ids")
         .isEqualTo(s"""["${messageId2.serialize}", "${messageId3.serialize}"]""")
+    }
+  }
+
+  @Test
+  def inMailboxAfterSortedByReceivedAtShouldCollapseThreads(server: GuiceJamesServer): Unit = {
+    val message1: Message = buildTestThreadMessage("test", "Message-ID")
+    val message2: Message = buildTestThreadMessage("BTW", "Message-ID-2")
+    val message3: Message = buildTestThreadMessage("Hello again", "Message-ID-3")
+
+    val beforeRequestDate1 = Date.from(ZonedDateTime.now().minusDays(3).toInstant)
+    val requestDate = ZonedDateTime.now().minusDays(1)
+    val afterRequestDate1 = Date.from(ZonedDateTime.now().toInstant)
+    val afterRequestDate2 = Date.from(ZonedDateTime.now().plusDays(1).toInstant)
+    val afterRequestDate3 = Date.from(ZonedDateTime.now().plusDays(2).toInstant)
+    val mailboxProbe = server.getProbe(classOf[MailboxProbeImpl])
+    val mailboxId = mailboxProbe.createMailbox(MailboxPath.inbox(BOB))
+
+    val messageId1: MessageId = sendMessageToBobInbox(server, message1, beforeRequestDate1)
+    val messageId2: MessageId = sendMessageToBobInbox(server, message2, afterRequestDate1)
+    val messageId3: MessageId = sendMessageToBobInbox(server, message3, afterRequestDate2)
+    val messageId4: MessageId = sendMessageToBobInbox(server, message3, afterRequestDate3)
+
+    val request =
+      s"""{
+         |  "using": [
+         |    "urn:ietf:params:jmap:core",
+         |    "urn:ietf:params:jmap:mail"],
+         |  "methodCalls": [[
+         |    "Email/query",
+         |    {
+         |      "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+         |      "filter": {
+         |        "inMailbox": "${mailboxId.serialize()}",
+         |        "after": "${UTCDate(requestDate).asUTC.format(UTC_DATE_FORMAT)}"
+         |      },
+         |      "sort": [{
+         |        "property":"receivedAt",
+         |        "isAscending": false
+         |      }],
+         |      "collapseThreads": true
+         |    },
+         |    "c1"]]
+         |}""".stripMargin
+
+    awaitAtMostTenSeconds.untilAsserted { () =>
+      val response = `given`
+        .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
+        .body(request)
+      .when
+        .post
+      .`then`
+        .statusCode(SC_OK)
+        .contentType(JSON)
+        .extract
+        .body
+        .asString
+
+      assertThatJson(response).isEqualTo(
+        s"""{
+           |    "sessionState": "${SESSION_STATE.value}",
+           |    "methodResponses": [[
+           |            "Email/query",
+           |            {
+           |                "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+           |                "queryState": "${generateQueryState(messageId4, messageId2)}",
+           |                "canCalculateChanges": false,
+           |                "position": 0,
+           |                "limit": 256,
+           |                "ids": ["${messageId4.serialize}", "${messageId2.serialize}"]
+           |            },
+           |            "c1"
+           |        ]]
+           |}""".stripMargin)
+    }
+  }
+
+  @Test
+  def inMailboxSortedByReceivedAtShouldCollapseThreads(server: GuiceJamesServer): Unit = {
+    val message1: Message = buildTestThreadMessage("test", "Message-ID")
+    val message2: Message = buildTestThreadMessage("BTW", "Message-ID-2")
+
+    val beforeRequestDate1 = Date.from(ZonedDateTime.now().minusDays(3).toInstant)
+    val beforeRequestDate2 = Date.from(ZonedDateTime.now().minusDays(2).toInstant)
+    val afterRequestDate1 = Date.from(ZonedDateTime.now().toInstant)
+    val afterRequestDate2 = Date.from(ZonedDateTime.now().plusDays(1).toInstant)
+    val mailboxProbe = server.getProbe(classOf[MailboxProbeImpl])
+    val mailboxId = mailboxProbe.createMailbox(MailboxPath.inbox(BOB))
+
+    val messageId1: MessageId = sendMessageToBobInbox(server, message1, beforeRequestDate1)
+    val messageId2: MessageId = sendMessageToBobInbox(server, message1, beforeRequestDate2)
+    val messageId3: MessageId = sendMessageToBobInbox(server, message2, afterRequestDate1)
+    val messageId4: MessageId = sendMessageToBobInbox(server, message2, afterRequestDate2)
+
+    val request =
+      s"""{
+         |  "using": [
+         |    "urn:ietf:params:jmap:core",
+         |    "urn:ietf:params:jmap:mail"],
+         |  "methodCalls": [[
+         |    "Email/query",
+         |    {
+         |      "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+         |      "filter": {
+         |        "inMailbox": "${mailboxId.serialize()}"
+         |       },
+         |      "sort": [{
+         |        "property":"receivedAt",
+         |        "isAscending": false
+         |      }],
+         |      "collapseThreads": true
+         |    },
+         |    "c1"]]
+         |}""".stripMargin
+
+    awaitAtMostTenSeconds.untilAsserted { () =>
+      val response = `given`
+        .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
+        .body(request)
+      .when
+        .post
+      .`then`
+        .statusCode(SC_OK)
+        .contentType(JSON)
+        .extract
+        .body
+        .asString
+
+      assertThatJson(response).isEqualTo(
+        s"""{
+           |    "sessionState": "${SESSION_STATE.value}",
+           |    "methodResponses": [[
+           |            "Email/query",
+           |            {
+           |                "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+           |                "queryState": "${generateQueryState(messageId4, messageId2)}",
+           |                "canCalculateChanges": false,
+           |                "position": 0,
+           |                "limit": 256,
+           |                "ids": ["${messageId4.serialize}", "${messageId2.serialize}"]
+           |            },
+           |            "c1"
+           |        ]]
+           |}""".stripMargin)
+    }
+  }
+
+  @Test
+  def inMailboxSortedBySentAtShouldCollapseThreads(server: GuiceJamesServer): Unit = {
+    val message1: Message = buildTestThreadMessage("test", "Message-ID")
+    val message2: Message = buildTestThreadMessage("BTW", "Message-ID-2")
+
+    val beforeRequestDate1 = Date.from(ZonedDateTime.now().minusDays(3).toInstant)
+    val beforeRequestDate2 = Date.from(ZonedDateTime.now().minusDays(2).toInstant)
+    val afterRequestDate1 = Date.from(ZonedDateTime.now().toInstant)
+    val afterRequestDate2 = Date.from(ZonedDateTime.now().plusDays(1).toInstant)
+    val mailboxProbe = server.getProbe(classOf[MailboxProbeImpl])
+    val mailboxId = mailboxProbe.createMailbox(MailboxPath.inbox(BOB))
+
+    val messageId1: MessageId = sendMessageToBobInbox(server, message1, beforeRequestDate1)
+    val messageId2: MessageId = sendMessageToBobInbox(server, message1, beforeRequestDate2)
+    val messageId3: MessageId = sendMessageToBobInbox(server, message2, afterRequestDate1)
+    val messageId4: MessageId = sendMessageToBobInbox(server, message2, afterRequestDate2)
+
+    val request =
+      s"""{
+         |  "using": [
+         |    "urn:ietf:params:jmap:core",
+         |    "urn:ietf:params:jmap:mail"],
+         |  "methodCalls": [[
+         |    "Email/query",
+         |    {
+         |      "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+         |      "filter": {
+         |        "inMailbox": "${mailboxId.serialize()}"
+         |       },
+         |      "sort": [{
+         |        "property":"sentAt",
+         |        "isAscending": false
+         |      }],
+         |      "collapseThreads": true
+         |    },
+         |    "c1"]]
+         |}""".stripMargin
+
+    awaitAtMostTenSeconds.untilAsserted { () =>
+      val response = `given`
+        .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
+        .body(request)
+      .when
+        .post
+      .`then`
+        .statusCode(SC_OK)
+        .contentType(JSON)
+        .extract
+        .body
+        .asString
+
+      assertThatJson(response).isEqualTo(
+        s"""{
+           |    "sessionState": "${SESSION_STATE.value}",
+           |    "methodResponses": [[
+           |            "Email/query",
+           |            {
+           |                "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+           |                "queryState": "${generateQueryState(messageId4, messageId2)}",
+           |                "canCalculateChanges": false,
+           |                "position": 0,
+           |                "limit": 256,
+           |                "ids": ["${messageId4.serialize}", "${messageId2.serialize}"]
+           |            },
+           |            "c1"
+           |        ]]
+           |}""".stripMargin)
+    }
+  }
+
+  @Test
+  def inMailboxBeforeSortedByReceivedAtShouldCollapseThreads(server: GuiceJamesServer): Unit = {
+    val message1: Message = buildTestThreadMessage("test", "Message-ID")
+    val message2: Message = buildTestThreadMessage("BTW", "Message-ID-2")
+    val message3: Message = buildTestThreadMessage("Hello again", "Message-ID-3")
+
+    val beforeRequestDate1 = Date.from(ZonedDateTime.now().minusDays(3).toInstant)
+    val beforeRequestDate2 = Date.from(ZonedDateTime.now().minusDays(2).toInstant)
+    val beforeRequestDate3 = Date.from(ZonedDateTime.now().minusDays(1).toInstant)
+    val requestDate = ZonedDateTime.now()
+    val afterRequestDate1 = Date.from(ZonedDateTime.now().plusDays(1).toInstant)
+    val mailboxProbe = server.getProbe(classOf[MailboxProbeImpl])
+    val mailboxId = mailboxProbe.createMailbox(MailboxPath.inbox(BOB))
+
+    val messageId1: MessageId = sendMessageToBobInbox(server, message1, beforeRequestDate1)
+    val messageId2: MessageId = sendMessageToBobInbox(server, message2, beforeRequestDate2)
+    val messageId3: MessageId = sendMessageToBobInbox(server, message2, beforeRequestDate3)
+    val messageId4: MessageId = sendMessageToBobInbox(server, message3, afterRequestDate1)
+
+    val request =
+      s"""{
+         |  "using": [
+         |    "urn:ietf:params:jmap:core",
+         |    "urn:ietf:params:jmap:mail"],
+         |  "methodCalls": [[
+         |    "Email/query",
+         |    {
+         |      "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+         |      "filter": {
+         |        "inMailbox": "${mailboxId.serialize()}",
+         |        "before": "${UTCDate(requestDate).asUTC.format(UTC_DATE_FORMAT)}"
+         |      },
+         |      "sort": [{
+         |        "property":"receivedAt",
+         |        "isAscending": false
+         |      }],
+         |      "collapseThreads": true
+         |    },
+         |    "c1"]]
+         |}""".stripMargin
+
+    awaitAtMostTenSeconds.untilAsserted { () =>
+      val response = `given`
+        .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
+        .body(request)
+      .when
+        .post
+      .`then`
+        .statusCode(SC_OK)
+        .contentType(JSON)
+        .extract
+        .body
+        .asString
+
+      assertThatJson(response).isEqualTo(
+        s"""{
+           |    "sessionState": "${SESSION_STATE.value}",
+           |    "methodResponses": [[
+           |            "Email/query",
+           |            {
+           |                "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+           |                "queryState": "${generateQueryState(messageId3, messageId1)}",
+           |                "canCalculateChanges": false,
+           |                "position": 0,
+           |                "limit": 256,
+           |                "ids": ["${messageId3.serialize}", "${messageId1.serialize}"]
+           |            },
+           |            "c1"
+           |        ]]
+           |}""".stripMargin)
+    }
+  }
+
+  @Test
+  def collapseThreadsShouldApplyOnSearchIndexPath(server: GuiceJamesServer): Unit = {
+    val thread1Message: Message = buildTestThreadMessage("thread-1", "Message-ID-1")
+    val thread2Message: Message = buildTestThreadMessage("thread-2", "Message-ID-2")
+
+    val threeDaysBefore = Date.from(ZonedDateTime.now().minusDays(3).toInstant)
+    val twoDaysBefore = Date.from(ZonedDateTime.now().minusDays(2).toInstant)
+    val oneDayBefore = Date.from(ZonedDateTime.now().minusDays(1).toInstant)
+    val mailboxId = server.getProbe(classOf[MailboxProbeImpl]).createMailbox(MailboxPath.inbox(BOB))
+
+    // Thread 1: message 1 (oldest), message 3 (newest)
+    // Thread 2: message 2
+    val messageId1: MessageId = sendMessageToBobInbox(server, thread1Message, threeDaysBefore)
+    val messageId2: MessageId = sendMessageToBobInbox(server, thread2Message, twoDaysBefore)
+    val messageId3: MessageId = sendMessageToBobInbox(server, thread1Message, oneDayBefore)
+
+    val request: String =
+      s"""{
+         |  "using": [
+         |    "urn:ietf:params:jmap:core",
+         |    "urn:ietf:params:jmap:mail"],
+         |  "methodCalls": [[
+         |    "Email/query",
+         |    {
+         |      "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+         |      "filter": {
+         |        "inMailbox": "${mailboxId.serialize()}",
+         |        "text": "testmail"
+         |      },
+         |      "sort": [{
+         |        "property":"receivedAt",
+         |        "isAscending": false
+         |      }],
+         |      "collapseThreads": true
+         |    },
+         |    "c1"]]
+         |}""".stripMargin
+
+    awaitAtMostTenSeconds.untilAsserted { () =>
+      val response = `given`
+        .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
+        .body(request)
+      .when
+        .post
+      .`then`
+        .statusCode(SC_OK)
+        .contentType(JSON)
+        .extract
+        .body
+        .asString
+
+      assertThatJson(response).isEqualTo(
+        s"""{
+           |    "sessionState": "${SESSION_STATE.value}",
+           |    "methodResponses": [[
+           |            "Email/query",
+           |            {
+           |                "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+           |                "queryState": "${generateQueryState(messageId3, messageId2)}",
+           |                "canCalculateChanges": false,
+           |                "position": 0,
+           |                "limit": 256,
+           |                "ids": ["${messageId3.serialize}", "${messageId2.serialize}"]
+           |            },
+           |            "c1"
+           |        ]]
+           |}""".stripMargin)
+    }
+  }
+
+  @Test
+  @Tag(CategoryTags.BASIC_FEATURE)
+  def collapseThreadsShouldApplyPaginationOnCollapsedResults(server: GuiceJamesServer): Unit = {
+    val thread1Message: Message = buildTestThreadMessage("thread-1", "Message-ID-1")
+    val thread2Message: Message = buildTestThreadMessage("thread-2", "Message-ID-2")
+    val thread3Message: Message = buildTestThreadMessage("thread-3", "Message-ID-3")
+
+    val fourDaysBefore = Date.from(ZonedDateTime.now().minusDays(4).toInstant)
+    val threeDaysBefore = Date.from(ZonedDateTime.now().minusDays(3).toInstant)
+    val twoDaysBefore = Date.from(ZonedDateTime.now().minusDays(2).toInstant)
+    val oneDayBefore = Date.from(ZonedDateTime.now().minusDays(1).toInstant)
+    val mailboxId = server.getProbe(classOf[MailboxProbeImpl]).createMailbox(MailboxPath.inbox(BOB))
+
+    // Thread 1: message 1 (oldest), message 2 (newest)
+    // Thread 2: message 3
+    // Thread 3: message 4
+    val messageId1: MessageId = sendMessageToBobInbox(server, thread1Message, twoDaysBefore)
+    val messageId2: MessageId = sendMessageToBobInbox(server, thread1Message, oneDayBefore)
+    val messageId3: MessageId = sendMessageToBobInbox(server, thread2Message, threeDaysBefore)
+    val messageId4: MessageId = sendMessageToBobInbox(server, thread3Message, fourDaysBefore)
+
+    val request: String =
+      s"""{
+         |  "using": [
+         |    "urn:ietf:params:jmap:core",
+         |    "urn:ietf:params:jmap:mail"],
+         |  "methodCalls": [[
+         |    "Email/query",
+         |    {
+         |      "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+         |      "filter": {
+         |        "inMailbox": "${mailboxId.serialize()}",
+         |        "text": "testmail"
+         |      },
+         |      "sort": [{
+         |        "property":"receivedAt",
+         |        "isAscending": false
+         |      }],
+         |      "position": 1,
+         |      "limit": 2,
+         |      "collapseThreads": true
+         |    },
+         |    "c1"]]
+         |}""".stripMargin
+
+    awaitAtMostTenSeconds.untilAsserted { () =>
+      val response: String = `given`
+        .header(ACCEPT.toString, ACCEPT_RFC8621_VERSION_HEADER)
+        .body(request)
+      .when
+        .post
+      .`then`
+        .statusCode(SC_OK)
+        .contentType(JSON)
+        .extract
+        .body
+        .asString
+
+      assertThatJson(response).isEqualTo(
+        s"""{
+           |    "sessionState": "${SESSION_STATE.value}",
+           |    "methodResponses": [[
+           |            "Email/query",
+           |            {
+           |                "accountId": "29883977c13473ae7cb7678ef767cbfbaffc8a44a6e463d971d23a65c1dc4af6",
+           |                "queryState": "${generateQueryState(messageId3, messageId4)}",
+           |                "canCalculateChanges": false,
+           |                "position": 1,
+           |                "ids": ["${messageId3.serialize}", "${messageId4.serialize}"]
+           |            },
+           |            "c1"
+           |        ]]
+           |}""".stripMargin)
     }
   }
 
@@ -7487,6 +7916,15 @@ trait EmailQueryMethodContract {
       .appendMessage(BOB.asString, MailboxPath.inbox(BOB),
         AppendCommand.builder().withInternalDate(requestDate).build(message))
       .getMessageId
+  }
+
+  private def buildTestThreadMessage(subject: String, mimeMessageId: String) = {
+    Message.Builder
+      .of
+      .setMessageId(mimeMessageId)
+      .setSubject(subject)
+      .setBody("testmail", StandardCharsets.UTF_8)
+      .build
   }
 
   private def generateQueryState(messages: MessageId*): String =

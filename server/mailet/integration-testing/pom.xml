@@ -23,7 +23,7 @@
     <parent>
         <groupId>org.apache.james</groupId>
         <artifactId>james-server</artifactId>
-        <version>3.9.0-SNAPSHOT</version>
+        <version>3.10.0-SNAPSHOT</version>
         <relativePath>../../pom.xml</relativePath>
     </parent>
 
@@ -33,7 +33,7 @@
     <name>Apache James :: Server :: Mailet :: Integration Testing</name>
 
     <properties>
-        <xmlunit.version>2.9.1</xmlunit.version>
+        <xmlunit.version>2.10.2</xmlunit.version>
     </properties>
 
     <dependencies>

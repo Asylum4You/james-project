@@ -22,7 +22,7 @@ package org.apache.james.protocols.smtp;
 
 import java.util.Optional;
 
-import org.apache.james.protocols.api.OidcSASLConfiguration;
+import org.apache.james.jwt.OidcSASLConfiguration;
 import org.apache.james.protocols.api.ProtocolConfigurationImpl;
 
 /**
@@ -37,7 +37,13 @@ public class SMTPConfigurationImpl extends ProtocolConfigurationImpl implements 
     public SMTPConfigurationImpl() {
         super("JAMES SMTP Protocols Server");
     }
-    
+
+    @Override
+    public SenderVerificationConfiguration senderVerificationConfiguration() {
+        boolean allowUnauthenticatedSender = true;
+        return new SenderVerificationConfiguration(SenderVerificationMode.STRICT, allowUnauthenticatedSender);
+    }
+
     @Override
     public long getMaxMessageSize() {
         return maxMessageSize;

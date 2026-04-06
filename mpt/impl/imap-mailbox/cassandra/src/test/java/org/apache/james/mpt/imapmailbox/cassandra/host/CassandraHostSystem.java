@@ -41,6 +41,7 @@ import org.apache.james.mailbox.cassandra.TestCassandraMailboxSessionMapperFacto
 import org.apache.james.mailbox.cassandra.ids.CassandraMessageId;
 import org.apache.james.mailbox.cassandra.quota.CassandraCurrentQuotaManagerV2;
 import org.apache.james.mailbox.cassandra.quota.CassandraPerUserMaxQuotaManagerV2;
+import org.apache.james.mailbox.quota.QuotaChangeNotifier;
 import org.apache.james.mailbox.quota.QuotaRootResolver;
 import org.apache.james.mailbox.store.JVMMailboxPathLocker;
 import org.apache.james.mailbox.store.MailboxManagerConfiguration;
@@ -54,7 +55,7 @@ import org.apache.james.mailbox.store.StoreSubscriptionManager;
 import org.apache.james.mailbox.store.extractor.DefaultTextExtractor;
 import org.apache.james.mailbox.store.mail.NaiveThreadIdGuessingAlgorithm;
 import org.apache.james.mailbox.store.mail.ThreadIdGuessingAlgorithm;
-import org.apache.james.mailbox.store.mail.model.impl.MessageParser;
+import org.apache.james.mailbox.store.mail.model.impl.MessageParserImpl;
 import org.apache.james.mailbox.store.quota.DefaultUserQuotaRootResolver;
 import org.apache.james.mailbox.store.quota.ListeningCurrentQuotaUpdater;
 import org.apache.james.mailbox.store.quota.QuotaComponents;
@@ -109,7 +110,7 @@ public class CassandraHostSystem extends JamesImapHostSystem {
         SessionProviderImpl sessionProvider = new SessionProviderImpl(authenticator, authorizator);
         QuotaRootResolver quotaRootResolver = new DefaultUserQuotaRootResolver(sessionProvider, mapperFactory);
 
-        perUserMaxQuotaManager = new CassandraPerUserMaxQuotaManagerV2(new CassandraQuotaLimitDao(session));
+        perUserMaxQuotaManager = new CassandraPerUserMaxQuotaManagerV2(new CassandraQuotaLimitDao(session), QuotaChangeNotifier.NOOP);
         CassandraCurrentQuotaManagerV2 currentQuotaManager = new CassandraCurrentQuotaManagerV2(new CassandraQuotaCurrentValueDao(session));
         StoreQuotaManager quotaManager = new StoreQuotaManager(currentQuotaManager, perUserMaxQuotaManager);
         ListeningCurrentQuotaUpdater quotaUpdater = new ListeningCurrentQuotaUpdater(currentQuotaManager, quotaRootResolver, eventBus, quotaManager);
@@ -121,7 +122,7 @@ public class CassandraHostSystem extends JamesImapHostSystem {
         MessageSearchIndex index = new SimpleMessageSearchIndex(mapperFactory, mapperFactory, new DefaultTextExtractor(), attachmentManager);
 
         mailboxManager = new CassandraMailboxManager(mapperFactory, sessionProvider,
-            new JVMMailboxPathLocker(), new MessageParser(), messageIdFactory,
+            new JVMMailboxPathLocker(), new MessageParserImpl(), messageIdFactory,
             eventBus, annotationManager, storeRightManager, quotaComponents, index, MailboxManagerConfiguration.DEFAULT,
             PreDeletionHooks.NO_PRE_DELETION_HOOK, threadIdGuessingAlgorithm, clock);
 

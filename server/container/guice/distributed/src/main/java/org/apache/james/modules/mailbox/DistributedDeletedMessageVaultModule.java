@@ -19,17 +19,17 @@
 
 package org.apache.james.modules.mailbox;
 
-import org.apache.james.backends.cassandra.components.CassandraModule;
+import org.apache.james.backends.cassandra.components.CassandraDataDefinition;
+import org.apache.james.events.EventListener;
 import org.apache.james.mailbox.cassandra.DeleteMessageListener;
 import org.apache.james.modules.vault.DeletedMessageVaultModule;
-import org.apache.james.utils.InitializationOperation;
-import org.apache.james.utils.InitilizationOperationBuilder;
 import org.apache.james.vault.DeletedMessageVault;
+import org.apache.james.vault.DeletedMessageVaultDeletionListener;
 import org.apache.james.vault.blob.BlobStoreDeletedMessageVault;
 import org.apache.james.vault.blob.BucketNameGenerator;
 import org.apache.james.vault.dto.DeletedMessageWithStorageInformationConverter;
 import org.apache.james.vault.metadata.CassandraDeletedMessageMetadataVault;
-import org.apache.james.vault.metadata.DeletedMessageMetadataModule;
+import org.apache.james.vault.metadata.DeletedMessageMetadataDataDefinition;
 import org.apache.james.vault.metadata.DeletedMessageMetadataVault;
 import org.apache.james.vault.metadata.MetadataDAO;
 import org.apache.james.vault.metadata.StorageInformationDAO;
@@ -38,17 +38,17 @@ import org.apache.james.vault.metadata.UserPerBucketDAO;
 import com.google.inject.AbstractModule;
 import com.google.inject.Scopes;
 import com.google.inject.multibindings.Multibinder;
-import com.google.inject.multibindings.ProvidesIntoSet;
+import com.google.inject.name.Names;
 
 public class DistributedDeletedMessageVaultModule extends AbstractModule {
     @Override
     protected void configure() {
         install(new DeletedMessageVaultModule());
 
-        Multibinder<CassandraModule> cassandraDataDefinitions = Multibinder.newSetBinder(binder(), CassandraModule.class);
+        Multibinder<CassandraDataDefinition> cassandraDataDefinitions = Multibinder.newSetBinder(binder(), CassandraDataDefinition.class);
         cassandraDataDefinitions
             .addBinding()
-            .toInstance(DeletedMessageMetadataModule.MODULE);
+            .toInstance(DeletedMessageMetadataDataDefinition.MODULE);
 
         bind(MetadataDAO.class).in(Scopes.SINGLETON);
         bind(StorageInformationDAO.class).in(Scopes.SINGLETON);
@@ -64,15 +64,8 @@ public class DistributedDeletedMessageVaultModule extends AbstractModule {
         bind(DeletedMessageVault.class)
             .to(BlobStoreDeletedMessageVault.class);
 
-        Multibinder.newSetBinder(binder(), DeleteMessageListener.DeletionCallback.class)
+        Multibinder.newSetBinder(binder(), EventListener.ReactiveGroupEventListener.class, Names.named(DeleteMessageListener.CONTENT_DELETION))
             .addBinding()
-            .to(DistributedDeletedMessageVaultDeletionCallback.class);
-    }
-
-    @ProvidesIntoSet
-    InitializationOperation init(DistributedDeletedMessageVaultDeletionCallback callback) {
-        return InitilizationOperationBuilder
-            .forClass(DistributedDeletedMessageVaultDeletionCallback.class)
-            .init(callback::init);
+            .to(DeletedMessageVaultDeletionListener.class);
     }
 }

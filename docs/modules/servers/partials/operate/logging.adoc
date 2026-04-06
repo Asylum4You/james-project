@@ -1,0 +1,43 @@
+We recommend to closely monitoring *ERROR* and *WARNING* logs. Those
+logs should be considered not normal.
+
+If you encounter some suspicious logs:
+
+* If you have any doubt about the log being caused by a bug in James
+source code, please reach us via the bug tracker, the user mailing list or our Gitter channel (see our
+http://james.apache.org/#second[community page])
+* They can be due to insufficient performance from tier applications (eg
+{backend-name} timeouts). In such case we advise you to conduct a close
+review of performances at the tier level.
+
+Leveraging filters in Kibana discover view can help to filter out
+''already known'' frequently occurring logs.
+
+When reporting ERROR or WARNING logs, consider adding the full logs, and
+related data (eg the raw content of a mail triggering an issue) to the
+bug report in order to ease resolution.
+
+== Logging configuration
+
+{server-name} uses link:http://logback.qos.ch/[logback] as a logging library
+and link:https://docs.fluentbit.io/[FluentBit] as centralize logging.
+
+Information about logback configuration can be found
+link:http://logback.qos.ch/manual/configuration.html[here].
+
+It is possible to configure a logback appender to expose structured logging
+as JSON using logback's  `JsonEncoder` like in the following example:
+
+```
+<appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+         <encoder class="ch.qos.logback.classic.encoder.JsonEncoder">
+             <withFormattedMessage>true</withFormattedMessage>
+         </encoder>
+         <immediateFlush>false</immediateFlush>
+</appender>
+```
+
+Note that dedicated formatters can be added to your docker containers :
+
+ - Add the corresponding JAR onto the `/root/libs` folder of docker container
+ - Add the JAR path onto `/root/jib-classpath-file` for it to be loaded on the classpath by the JAVA runtime.

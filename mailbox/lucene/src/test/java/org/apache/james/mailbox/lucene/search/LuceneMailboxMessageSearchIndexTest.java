@@ -41,6 +41,7 @@ import org.apache.james.mailbox.MessageUid;
 import org.apache.james.mailbox.model.Mailbox;
 import org.apache.james.mailbox.model.MailboxPath;
 import org.apache.james.mailbox.model.MessageId;
+import org.apache.james.mailbox.model.SearchOptions;
 import org.apache.james.mailbox.model.SearchQuery;
 import org.apache.james.mailbox.model.SearchQuery.AddressType;
 import org.apache.james.mailbox.model.SearchQuery.DateResolution;
@@ -52,9 +53,11 @@ import org.apache.james.mailbox.model.TestMessageId;
 import org.apache.james.mailbox.model.UidValidity;
 import org.apache.james.mailbox.model.UpdatedFlags;
 import org.apache.james.mailbox.store.MessageBuilder;
+import org.apache.james.mailbox.store.extractor.JsoupTextExtractor;
 import org.apache.james.mailbox.store.search.ListeningMessageSearchIndex;
 import org.apache.james.mailbox.store.search.ListeningMessageSearchIndexContract;
-import org.apache.lucene.store.RAMDirectory;
+import org.apache.james.util.streams.Limit;
+import org.apache.lucene.store.ByteBuffersDirectory;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -63,7 +66,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 
 class LuceneMailboxMessageSearchIndexTest {
-    static final long LIMIT = 100L;
+    static final SearchOptions LIMIT = SearchOptions.limit(Limit.limit(100));
     static final TestId TEST_ID_1 = TestId.of(0);
     static final TestId TEST_ID_2 = TestId.of(1);
     static final TestId TEST_ID_3 = TestId.of(2);
@@ -112,7 +115,7 @@ class LuceneMailboxMessageSearchIndexTest {
         id3 = factory.generate();
         id4 = factory.generate();
         id5 = factory.generate();
-        index = new LuceneMessageSearchIndex(null, new TestId.Factory(), new RAMDirectory(), true, useLenient(), factory, null);
+        index = new LuceneMessageSearchIndex(null, new TestId.Factory(), new ByteBuffersDirectory(), true, factory, null, new JsoupTextExtractor());
         index.setEnableSuffixMatch(true);
         Map<String, String> headersSubject = new HashMap<>();
         headersSubject.put("Subject", "test (fwd)");
@@ -143,7 +146,7 @@ class LuceneMailboxMessageSearchIndexTest {
             .size(200);
         index.add(session, mailbox, builder1.build(id1)).block();
 
-        uid2 = MessageUid.of(1);
+        uid2 = MessageUid.of(2);
         MessageBuilder builder2 = new MessageBuilder()
             .headers(headersSubject)
             .flags(new Flags(Flag.ANSWERED))
@@ -154,7 +157,7 @@ class LuceneMailboxMessageSearchIndexTest {
             .size(20);
         index.add(session, mailbox2, builder2.build(id2)).block();
         
-        uid3 = MessageUid.of(2);
+        uid3 = MessageUid.of(3);
         Calendar cal = Calendar.getInstance();
         cal.set(1980, 2, 10);
         MessageBuilder builder3 = new MessageBuilder()
@@ -167,7 +170,7 @@ class LuceneMailboxMessageSearchIndexTest {
             .size(20);
         index.add(session, mailbox, builder3.build(id3)).block();
         
-        uid4 = MessageUid.of(3);
+        uid4 = MessageUid.of(4);
         Calendar cal2 = Calendar.getInstance();
         cal2.set(8000, 2, 10);
         MessageBuilder builder4 = new MessageBuilder()
@@ -180,7 +183,7 @@ class LuceneMailboxMessageSearchIndexTest {
             .size(20);
         index.add(session, mailbox, builder4.build(id4)).block();
         
-        uid5 = MessageUid.of(10);
+        uid5 = MessageUid.of(5);
         MessageBuilder builder = new MessageBuilder();
         builder.header("From", "test <user-from@domain.org>");
         builder.header("To", FROM_ADDRESS);
@@ -358,7 +361,7 @@ class LuceneMailboxMessageSearchIndexTest {
         SearchQuery query = SearchQuery.of(SearchQuery.all());
 
         int limit = 1;
-        List<MessageId> result = index.search(session, ImmutableList.of(mailbox.getMailboxId(), mailbox2.getMailboxId(), mailbox3.getMailboxId()), query, limit)
+        List<MessageId> result = index.search(session, ImmutableList.of(mailbox.getMailboxId(), mailbox2.getMailboxId(), mailbox3.getMailboxId()), query, SearchOptions.limit(Limit.limit(1)))
             .collectList().block();
 
         assertThat(result).hasSize(limit);
@@ -621,10 +624,10 @@ class LuceneMailboxMessageSearchIndexTest {
             .newFlags(newFlags)
             .build();
 
-        index.update(session, mailbox.getMailboxId(), Lists.newArrayList(updatedFlags)).block();
+        index.update(session, mailbox2.getMailboxId(), Lists.newArrayList(updatedFlags)).block();
 
         SearchQuery query = SearchQuery.of(SearchQuery.flagIsSet(Flags.Flag.DRAFT));
-        assertThat(index.search(session, mailbox, query).toStream())
+        assertThat(index.search(session, mailbox2, query).toStream())
             .containsExactly(uid2);
     }
 
@@ -655,11 +658,11 @@ class LuceneMailboxMessageSearchIndexTest {
             .newFlags(newFlags)
             .build();
 
-        index.update(session, mailbox.getMailboxId(), Lists.newArrayList(updatedFlags)).block();
-        index.update(session, mailbox.getMailboxId(), Lists.newArrayList(updatedFlags)).block();
+        index.update(session, mailbox2.getMailboxId(), Lists.newArrayList(updatedFlags)).block();
+        index.update(session, mailbox2.getMailboxId(), Lists.newArrayList(updatedFlags)).block();
 
         SearchQuery query = SearchQuery.of(SearchQuery.flagIsSet(Flags.Flag.DRAFT));
-        assertThat(index.search(session, mailbox, query).toStream())
+        assertThat(index.search(session, mailbox2, query).toStream())
             .containsExactly(uid2);
     }
 

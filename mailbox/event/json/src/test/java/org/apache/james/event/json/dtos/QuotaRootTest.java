@@ -62,6 +62,12 @@ class QuotaRootTest {
     }
 
     @Test
+    void quotaRootWithAndShouldBeWellDeSerialized() {
+        assertThat(DTO_JSON_SERIALIZE.quotaRootReads().reads(new JsString("#private&bob&marley")).get())
+            .isEqualTo(QuotaRoot.quotaRoot("#private&bob&marley", Optional.empty()));
+    }
+
+    @Test
     void emptyQuotaRootShouldBeWellSerialized() {
         assertThat(DTO_JSON_SERIALIZE.quotaRootWrites().writes(QuotaRoot.quotaRoot("", Optional.empty())))
             .isEqualTo(new JsString(""));
@@ -71,7 +77,7 @@ class QuotaRootTest {
     void emptyQuotaRootShouldBeWellDeSerialized() {
         assertThatThrownBy(() -> DTO_JSON_SERIALIZE.quotaRootReads().reads(new JsString("")).get())
             .isInstanceOf(MailboxException.class)
-            .hasMessage(" used as QuotaRoot should contain exactly one \"&\"");
+            .hasMessage(" used as QuotaRoot should contain at least one \"&\"");
     }
 
     @Test

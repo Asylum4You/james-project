@@ -25,6 +25,7 @@ import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.RejectedExecutionException;
 
 import javax.management.MBeanServer;
 import javax.management.ObjectName;
@@ -40,14 +41,13 @@ import org.apache.commons.configuration2.tree.ImmutableNode;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.james.filesystem.api.FileSystem;
 import org.apache.james.lifecycle.api.Configurable;
-import org.apache.james.protocols.lib.LegacyJavaEncryptionFactory;
-import org.apache.james.protocols.lib.SslConfig;
 import org.apache.james.protocols.lib.jmx.ServerMBean;
 import org.apache.james.protocols.netty.AbstractAsyncServer;
 import org.apache.james.protocols.netty.AbstractChannelPipelineFactory;
 import org.apache.james.protocols.netty.AbstractSSLAwareChannelPipelineFactory;
 import org.apache.james.protocols.netty.ChannelHandlerFactory;
 import org.apache.james.protocols.netty.Encryption;
+import org.apache.james.protocols.netty.SslConfig;
 import org.apache.james.util.Size;
 import org.apache.james.util.concurrent.NamedThreadFactory;
 import org.slf4j.Logger;
@@ -59,6 +59,8 @@ import io.netty.channel.ChannelOption;
 import io.netty.channel.WriteBufferWaterMark;
 import io.netty.util.concurrent.DefaultEventExecutorGroup;
 import io.netty.util.concurrent.EventExecutorGroup;
+import io.netty.util.concurrent.RejectedExecutionHandler;
+import io.netty.util.internal.SystemPropertyUtil;
 
 
 /**
@@ -87,14 +89,18 @@ public abstract class AbstractConfigurableAsyncServer
 
     /** The name of the parameter defining the service hello name. */
     public static final String PROXY_REQUIRED = "proxyRequired";
+    public static final String PROXY_FIRST = "proxyFirst";
 
     public static final int DEFAULT_MAX_EXECUTOR_COUNT = 16;
 
     private FileSystem fileSystem;
 
+    private Encryption.Factory encryptionFactory;
+
     private boolean enabled;
 
     protected boolean proxyRequired;
+    protected boolean proxyFirst;
 
     protected int connPerIP;
 
@@ -116,6 +122,11 @@ public abstract class AbstractConfigurableAsyncServer
     @Inject
     public final void setFileSystem(FileSystem filesystem) {
         this.fileSystem = filesystem;
+    }
+
+    @Inject
+    public final void setEncryptionFactory(Encryption.Factory encryptionFactory) {
+        this.encryptionFactory = encryptionFactory;
     }
 
     protected void registerMBean() {
@@ -180,8 +191,16 @@ public abstract class AbstractConfigurableAsyncServer
         Integer bossWorker = config.getInteger("bossWorkerCount", null);
         setBossWorkerCount(Optional.ofNullable(bossWorker));
 
+        RejectedExecutionHandler rejectedExecutionHandler = (task, executor) -> {
+            if (!executor.isShuttingDown()) {
+                throw new RejectedExecutionException();
+            }
+        };
+
         executorGroup = new DefaultEventExecutorGroup(config.getInt("maxExecutorCount", DEFAULT_MAX_EXECUTOR_COUNT),
-            NamedThreadFactory.withName(jmxName));
+            NamedThreadFactory.withName(jmxName),
+            Math.max(16, SystemPropertyUtil.getInt("io.netty.eventexecutor.maxPendingTasks", Integer.MAX_VALUE)),
+            rejectedExecutionHandler);
         
         configureHelloName(config);
 
@@ -240,6 +259,7 @@ public abstract class AbstractConfigurableAsyncServer
         Optional.ofNullable(config.getBoolean("useEpoll", null)).ifPresent(this::setUseEpoll);
 
         proxyRequired = config.getBoolean(PROXY_REQUIRED, false);
+        proxyFirst = config.getBoolean(PROXY_FIRST, true);
 
         doConfigure(config);
 
@@ -285,9 +305,9 @@ public abstract class AbstractConfigurableAsyncServer
         LOGGER.info("Dispose {}", getServiceType());
         
         if (isEnabled()) {
+            executorGroup.shutdownGracefully();
             unbind();
             postDestroy();
-            executorGroup.shutdownGracefully();
 
             unregisterMBean();
         }
@@ -373,8 +393,7 @@ public abstract class AbstractConfigurableAsyncServer
      */
     protected void buildSSLContext() throws Exception {
         if (sslConfig.useSSL() || sslConfig.useStartTLS()) {
-            encryption = new LegacyJavaEncryptionFactory(fileSystem, sslConfig)
-                .create();
+            encryption = encryptionFactory.create(sslConfig);
         }
     }
 
@@ -477,7 +496,7 @@ public abstract class AbstractConfigurableAsyncServer
     @Override
     protected AbstractChannelPipelineFactory createPipelineFactory() {
         return new AbstractSSLAwareChannelPipelineFactory<>(getTimeout(), connectionLimit, connPerIP,
-            proxyRequired,
+            proxyRequired, proxyFirst,
             this::getEncryption, getFrameHandlerFactory(), getExecutorGroup()) {
 
             @Override

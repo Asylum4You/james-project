@@ -40,6 +40,7 @@ import org.apache.james.mailbox.cassandra.quota.CassandraCurrentQuotaManagerV2;
 import org.apache.james.mailbox.cassandra.quota.CassandraPerUserMaxQuotaManagerV2;
 import org.apache.james.mailbox.quota.CurrentQuotaManager;
 import org.apache.james.mailbox.quota.MaxQuotaManager;
+import org.apache.james.mailbox.quota.QuotaChangeNotifier;
 import org.apache.james.mailbox.quota.QuotaManager;
 import org.apache.james.mailbox.store.MailboxManagerConfiguration;
 import org.apache.james.mailbox.store.NoMailboxPathLocker;
@@ -51,7 +52,7 @@ import org.apache.james.mailbox.store.StoreRightManager;
 import org.apache.james.mailbox.store.event.MailboxAnnotationListener;
 import org.apache.james.mailbox.store.extractor.DefaultTextExtractor;
 import org.apache.james.mailbox.store.mail.NaiveThreadIdGuessingAlgorithm;
-import org.apache.james.mailbox.store.mail.model.impl.MessageParser;
+import org.apache.james.mailbox.store.mail.model.impl.MessageParserImpl;
 import org.apache.james.mailbox.store.quota.DefaultUserQuotaRootResolver;
 import org.apache.james.mailbox.store.quota.QuotaComponents;
 import org.apache.james.mailbox.store.search.MessageSearchIndex;
@@ -78,12 +79,12 @@ public class CassandraTestSystemFixture {
         AttachmentContentLoader attachmentContentLoader = null;
         MessageSearchIndex index = new SimpleMessageSearchIndex(mapperFactory, mapperFactory, new DefaultTextExtractor(), attachmentContentLoader);
         CassandraMailboxManager cassandraMailboxManager = new CassandraMailboxManager(mapperFactory, sessionProvider,
-            new NoMailboxPathLocker(), new MessageParser(), new CassandraMessageId.Factory(),
+            new NoMailboxPathLocker(), new MessageParserImpl(), new CassandraMessageId.Factory(),
             eventBus, annotationManager, storeRightManager, quotaComponents, index, MailboxManagerConfiguration.DEFAULT, PreDeletionHooks.NO_PRE_DELETION_HOOK,
             new NaiveThreadIdGuessingAlgorithm(), new UpdatableTickingClock(Instant.now()));
 
         eventBus.register(new MailboxAnnotationListener(mapperFactory, sessionProvider));
-        eventBus.register(mapperFactory.deleteMessageListener());
+        eventBus.register(mapperFactory.deleteMessageListener(eventBus));
 
         return cassandraMailboxManager;
     }
@@ -101,7 +102,7 @@ public class CassandraTestSystemFixture {
     }
 
     static MaxQuotaManager createMaxQuotaManager(CassandraCluster cassandra) {
-        return new CassandraPerUserMaxQuotaManagerV2(new CassandraQuotaLimitDao(cassandra.getConf()));
+        return new CassandraPerUserMaxQuotaManagerV2(new CassandraQuotaLimitDao(cassandra.getConf()), QuotaChangeNotifier.NOOP);
     }
 
     public static CurrentQuotaManager createCurrentQuotaManager(CassandraCluster cassandra) {

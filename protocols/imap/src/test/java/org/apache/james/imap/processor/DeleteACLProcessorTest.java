@@ -33,6 +33,8 @@ import org.apache.james.imap.api.ImapConstants;
 import org.apache.james.imap.api.message.response.ImapResponseMessage;
 import org.apache.james.imap.api.process.ImapProcessor.Responder;
 import org.apache.james.imap.encode.FakeImapSession;
+import org.apache.james.imap.main.PathConverter;
+import org.apache.james.imap.message.MailboxName;
 import org.apache.james.imap.message.request.DeleteACLRequest;
 import org.apache.james.imap.message.response.UnpooledStatusResponseFactory;
 import org.apache.james.mailbox.MailboxManager;
@@ -80,7 +82,7 @@ class DeleteACLProcessorTest {
             Object[] args = invocation.getArguments();
             return (Mono) args[0];
         });
-        subject = new DeleteACLProcessor(mailboxManager, statusResponseFactory, new RecordingMetricFactory());
+        subject = new DeleteACLProcessor(mailboxManager, statusResponseFactory, new RecordingMetricFactory(), PathConverter.Factory.DEFAULT);
         imapSession = new FakeImapSession();
         mailboxSession = MailboxSessionUtil.create(USER_1);
 
@@ -95,11 +97,9 @@ class DeleteACLProcessorTest {
         when(mailboxManager.getMailbox(any(MailboxPath.class), any(MailboxSession.class)))
             .thenReturn(messageManager);
 
-        deleteACLRequest = new DeleteACLRequest(TAG,
-            MAILBOX_NAME,
-            USER_1.asString());
+        user1Key = EntryKey.createUserEntryKey(USER_1);
 
-        user1Key = EntryKey.deserialize(USER_1.asString());
+        deleteACLRequest = new DeleteACLRequest(TAG, new MailboxName(MAILBOX_NAME), user1Key);
 
         argumentCaptor = ArgumentCaptor.forClass(ImapResponseMessage.class);
     }

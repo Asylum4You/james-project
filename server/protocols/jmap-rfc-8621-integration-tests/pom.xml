@@ -23,7 +23,7 @@
     <parent>
         <groupId>org.apache.james</groupId>
         <artifactId>james-server</artifactId>
-        <version>3.9.0-SNAPSHOT</version>
+        <version>3.10.0-SNAPSHOT</version>
         <relativePath>../../pom.xml</relativePath>
     </parent>
     <artifactId>jmap-rfc-8621-integration-tests</artifactId>
@@ -34,6 +34,7 @@
         <module>distributed-jmap-rfc-8621-integration-tests</module>
         <module>jmap-rfc-8621-integration-tests-common</module>
         <module>memory-jmap-rfc-8621-integration-tests</module>
+        <module>postgres-jmap-rfc-8621-integration-tests</module>
     </modules>
 
     <dependencyManagement>

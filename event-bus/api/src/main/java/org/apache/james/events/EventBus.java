@@ -19,7 +19,9 @@
 
 package org.apache.james.events;
 
+import java.time.Duration;
 import java.util.Collection;
+import java.util.Optional;
 import java.util.Set;
 
 import org.reactivestreams.Publisher;
@@ -31,7 +33,11 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 public interface EventBus {
-    int EXECUTION_RATE = 10;
+    record Configuration(int maxConcurrency, Optional<Duration> executionTimeout) {
+        public static Configuration DEFAULT = new Configuration(DEFAULT_MAX_CONCURRENCY, Optional.empty());
+    }
+
+    int DEFAULT_MAX_CONCURRENCY = 10;
 
     interface StructuredLoggingFields {
         String EVENT_ID = "eventId";
@@ -71,13 +77,23 @@ public interface EventBus {
 
     Mono<Void> dispatch(Event event, Set<RegistrationKey> key);
 
-    Mono<Void> reDeliver(Group group, Event event);
-
-    EventBusName eventBusName();
-
     default Mono<Void> dispatch(Event event, RegistrationKey key) {
         return dispatch(event, ImmutableSet.of(key));
     }
+
+    record EventWithRegistrationKey(Event event, Set<RegistrationKey> keys) {
+
+    }
+
+    default Mono<Void> dispatch(Collection<EventWithRegistrationKey> events) {
+        return Flux.fromIterable(events)
+            .concatMap(event -> dispatch(event.event(), event.keys()))
+            .then();
+    }
+
+    Mono<Void> reDeliver(Group group, Event event);
+
+    EventBusName eventBusName();
 
     default Registration register(EventListener.GroupEventListener groupListener) {
         return register(EventListener.wrapReactive(groupListener));
@@ -89,5 +105,14 @@ public interface EventBus {
 
     default Collection<Group> listRegisteredGroups() {
         return ImmutableList.of();
+    }
+
+    default void start() {
+    }
+
+    default void restart() {
+    }
+
+    default void stop() {
     }
 }

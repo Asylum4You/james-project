@@ -26,7 +26,6 @@ import com.rabbitmq.client.AMQP;
 public interface Constants {
     boolean DURABLE = true;
     boolean AUTO_DELETE = true;
-    boolean ALLOW_QUORUM = true;
     boolean EXCLUSIVE = true;
     boolean NO_LOCAL = true;
 
@@ -41,4 +40,25 @@ public interface Constants {
     String DIRECT_EXCHANGE = "direct";
 
     AMQP.BasicProperties NO_PROPERTIES = new AMQP.BasicProperties();
+
+    static boolean evaluateAutoDelete(boolean autoDeleteWanted, boolean useQuorumQueue) {
+        if (autoDeleteWanted && useQuorumQueue) {
+            return !AUTO_DELETE; // quorum queue does not support autoDelete
+        }
+        return autoDeleteWanted;
+    }
+
+    static boolean evaluateDurable(boolean durableWanted, boolean useQuorumQueue) {
+        if (!durableWanted && useQuorumQueue) {
+            return DURABLE; // quorum queue only supports durable queue
+        }
+        return durableWanted;
+    }
+
+    static boolean evaluateExclusive(boolean exclusiveWanted, boolean useQuorumQueue) {
+        if (exclusiveWanted && useQuorumQueue) {
+            return !EXCLUSIVE; // quorum queue does not support exclusive
+        }
+        return exclusiveWanted;
+    }
 }

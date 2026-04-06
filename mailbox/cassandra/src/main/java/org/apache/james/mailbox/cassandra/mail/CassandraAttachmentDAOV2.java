@@ -33,11 +33,14 @@ import static org.apache.james.mailbox.cassandra.table.CassandraAttachmentV2Tabl
 import static org.apache.james.mailbox.cassandra.table.CassandraAttachmentV2Table.TABLE_NAME;
 import static org.apache.james.mailbox.cassandra.table.CassandraAttachmentV2Table.TYPE;
 
+import java.time.Duration;
 import java.util.Objects;
+import java.util.Optional;
 
 import jakarta.inject.Inject;
 
 import org.apache.james.backends.cassandra.utils.CassandraAsyncExecutor;
+import org.apache.james.backends.cassandra.utils.ProfileLocator;
 import org.apache.james.blob.api.BlobId;
 import org.apache.james.mailbox.cassandra.ids.CassandraMessageId;
 import org.apache.james.mailbox.model.AttachmentId;
@@ -45,16 +48,22 @@ import org.apache.james.mailbox.model.AttachmentMetadata;
 import org.apache.james.mailbox.model.ContentType;
 import org.apache.james.mailbox.model.MessageId;
 import org.apache.james.mailbox.model.StringBackedAttachmentId;
+import org.apache.james.util.DurationParser;
 
 import com.datastax.oss.driver.api.core.CqlSession;
+import com.datastax.oss.driver.api.core.config.DriverExecutionProfile;
 import com.datastax.oss.driver.api.core.cql.PreparedStatement;
 import com.datastax.oss.driver.api.core.cql.Row;
+import com.datastax.oss.driver.api.querybuilder.insert.RegularInsert;
 import com.google.common.base.Preconditions;
 
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 public class CassandraAttachmentDAOV2 {
+    private static final Optional<Duration> TTL = Optional.ofNullable(System.getProperty("james.jmap.attachment.ttl", null))
+        .map(DurationParser::parse);
+
     public static class DAOAttachment {
         private final MessageId messageId;
         private final AttachmentId attachmentId;
@@ -134,7 +143,7 @@ public class CassandraAttachmentDAOV2 {
         return new DAOAttachment(
             messageId,
             StringBackedAttachmentId.from(row.getString(ID)),
-            blobIfFactory.from(row.getString(BLOB_ID)),
+            blobIfFactory.parse(row.getString(BLOB_ID)),
             ContentType.of(row.getString(TYPE)),
             row.getLong(SIZE));
     }
@@ -146,6 +155,8 @@ public class CassandraAttachmentDAOV2 {
     private final PreparedStatement selectStatement;
     private final PreparedStatement listBlobs;
     private final CqlSession session;
+    private final DriverExecutionProfile readProfile;
+    private final DriverExecutionProfile writeProfile;
 
     @Inject
     public CassandraAttachmentDAOV2(BlobId.Factory blobIdFactory, CqlSession session) {
@@ -156,6 +167,9 @@ public class CassandraAttachmentDAOV2 {
         this.insertStatement = prepareInsert();
         this.deleteStatement = prepareDelete();
         this.listBlobs = prepareSelectBlobs();
+
+        this.readProfile = ProfileLocator.READ.locateProfile(session, "ATTACHMENTV2");
+        this.writeProfile = ProfileLocator.WRITE.locateProfile(session, "ATTACHMENTV2");
     }
 
     private PreparedStatement prepareSelectBlobs() {
@@ -171,14 +185,17 @@ public class CassandraAttachmentDAOV2 {
     }
 
     private PreparedStatement prepareInsert() {
+        RegularInsert insert = insertInto(TABLE_NAME)
+            .value(ID_AS_UUID, bindMarker(ID_AS_UUID))
+            .value(ID, bindMarker(ID))
+            .value(BLOB_ID, bindMarker(BLOB_ID))
+            .value(TYPE, bindMarker(TYPE))
+            .value(MESSAGE_ID, bindMarker(MESSAGE_ID))
+            .value(SIZE, bindMarker(SIZE));
+
         return session.prepare(
-            insertInto(TABLE_NAME)
-                .value(ID_AS_UUID, bindMarker(ID_AS_UUID))
-                .value(ID, bindMarker(ID))
-                .value(BLOB_ID, bindMarker(BLOB_ID))
-                .value(TYPE, bindMarker(TYPE))
-                .value(MESSAGE_ID, bindMarker(MESSAGE_ID))
-                .value(SIZE, bindMarker(SIZE))
+            TTL.map(ttl -> insert.usingTtl((int) ttl.toSeconds()))
+                .orElse(insert)
                 .build());
     }
 
@@ -193,7 +210,8 @@ public class CassandraAttachmentDAOV2 {
         Preconditions.checkArgument(attachmentId != null);
         return cassandraAsyncExecutor.executeSingleRow(
                 selectStatement.bind()
-                    .setUuid(ID_AS_UUID, attachmentId.asUUID()))
+                    .setUuid(ID_AS_UUID, attachmentId.asUUID())
+                    .setExecutionProfile(readProfile))
             .map(row -> CassandraAttachmentDAOV2.fromRow(row, blobIdFactory));
     }
 
@@ -206,17 +224,19 @@ public class CassandraAttachmentDAOV2 {
                 .setLong(SIZE, attachment.getSize())
                 .setUuid(MESSAGE_ID, messageId.get())
                 .setString(TYPE, attachment.getType().asString())
-                .setString(BLOB_ID, attachment.getBlobId().asString()));
+                .setString(BLOB_ID, attachment.getBlobId().asString())
+                .setExecutionProfile(writeProfile));
     }
 
     public Mono<Void> delete(AttachmentId attachmentId) {
         return cassandraAsyncExecutor.executeVoid(
             deleteStatement.bind()
-                .setUuid(ID_AS_UUID, attachmentId.asUUID()));
+                .setUuid(ID_AS_UUID, attachmentId.asUUID())
+                .setExecutionProfile(writeProfile));
     }
 
     public Flux<BlobId> listBlobs() {
         return cassandraAsyncExecutor.executeRows(listBlobs.bind())
-            .map(row -> blobIdFactory.from(row.getString(BLOB_ID)));
+            .map(row -> blobIdFactory.parse(row.getString(BLOB_ID)));
     }
 }

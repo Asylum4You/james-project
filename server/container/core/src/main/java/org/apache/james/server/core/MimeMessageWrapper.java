@@ -57,6 +57,7 @@ import com.google.common.io.CountingInputStream;
  * This class is not thread safe.
  */
 public class MimeMessageWrapper extends MimeMessage implements Disposable {
+    private static final String MIME_VERSION_HEADER = "MIME-Version";
 
     /**
      * System property which tells JAMES if it should copy a message in memory
@@ -162,6 +163,7 @@ public class MimeMessageWrapper extends MimeMessage implements Disposable {
                     original.writeTo(out);
                     out.close();
                     source = src;
+                    saved = true;
                 }
 
             } catch (IOException ex) {
@@ -205,6 +207,20 @@ public class MimeMessageWrapper extends MimeMessage implements Disposable {
         } else if (source != null) {
             try (InputStream in = source.getInputStream()) {
                 headers = createInternetHeaders(in);
+            } catch (IOException ioe) {
+                throw new MessagingException("Unable to parse headers from stream: " + ioe.getMessage(), ioe);
+            }
+        } else {
+            throw new MessagingException("loadHeaders called for a message with no source, contentStream or stream");
+        }
+    }
+
+    protected long loadHeadersCounting() throws MessagingException {
+        if (source != null) {
+            try (InputStream in = source.getInputStream();
+                 CountingInputStream countingInputStream = new CountingInputStream(in)) {
+                headers = createInternetHeaders(countingInputStream);
+                return countingInputStream.getCount();
             } catch (IOException ioe) {
                 throw new MessagingException("Unable to parse headers from stream: " + ioe.getMessage(), ioe);
             }
@@ -359,12 +375,8 @@ public class MimeMessageWrapper extends MimeMessage implements Disposable {
         if (source != null && !bodyModified) {
             try {
                 long fullSize = source.getMessageSize();
-                if (headers == null) {
-                    loadHeaders();
-                }
-                // 2 == CRLF
-                return Math.max(0, (int) (fullSize - initialHeaderSize - HEADER_BODY_SEPARATOR_SIZE));
-
+                long l = loadHeadersCounting();
+                return Math.max(0, (int) (fullSize - l));
             } catch (IOException e) {
                 throw new MessagingException("Unable to calculate message size");
             }
@@ -515,14 +527,18 @@ public class MimeMessageWrapper extends MimeMessage implements Disposable {
         if (headers == null) {
             loadHeaders();
         }
-        modified = true;
-        saved = false;
         headersModified = true;
     }
 
     @Override
     public void setHeader(String name, String value) throws MessagingException {
         checkModifyHeaders();
+        if (name.equalsIgnoreCase(MIME_VERSION_HEADER)
+            && getHeader(MIME_VERSION_HEADER) != null
+            && value.equals("1.0")
+            && getHeader(MIME_VERSION_HEADER)[0].startsWith("1.0")) {
+            return;
+        }
         super.setHeader(name, value);
     }
 

@@ -23,17 +23,21 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.io.ByteArrayInputStream;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 
 import jakarta.mail.internet.MimeMessage;
 
 import org.apache.james.blob.api.BlobId;
 import org.apache.james.blob.api.BlobStore;
-import org.apache.james.blob.api.HashBlobId;
 import org.apache.james.blob.api.ObjectNotFoundException;
+import org.apache.james.blob.api.PlainBlobId;
 import org.apache.james.blob.api.Store;
 import org.apache.james.blob.memory.MemoryBlobStoreFactory;
 import org.apache.james.core.builder.MimeMessageBuilder;
+import org.apache.james.server.core.MimeMessageSource;
+import org.apache.james.server.core.MimeMessageWrapper;
 import org.apache.james.util.MimeMessageUtil;
 import org.assertj.core.api.SoftAssertions;
 import org.junit.jupiter.api.BeforeEach;
@@ -42,7 +46,7 @@ import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Mono;
 
 class MimeMessageStoreTest {
-    private static final HashBlobId.Factory BLOB_ID_FACTORY = new HashBlobId.Factory();
+    private static final PlainBlobId.Factory BLOB_ID_FACTORY = new PlainBlobId.Factory();
 
     private Store<MimeMessage, MimeMessagePartsId> testee;
     private BlobStore blobStore;
@@ -103,10 +107,138 @@ class MimeMessageStoreTest {
     }
 
     @Test
+    void shouldSupportStoringMimeMessageWrapperWithLFInHeaders() {
+        MimeMessageSource mimeMessageSource = new MimeMessageSource() {
+            private byte[] bytes = "h1: v1\nh2: v2\r\n\r\nkrd2\r\nuhwevre\r\n".getBytes(StandardCharsets.UTF_8);
+
+            @Override
+            public String getSourceId() {
+                return "ABC";
+            }
+
+            @Override
+            public InputStream getInputStream() {
+                return new ByteArrayInputStream(bytes);
+            }
+
+            @Override
+            public long getMessageSize() {
+                return bytes.length;
+            }
+        };
+        MimeMessage message = new MimeMessageWrapper(mimeMessageSource);
+
+        assertThatCode(() -> testee.save(message).block()).doesNotThrowAnyException();
+    }
+
+    @Test
+    void shouldSupportStoringMimeMessageWrapperWithOnlyOneLine() {
+        MimeMessageSource mimeMessageSource = new MimeMessageSource() {
+            private byte[] bytes = "header: toto\\r\\n\\r\\n0123456789".getBytes(StandardCharsets.UTF_8);
+
+            @Override
+            public String getSourceId() {
+                return "ABC";
+            }
+
+            @Override
+            public InputStream getInputStream() {
+                return new ByteArrayInputStream(bytes);
+            }
+
+            @Override
+            public long getMessageSize() {
+                return bytes.length;
+            }
+        };
+        MimeMessage message = new MimeMessageWrapper(mimeMessageSource);
+
+        assertThatCode(() -> testee.save(message).block()).doesNotThrowAnyException();
+    }
+
+    @Test
+    void shouldSupportStoringMimeMessageWrapperAfterHeaderModification() throws Exception {
+        MimeMessageSource mimeMessageSource = new MimeMessageSource() {
+            private byte[] bytes = "h1: v1\r\nh2: v2\r\n\r\nkrd2\r\nuhwevre\r\n".getBytes(StandardCharsets.UTF_8);
+
+            @Override
+            public String getSourceId() {
+                return "ABC";
+            }
+
+            @Override
+            public InputStream getInputStream() {
+                return new ByteArrayInputStream(bytes);
+            }
+
+            @Override
+            public long getMessageSize() {
+                return bytes.length;
+            }
+        };
+        MimeMessage message = new MimeMessageWrapper(mimeMessageSource);
+        message.addHeader("toto", "tata");
+
+        assertThatCode(() -> testee.save(message).block()).doesNotThrowAnyException();
+    }
+
+    @Test
+    void shouldSupportStoringMimeMessageWrapperAfterHeaderModificationAndLF() throws Exception {
+        MimeMessageSource mimeMessageSource = new MimeMessageSource() {
+            private byte[] bytes = "h1: v1\nh2: v2\r\n\r\nkrd2\r\nuhwevre\r\n".getBytes(StandardCharsets.UTF_8);
+
+            @Override
+            public String getSourceId() {
+                return "ABC";
+            }
+
+            @Override
+            public InputStream getInputStream() {
+                return new ByteArrayInputStream(bytes);
+            }
+
+            @Override
+            public long getMessageSize() {
+                return bytes.length;
+            }
+        };
+        MimeMessage message = new MimeMessageWrapper(mimeMessageSource);
+        message.addHeader("toto", "tata");
+
+        assertThatCode(() -> testee.save(message).block()).doesNotThrowAnyException();
+    }
+
+    @Test
+    void shouldSupportStoringMimeMessageWrapperWithOnlyOneLineAbdAdditionalHeader() throws Exception {
+        MimeMessageSource mimeMessageSource = new MimeMessageSource() {
+            private byte[] bytes = "header: toto\\r\\n\\r\\n0123456789".getBytes(StandardCharsets.UTF_8);
+
+            @Override
+            public String getSourceId() {
+                return "ABC";
+            }
+
+            @Override
+            public InputStream getInputStream() {
+                return new ByteArrayInputStream(bytes);
+            }
+
+            @Override
+            public long getMessageSize() {
+                return bytes.length;
+            }
+        };
+        MimeMessage message = new MimeMessageWrapper(mimeMessageSource);
+        message.addHeader("toto", "tata");
+
+        assertThatCode(() -> testee.save(message).block()).doesNotThrowAnyException();
+    }
+
+    @Test
     void deleteShouldNotThrowWhenCalledOnNonExistingData() throws Exception {
         MimeMessagePartsId parts = MimeMessagePartsId.builder()
-            .headerBlobId(BLOB_ID_FACTORY.randomId())
-            .bodyBlobId(BLOB_ID_FACTORY.randomId())
+            .headerBlobId(BLOB_ID_FACTORY.of("NON_EXISTING_HEADER_BLOB_ID"))
+            .bodyBlobId(BLOB_ID_FACTORY.of("NON_EXISTING_BODY_BLOB_ID"))
             .build();
 
         assertThatCode(() -> Mono.from(testee.delete(parts)).block())

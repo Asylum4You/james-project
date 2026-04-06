@@ -22,18 +22,21 @@ package org.apache.james;
 import org.apache.commons.configuration2.BaseHierarchicalConfiguration;
 import org.apache.james.data.UsersRepositoryModuleChooser;
 import org.apache.james.jmap.JMAPListenerModule;
+import org.apache.james.jmap.JMAPModule;
 import org.apache.james.jmap.api.identity.CustomIdentityDAO;
 import org.apache.james.jmap.memory.identity.MemoryCustomIdentityDAO;
 import org.apache.james.jmap.memory.pushsubscription.MemoryPushSubscriptionModule;
 import org.apache.james.jwt.JwtConfiguration;
 import org.apache.james.modules.BlobExportMechanismModule;
 import org.apache.james.modules.BlobMemoryModule;
+import org.apache.james.modules.LegacyEncryptionModule;
 import org.apache.james.modules.MailboxModule;
 import org.apache.james.modules.MailetProcessingModule;
 import org.apache.james.modules.RunArgumentsModule;
 import org.apache.james.modules.data.MemoryDataJmapModule;
 import org.apache.james.modules.data.MemoryDataModule;
 import org.apache.james.modules.data.MemoryDelegationStoreModule;
+import org.apache.james.modules.data.MemoryDropListsModule;
 import org.apache.james.modules.data.MemoryUsersRepositoryModule;
 import org.apache.james.modules.eventstore.MemoryEventStoreModule;
 import org.apache.james.modules.mailbox.MemoryMailboxModule;
@@ -49,6 +52,7 @@ import org.apache.james.modules.queue.memory.MemoryMailQueueModule;
 import org.apache.james.modules.server.DKIMMailetModule;
 import org.apache.james.modules.server.DLPRoutesModule;
 import org.apache.james.modules.server.DataRoutesModules;
+import org.apache.james.modules.server.DropListsRoutesModule;
 import org.apache.james.modules.server.InconsistencyQuotasSolvingRoutesModule;
 import org.apache.james.modules.server.JMXServerModule;
 import org.apache.james.modules.server.JmapTasksModule;
@@ -108,6 +112,7 @@ public class MemoryJamesServerMain implements JamesServerMain {
 
     public static final Module PROTOCOLS = Modules.combine(
         new IMAPServerModule(),
+        new LegacyEncryptionModule(),
         new LMTPServerModule(),
         new ManageSieveServerModule(),
         new POP3ServerModule(),
@@ -119,6 +124,7 @@ public class MemoryJamesServerMain implements JamesServerMain {
         new JmapTasksModule(),
         new MemoryDataJmapModule(),
         new MemoryPushSubscriptionModule(),
+        JMAPModule.INSTANCE,
         new JMAPServerModule());
 
     public static final Module IN_MEMORY_SERVER_MODULE = Modules.combine(
@@ -136,6 +142,7 @@ public class MemoryJamesServerMain implements JamesServerMain {
 
     public static final Module SMTP_ONLY_MODULE = Modules.combine(
         MemoryJamesServerMain.IN_MEMORY_SERVER_MODULE,
+        new LegacyEncryptionModule(),
         new ProtocolHandlerModule(),
         new SMTPServerModule(),
         new RawPostDequeueDecoratorModule(),
@@ -163,7 +170,7 @@ public class MemoryJamesServerMain implements JamesServerMain {
 
         LOGGER.info("Loading configuration {}", configuration.toString());
         GuiceJamesServer server = createServer(configuration)
-            .combineWith(new FakeSearchMailboxModule(), new JMXServerModule())
+            .combineWith(new JMXServerModule())
             .overrideWith(new RunArgumentsModule(args));
 
         JamesServerMain.main(server);
@@ -174,12 +181,22 @@ public class MemoryJamesServerMain implements JamesServerMain {
             .combineWith(IN_MEMORY_SERVER_AGGREGATE_MODULE)
             .combineWith(new UsersRepositoryModuleChooser(new MemoryUsersRepositoryModule())
                 .chooseModules(configuration.getUsersRepositoryImplementation()))
-            .combineWith(chooseJmapModule(configuration));
+            .combineWith(chooseJmapModule(configuration))
+            .combineWith(chooseDropListsModule(configuration));
     }
 
     private static Module chooseJmapModule(MemoryJamesConfiguration configuration) {
         if (configuration.isJmapEnabled()) {
             return new JMAPListenerModule();
+        }
+        return binder -> {
+
+        };
+    }
+
+    private static Module chooseDropListsModule(MemoryJamesConfiguration configuration) {
+        if (configuration.isDropListsEnabled()) {
+            return Modules.combine(new MemoryDropListsModule(), new DropListsRoutesModule());
         }
         return binder -> {
 

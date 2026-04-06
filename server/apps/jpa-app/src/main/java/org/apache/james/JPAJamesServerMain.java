@@ -20,16 +20,21 @@
 package org.apache.james;
 
 import org.apache.james.data.UsersRepositoryModuleChooser;
+import org.apache.james.mailbox.extractor.TextExtractor;
+import org.apache.james.mailbox.store.extractor.JsoupTextExtractor;
+import org.apache.james.modules.LegacyEncryptionModule;
 import org.apache.james.modules.MailboxModule;
 import org.apache.james.modules.MailetProcessingModule;
 import org.apache.james.modules.RunArgumentsModule;
 import org.apache.james.modules.data.JPADataModule;
+import org.apache.james.modules.data.JPADropListsModule;
 import org.apache.james.modules.data.JPAUsersRepositoryModule;
 import org.apache.james.modules.data.SieveJPARepositoryModules;
 import org.apache.james.modules.mailbox.DefaultEventModule;
 import org.apache.james.modules.mailbox.JPAMailboxModule;
 import org.apache.james.modules.mailbox.LuceneSearchMailboxModule;
 import org.apache.james.modules.mailbox.MemoryDeadLetterModule;
+import org.apache.james.modules.mailbox.ReIndexingTaskSerializationModule;
 import org.apache.james.modules.protocols.IMAPServerModule;
 import org.apache.james.modules.protocols.LMTPServerModule;
 import org.apache.james.modules.protocols.ManageSieveServerModule;
@@ -39,6 +44,7 @@ import org.apache.james.modules.protocols.SMTPServerModule;
 import org.apache.james.modules.queue.activemq.ActiveMQQueueModule;
 import org.apache.james.modules.server.DataRoutesModules;
 import org.apache.james.modules.server.DefaultProcessorsConfigurationProviderModule;
+import org.apache.james.modules.server.DropListsRoutesModule;
 import org.apache.james.modules.server.InconsistencyQuotasSolvingRoutesModule;
 import org.apache.james.modules.server.JMXServerModule;
 import org.apache.james.modules.server.MailQueueRoutesModule;
@@ -72,6 +78,7 @@ public class JPAJamesServerMain implements JamesServerMain {
 
     private static final Module PROTOCOLS = Modules.combine(
         new IMAPServerModule(),
+        new LegacyEncryptionModule(),
         new LMTPServerModule(),
         new ManageSieveServerModule(),
         new POP3ServerModule(),
@@ -79,14 +86,19 @@ public class JPAJamesServerMain implements JamesServerMain {
         new SMTPServerModule(),
         WEBADMIN);
 
+    private static final Module SEARCH_MODULE = Modules.combine(
+        new LuceneSearchMailboxModule(),
+        binder -> binder.bind(TextExtractor.class).toInstance(new JsoupTextExtractor()));
+
     private static final Module JPA_SERVER_MODULE = Modules.combine(
+        SEARCH_MODULE,
         new ActiveMQQueueModule(),
         new NaiveDelegationStoreModule(),
         new DefaultProcessorsConfigurationProviderModule(),
         new JPADataModule(),
         new JPAMailboxModule(),
         new MailboxModule(),
-        new LuceneSearchMailboxModule(),
+        new ReIndexingTaskSerializationModule(),
         new NoJwtModule(),
         new RawPostDequeueDecoratorModule(),
         new SieveJPARepositoryModules(),
@@ -107,7 +119,8 @@ public class JPAJamesServerMain implements JamesServerMain {
         LOGGER.info("Loading configuration {}", configuration.toString());
         GuiceJamesServer server = createServer(configuration)
             .combineWith(new JMXServerModule())
-            .overrideWith(new RunArgumentsModule(args));
+            .overrideWith(new RunArgumentsModule(args))
+            .overrideWith(chooseDropListsModule(configuration));
 
         JamesServerMain.main(server);
     }
@@ -117,5 +130,14 @@ public class JPAJamesServerMain implements JamesServerMain {
             .combineWith(JPA_MODULE_AGGREGATE)
             .combineWith(new UsersRepositoryModuleChooser(new JPAUsersRepositoryModule())
                 .chooseModules(configuration.getUsersRepositoryImplementation()));
+    }
+
+    private static Module chooseDropListsModule(JPAJamesConfiguration configuration) {
+        if (configuration.isDropListsEnabled()) {
+            return Modules.combine(new JPADropListsModule(), new DropListsRoutesModule());
+        }
+        return binder -> {
+
+        };
     }
 }

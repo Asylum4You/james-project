@@ -20,8 +20,8 @@
 package org.apache.james.mailbox.cassandra.mail.eventsourcing.acl;
 
 import org.apache.james.JsonSerializationVerifier;
-import org.apache.james.event.acl.ACLUpdated;
 import org.apache.james.event.MailboxAggregateId;
+import org.apache.james.event.acl.ACLUpdated;
 import org.apache.james.eventsourcing.EventId;
 import org.apache.james.mailbox.acl.ACLDiff;
 import org.apache.james.mailbox.cassandra.ids.CassandraId;
@@ -39,7 +39,7 @@ class ACLUpdatedDTOTest {
         "    \"newAcl\":{\"entries\":{\"$any\":\"l\"}}" +
         "  }" +
         "}";
-    private static final MailboxACL.EntryKey ENTRY_KEY = MailboxACL.EntryKey.createGroupEntryKey("any", false);
+    private static final MailboxACL.EntryKey ENTRY_KEY = MailboxACL.EntryKey.createGroupEntryKey("any", MailboxACL.POSITIVE_KEY);
     private static final MailboxACL.Rfc4314Rights RIGHTS = new MailboxACL.Rfc4314Rights(MailboxACL.Right.Administer);
     private static final ACLUpdated EVENT = aclUpdated();
 

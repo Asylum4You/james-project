@@ -35,7 +35,7 @@ import org.apache.james.jmap.core.Properties.toProperties
 import org.apache.james.jmap.core.SetError.SetErrorDescription
 import org.apache.james.jmap.mail.{InvalidPropertyException, InvalidUpdateException, PatchUpdateValidationException, UnsupportedPropertyUpdatedException}
 import org.apache.james.jmap.method.{SetRequest, WithoutAccountId}
-import play.api.libs.json.{JsArray, JsObject, JsString, JsValue}
+import play.api.libs.json.{JsArray, JsNull, JsObject, JsString, JsValue}
 
 import scala.util.{Failure, Success, Try}
 
@@ -133,11 +133,12 @@ object TypesUpdate {
       .map(js => parseType(js, typeStateFactory))
       .sequence
       .map(_.toSet)
-      .map(TypesUpdate(_))
+      .map(types => TypesUpdate(Some(types)))
+    case JsNull => Right(TypesUpdate(None))
     case _ => Left(InvalidUpdateException("types", "Expecting an array of JSON strings as an argument"))
   }
   def parseType(jsValue: JsValue, typeStateFactory: TypeStateFactory): Either[PatchUpdateValidationException, TypeName] = jsValue match {
-    case JsString(aString) => typeStateFactory.parse(aString).left.map(e => InvalidUpdateException("types", e.getMessage))
+    case JsString(aString) => typeStateFactory.strictParse(aString).left.map(e => InvalidUpdateException("types", e.getMessage))
     case _ => Left(InvalidUpdateException("types", "Expecting an array of JSON strings as an argument"))
   }
 }
@@ -156,7 +157,7 @@ object ExpiresUpdate {
 
 sealed trait Update
 case class VerificationCodeUpdate(newVerificationCode: VerificationCode) extends Update
-case class TypesUpdate(types: Set[TypeName]) extends Update
+case class TypesUpdate(types: Option[Set[TypeName]]) extends Update
 case class ExpiresUpdate(newExpires: UTCDate) extends Update
 
 object ValidatedPushSubscriptionPatchObject {
@@ -166,7 +167,7 @@ object ValidatedPushSubscriptionPatchObject {
 }
 
 case class ValidatedPushSubscriptionPatchObject(verificationCodeUpdate: Option[VerificationCode],
-                                                typesUpdate: Option[Set[TypeName]],
+                                                typesUpdate: Option[Option[Set[TypeName]]],
                                                 expiresUpdate: Option[PushSubscriptionExpiredTime]) {
   val shouldUpdate: Boolean = verificationCodeUpdate.isDefined || typesUpdate.isDefined || expiresUpdate.isDefined
 

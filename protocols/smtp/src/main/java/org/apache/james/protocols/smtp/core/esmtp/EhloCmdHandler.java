@@ -21,9 +21,11 @@ package org.apache.james.protocols.smtp.core.esmtp;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Locale;
 
 import jakarta.inject.Inject;
 
+import org.apache.commons.lang3.StringUtils;
 import org.apache.james.metrics.api.MetricFactory;
 import org.apache.james.protocols.api.ProtocolSession.State;
 import org.apache.james.protocols.api.Response;
@@ -37,6 +39,7 @@ import org.apache.james.protocols.smtp.hook.HookResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.google.common.base.CharMatcher;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
@@ -57,6 +60,9 @@ public class EhloCmdHandler extends AbstractHookableCmdHandler<HeloHook> impleme
     private static final List<String> ESMTP_FEATURES = ImmutableList.of("PIPELINING", "ENHANCEDSTATUSCODES", "8BITMIME");
     private static final Response DOMAIN_ADDRESS_REQUIRED = new SMTPResponse(SMTPRetCode.SYNTAX_ERROR_ARGUMENTS, DSNStatus.getStatus(DSNStatus.PERMANENT, DSNStatus.DELIVERY_INVALID_ARG) + " Domain address required: " + COMMAND_NAME).immutable();
     private static final Logger LOGGER = LoggerFactory.getLogger(EhloCmdHandler.class);
+    private static final CharMatcher ALPHANUMERIC_MATCHER = CharMatcher.inRange('a', 'z')
+        .or(CharMatcher.inRange('A', 'Z'))
+        .or(CharMatcher.inRange('0', '9'));
 
     private List<EhloExtension> ehloExtensions;
 
@@ -77,7 +83,7 @@ public class EhloCmdHandler extends AbstractHookableCmdHandler<HeloHook> impleme
      */
     private Response doEHLO(SMTPSession session, String argument) {
         if (!isValid(argument)) {
-            LOGGER.error("Invalid EHLO argument received: {}. Must be a domain name or an IP address.", argument);
+            LOGGER.error("Invalid EHLO argument received: {} which must be a domain name or an IP address.", argument);
             return new SMTPResponse(SMTPRetCode.SYNTAX_ERROR_ARGUMENTS,
                 DSNStatus.getStatus(DSNStatus.PERMANENT, DSNStatus.DELIVERY_SYNTAX) + " Invalid domain name or ip supplied as HELO argument");
         }
@@ -90,6 +96,8 @@ public class EhloCmdHandler extends AbstractHookableCmdHandler<HeloHook> impleme
                 COMMAND_NAME, State.Connection);
 
         processExtensions(session, resp);
+
+        LOGGER.debug("EHLO {}", StringUtils.abbreviate(argument, 80));
  
         return resp;
     }
@@ -100,8 +108,38 @@ public class EhloCmdHandler extends AbstractHookableCmdHandler<HeloHook> impleme
         // Without [] Guava attempt to parse IPV4
         return InetAddresses.isUriInetAddress(hostname)
             // Guava tries parsing IPv6 if and only if wrapped by []
-            || InetAddresses.isUriInetAddress("[" + hostname + "]")
-            || InternetDomainName.isValid(hostname);
+            || InetAddresses.isUriInetAddress("[" + removeEmIPV6Prefix(hostname) + "]")
+            || InternetDomainName.isValid(hostname)
+            || emClientCompatibility(hostname)
+            || isAlphanumeric(hostname);
+    }
+
+    // CF JAMES-4046 https://issues.apache.org/jira/projects/JAMES/issues/JAMES-4066
+    private boolean isAlphanumeric(String hostname) {
+        return !hostname.isEmpty() && ALPHANUMERIC_MATCHER.matchesAllOf(hostname);
+    }
+
+    // CF JAMES-4040 IPv6v4-full https://datatracker.ietf.org/doc/html/rfc5321
+    private boolean emClientCompatibility(String hostname) {
+        int separator = hostname.lastIndexOf(':');
+        if (separator == -1 || separator == hostname.length() - 1) {
+            return false;
+        }
+        String ipv4 = hostname.substring(separator + 1);
+        String ipv6 = removeEmIPV6Prefix(hostname.substring(0, separator));
+
+        boolean isIPv6 = InetAddresses.isInetAddress(ipv6)
+            || InetAddresses.isUriInetAddress(ipv6)
+            || InetAddresses.isUriInetAddress("[" + ipv6 + "]");
+        return InetAddresses.isInetAddress(ipv4)
+            && isIPv6;
+    }
+
+    private static String removeEmIPV6Prefix(String ipv6) {
+        if (ipv6.toLowerCase(Locale.US).startsWith("ipv6:")) {
+            ipv6 = ipv6.substring(5);
+        }
+        return ipv6;
     }
 
     private String unquote(String argument) {

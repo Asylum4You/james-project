@@ -22,14 +22,13 @@
     <parent>
         <groupId>org.apache.james</groupId>
         <artifactId>apache-james-mpt-managesieve</artifactId>
-        <version>3.9.0-SNAPSHOT</version>
+        <version>3.10.0-SNAPSHOT</version>
         <relativePath>..</relativePath>
     </parent>
 
     <artifactId>apache-james-mpt-managesieve-cassandra</artifactId>
 
     <name>Apache James :: MPT :: ManageSieve :: Cassandra</name>
-
 
     <dependencies>
         <dependency>
@@ -54,11 +53,5 @@
             <artifactId>testing-base</artifactId>
             <scope>test</scope>
         </dependency>
-        <dependency>
-            <groupId>commons-codec</groupId>
-            <artifactId>commons-codec</artifactId>
-            <scope>test</scope>
-        </dependency>
     </dependencies>
-
 </project>

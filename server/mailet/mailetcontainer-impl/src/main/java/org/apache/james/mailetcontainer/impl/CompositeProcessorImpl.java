@@ -47,7 +47,7 @@ public class CompositeProcessorImpl extends AbstractStateCompositeProcessor {
     private final MailetLoader mailetLoader;
 
     @Inject
-    CompositeProcessorImpl(MetricFactory metricFactory, MailetContext mailetContext, MatcherLoader matcherLoader, MailetLoader mailetLoader) {
+    public CompositeProcessorImpl(MetricFactory metricFactory, MailetContext mailetContext, MatcherLoader matcherLoader, MailetLoader mailetLoader) {
         this.metricFactory = metricFactory;
         this.mailetContext = mailetContext;
         this.matcherLoader = matcherLoader;
@@ -62,7 +62,7 @@ public class CompositeProcessorImpl extends AbstractStateCompositeProcessor {
 
     @Override
     protected MailProcessor createMailProcessor(String name, HierarchicalConfiguration<ImmutableNode> config) throws Exception {
-        MailetProcessorImpl processor = new MailetProcessorImpl(metricFactory);
+        MailetProcessorImpl processor = new MailetProcessorImpl(name, metricFactory);
         try {
             processor.setMailetContext(mailetContext);
             processor.setMailetLoader(mailetLoader);

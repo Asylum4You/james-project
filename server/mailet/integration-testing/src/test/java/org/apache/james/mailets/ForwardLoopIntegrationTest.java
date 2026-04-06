@@ -20,7 +20,7 @@
 package org.apache.james.mailets;
 
 import static org.apache.james.jmap.api.filtering.Rule.Condition.Comparator.NOT_CONTAINS;
-import static org.apache.james.jmap.api.filtering.Rule.Condition.Field.FROM;
+import static org.apache.james.jmap.api.filtering.Rule.Condition.FixedField.FROM;
 import static org.apache.james.mailets.configuration.CommonProcessors.RRT_ERROR_REPOSITORY;
 import static org.apache.james.mailets.configuration.Constants.DEFAULT_DOMAIN;
 import static org.apache.james.mailets.configuration.Constants.LOCALHOST_IP;
@@ -54,12 +54,12 @@ import org.apache.james.utils.SMTPMessageSender;
 import org.apache.james.utils.SpoolerProbe;
 import org.apache.mailet.Mail;
 import org.assertj.core.api.SoftAssertions;
+import org.awaitility.Awaitility;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.api.io.TempDir;
-import org.testcontainers.shaded.org.awaitility.Awaitility;
 
 import com.github.fge.lambdas.Throwing;
 import com.google.common.collect.ImmutableList;

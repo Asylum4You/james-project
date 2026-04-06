@@ -16,7 +16,7 @@
     }],
     "bcc": [],
     "htmlBody": null,
-    "textBody": "Main test message...\n",
+    "textBody": "Main test message...\r\n",
     "cc": [],
     "date": "2015-06-07T00:00:00+0200",
     "saveDate": null,
@@ -25,7 +25,7 @@
         "address": "bob@domain.tld",
         "domain":"domain"
     }],
-    "hasAttachment": false,
+    "hasAttachment": true,
     "headers": [{
         "name": "date",
         "value": "Wed, 26 Jan 2022 12:21:37 +0100"

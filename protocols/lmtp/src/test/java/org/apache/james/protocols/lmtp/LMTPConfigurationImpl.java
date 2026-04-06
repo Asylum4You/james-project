@@ -20,7 +20,7 @@ package org.apache.james.protocols.lmtp;
 
 import java.util.Optional;
 
-import org.apache.james.protocols.api.OidcSASLConfiguration;
+import org.apache.james.jwt.OidcSASLConfiguration;
 
 public class LMTPConfigurationImpl extends LMTPConfiguration {
 
@@ -29,7 +29,13 @@ public class LMTPConfigurationImpl extends LMTPConfiguration {
     public LMTPConfigurationImpl() {
         super("JAMES Protocols LMTP Server");
     }
-    
+
+    @Override
+    public SenderVerificationConfiguration senderVerificationConfiguration() {
+        boolean allowUnauthenticatedSender = true;
+        return new SenderVerificationConfiguration(SenderVerificationMode.DISABLED, allowUnauthenticatedSender);
+    }
+
     @Override
     public long getMaxMessageSize() {
         return maxMessageSize;

@@ -40,6 +40,7 @@ import org.apache.james.mailbox.cassandra.quota.CassandraCurrentQuotaManagerV2;
 import org.apache.james.mailbox.cassandra.quota.CassandraPerUserMaxQuotaManagerV2;
 import org.apache.james.mailbox.model.MessageId;
 import org.apache.james.mailbox.quota.MaxQuotaManager;
+import org.apache.james.mailbox.quota.QuotaChangeNotifier;
 import org.apache.james.mailbox.quota.QuotaRootResolver;
 import org.apache.james.mailbox.store.MailboxManagerConfiguration;
 import org.apache.james.mailbox.store.NoMailboxPathLocker;
@@ -51,7 +52,7 @@ import org.apache.james.mailbox.store.event.MailboxAnnotationListener;
 import org.apache.james.mailbox.store.extractor.DefaultTextExtractor;
 import org.apache.james.mailbox.store.mail.NaiveThreadIdGuessingAlgorithm;
 import org.apache.james.mailbox.store.mail.ThreadIdGuessingAlgorithm;
-import org.apache.james.mailbox.store.mail.model.impl.MessageParser;
+import org.apache.james.mailbox.store.mail.model.impl.MessageParserImpl;
 import org.apache.james.mailbox.store.quota.DefaultUserQuotaRootResolver;
 import org.apache.james.mailbox.store.quota.ListeningCurrentQuotaUpdater;
 import org.apache.james.mailbox.store.quota.QuotaComponents;
@@ -105,7 +106,7 @@ public class CassandraMailboxManagerProvider {
                                                                  ThreadIdGuessingAlgorithm threadIdGuessingAlgorithm,
                                                                  Clock clock) {
         MailboxACLResolver aclResolver = new UnionMailboxACLResolver();
-        MessageParser messageParser = new MessageParser();
+        MessageParserImpl messageParser = new MessageParserImpl();
         InVMEventBus eventBus = new InVMEventBus(new InVmEventDelivery(new RecordingMetricFactory()), EventBusTestFixture.RETRY_BACKOFF_CONFIGURATION, new MemoryEventDeadLetters());
         StoreRightManager storeRightManager = new StoreRightManager(mapperFactory, aclResolver, eventBus);
 
@@ -115,7 +116,7 @@ public class CassandraMailboxManagerProvider {
             LIMIT_ANNOTATIONS, LIMIT_ANNOTATION_SIZE);
 
         SessionProviderImpl sessionProvider = new SessionProviderImpl(noAuthenticator, noAuthorizator);
-        MaxQuotaManager maxQuotaManager = new CassandraPerUserMaxQuotaManagerV2(new CassandraQuotaLimitDao(session));
+        MaxQuotaManager maxQuotaManager = new CassandraPerUserMaxQuotaManagerV2(new CassandraQuotaLimitDao(session), QuotaChangeNotifier.NOOP);
         CassandraCurrentQuotaManagerV2 currentQuotaUpdater = new CassandraCurrentQuotaManagerV2(new CassandraQuotaCurrentValueDao(session));
         StoreQuotaManager storeQuotaManager = new StoreQuotaManager(currentQuotaUpdater, maxQuotaManager);
         QuotaRootResolver quotaRootResolver = new DefaultUserQuotaRootResolver(sessionProvider, mapperFactory);
@@ -131,7 +132,7 @@ public class CassandraMailboxManagerProvider {
 
         eventBus.register(quotaUpdater);
         eventBus.register(new MailboxAnnotationListener(mapperFactory, sessionProvider));
-        eventBus.register(mapperFactory.deleteMessageListener());
+        eventBus.register(mapperFactory.deleteMessageListener(eventBus));
 
         return manager;
     }

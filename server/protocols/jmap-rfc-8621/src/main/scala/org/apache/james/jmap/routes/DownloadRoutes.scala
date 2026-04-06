@@ -20,6 +20,8 @@ package org.apache.james.jmap.routes
 
 import java.io.InputStream
 import java.nio.charset.StandardCharsets
+import java.util.concurrent.Callable
+import java.util.function.Consumer
 import java.util.stream
 import java.util.stream.Stream
 
@@ -29,7 +31,7 @@ import eu.timepit.refined.refineV
 import io.netty.buffer.Unpooled
 import io.netty.handler.codec.http.HttpHeaderNames.{CONTENT_LENGTH, CONTENT_TYPE}
 import io.netty.handler.codec.http.HttpResponseStatus._
-import io.netty.handler.codec.http.{HttpHeaderValidationUtil, HttpMethod, HttpResponseStatus, QueryStringDecoder}
+import io.netty.handler.codec.http.{HttpHeaderNames, HttpHeaderValidationUtil, HttpMethod, QueryStringDecoder}
 import jakarta.inject.{Inject, Named}
 import org.apache.commons.io.output.UnsynchronizedByteArrayOutputStream
 import org.apache.james.jmap.HttpConstants.JSON_CONTENT_TYPE
@@ -42,26 +44,28 @@ import org.apache.james.jmap.exceptions.UnauthorizedException
 import org.apache.james.jmap.http.Authenticator
 import org.apache.james.jmap.http.rfc8621.InjectionKeys
 import org.apache.james.jmap.json.ResponseSerializer
-import org.apache.james.jmap.mail.{BlobId, EmailBodyPart, MinimalEmailBodyPart}
+import org.apache.james.jmap.mail.{BlobId, MinimalEmailBodyPart}
 import org.apache.james.jmap.method.{AccountNotFoundException, ZoneIdProvider}
 import org.apache.james.jmap.routes.DownloadRoutes.{BUFFER_SIZE, LOGGER}
 import org.apache.james.jmap.{Endpoint, JMAPRoute, JMAPRoutes}
+import org.apache.james.mailbox.exception.AttachmentNotFoundException
 import org.apache.james.mailbox.model.ContentType.{MediaType, MimeType, SubType}
 import org.apache.james.mailbox.model._
 import org.apache.james.mailbox.{AttachmentIdFactory, AttachmentManager, MailboxSession, MessageIdManager}
+import org.apache.james.metrics.api.{Metric, MetricFactory}
 import org.apache.james.mime4j.codec.EncoderUtil
 import org.apache.james.mime4j.codec.EncoderUtil.Usage
 import org.apache.james.mime4j.dom.SingleBody
 import org.apache.james.mime4j.message.DefaultMessageWriter
 import org.apache.james.util.ReactorUtils
+import org.reactivestreams.Publisher
 import org.slf4j.{Logger, LoggerFactory}
 import play.api.libs.json.Json
 import reactor.core.publisher.Mono
-import reactor.core.scala.publisher.SMono
+import reactor.core.scala.publisher.{SFlux, SMono}
 import reactor.core.scheduler.Schedulers
 import reactor.netty.http.server.{HttpServerRequest, HttpServerResponse}
 
-import scala.compat.java8.FunctionConverters._
 import scala.jdk.CollectionConverters._
 import scala.util.{Failure, Success, Try}
 
@@ -82,7 +86,7 @@ case class Applicable(blob: SMono[Blob]) extends BlobResolutionResult {
 }
 
 trait BlobResolver {
-  def resolve(blobId: BlobId, mailboxSession: MailboxSession): BlobResolutionResult
+  def resolve(blobId: BlobId, mailboxSession: MailboxSession): Publisher[BlobResolutionResult]
 }
 
 trait Blob {
@@ -125,29 +129,40 @@ case class AttachmentBlob(attachmentMetadata: AttachmentMetadata, fileContent: I
 }
 
 case class EmailBodyPartBlob(blobId: BlobId, part: MinimalEmailBodyPart) extends Blob {
-  override def size: Try[Size] = part.size
-
-  override def contentType: ContentType = ContentType.of(part.`type`.value)
-
-  override def content: InputStream = part.entity.getBody match {
-    case body: SingleBody => body.getInputStream
+  private lazy val writtenBodyContent: Option[UnsynchronizedByteArrayOutputStream] = part.entity.getBody match {
+    case _: SingleBody => None
     case body =>
       val writer = new DefaultMessageWriter
       val outputStream = new UnsynchronizedByteArrayOutputStream()
       writer.writeBody(body, outputStream)
-      outputStream.toInputStream
+      Some(outputStream)
+  }
+
+  override def size: Try[Size] = writtenBodyContent match {
+    case Some(outputStream) =>
+      refineV[NonNegative](outputStream.size().toLong) match {
+        case Left(e) => Failure(new IllegalArgumentException(e))
+        case Right(s) => Success(s)
+      }
+    case None => part.size
+  }
+
+  override def contentType: ContentType = ContentType.of(part.`type`.value)
+
+  override def content: InputStream = writtenBodyContent match {
+    case Some(outputStream) => outputStream.toInputStream
+    case None => part.entity.getBody.asInstanceOf[SingleBody].getInputStream
   }
 }
 
 class MessageBlobResolver @Inject()(val messageIdFactory: MessageId.Factory,
                                     val messageIdManager: MessageIdManager) extends BlobResolver {
-  override def resolve(blobId: BlobId, mailboxSession: MailboxSession): BlobResolutionResult = {
+  override def resolve(blobId: BlobId, mailboxSession: MailboxSession): SMono[BlobResolutionResult] = {
     Try(messageIdFactory.fromString(blobId.value.value)) match {
-      case Failure(_) => NonApplicable
-      case Success(messageId) => Applicable(SMono.fromPublisher(
-        messageIdManager.getMessagesReactive(List(messageId).asJava, FetchGroup.FULL_CONTENT, mailboxSession))
-        .map[Blob](MessageBlob(blobId, _))
-        .switchIfEmpty(SMono.error(BlobNotFoundException(blobId))))
+      case Failure(_) => SMono.just(NonApplicable)
+      case Success(messageId) => SMono.fromPublisher(messageIdManager.getMessagesReactive(List(messageId).asJava, FetchGroup.FULL_CONTENT, mailboxSession))
+        .map(message => Applicable(SMono.just(MessageBlob(blobId, message))))
+        .switchIfEmpty(SMono.just(NonApplicable))
     }
   }
 }
@@ -155,35 +170,36 @@ class MessageBlobResolver @Inject()(val messageIdFactory: MessageId.Factory,
 class UploadResolver @Inject()(val uploadService: UploadService) extends BlobResolver {
   private val prefix = "uploads-"
 
-  override def resolve(blobId: BlobId, mailboxSession: MailboxSession): BlobResolutionResult = {
+  override def resolve(blobId: BlobId, mailboxSession: MailboxSession): SMono[BlobResolutionResult] = {
     if (!blobId.value.value.startsWith(prefix)) {
-      NonApplicable
+      SMono.just(NonApplicable)
     } else {
       val uploadIdAsString = blobId.value.value.substring(prefix.length)
       Try(UploadId.from(uploadIdAsString)) match {
-        case Failure(_) => NonApplicable
-        case Success(uploadId) => Applicable(
-          SMono(uploadService.retrieve(uploadId, mailboxSession.getUser))
-            .map(upload => UploadedBlob(blobId, upload))
+        case Failure(_) => SMono.just(NonApplicable)
+        case Success(uploadId) => SMono.fromPublisher(uploadService.retrieve(uploadId, mailboxSession.getUser))
+            .map(upload => Applicable(SMono.just(UploadedBlob(blobId, upload))))
             .onErrorResume {
-              case _: UploadNotFoundException => SMono.error(BlobNotFoundException(blobId))
-            })
+              case _: UploadNotFoundException => SMono.just(NonApplicable)
+              case e => SMono.error[BlobResolutionResult](e)
+            }
       }
     }
   }
 }
 
 class AttachmentBlobResolver @Inject()(val attachmentManager: AttachmentManager, val attachmentIdFactory: AttachmentIdFactory) extends BlobResolver {
-  override def resolve(blobId: BlobId, mailboxSession: MailboxSession): BlobResolutionResult =
-    attachmentIdFactory.from(blobId.value.value) match {
-      case attachmentId: StringBackedAttachmentId =>
-        Try(attachmentManager.getAttachment(attachmentId, mailboxSession)) match {
-          case Success(attachmentMetadata) =>
-            Applicable(SMono(attachmentManager.loadReactive(attachmentMetadata, mailboxSession))
-              .map(content => AttachmentBlob(attachmentMetadata, content)))
-          case Failure(_) => NonApplicable
-        }
-      case _ => NonApplicable
+  override def resolve(blobId: BlobId, mailboxSession: MailboxSession): SMono[BlobResolutionResult] =
+    Try(attachmentIdFactory.from(blobId.value.value)) match {
+      case Success(attachmentId) =>
+        SMono(attachmentManager.getAttachmentReactive(attachmentId, mailboxSession))
+          .map(attachmentMetadata => Applicable(SMono(attachmentManager.loadReactive(attachmentMetadata, mailboxSession))
+            .map(content => AttachmentBlob(attachmentMetadata, content))))
+          .onErrorResume {
+            case e: AttachmentNotFoundException =>  SMono.just(NonApplicable.asInstanceOf[BlobResolutionResult])
+            case e => SMono.error[BlobResolutionResult](e)
+          }
+      case _ => SMono.just(NonApplicable)
     }
 }
 
@@ -205,11 +221,11 @@ class MessagePartBlobResolver @Inject()(val messageIdFactory: MessageId.Factory,
     case (acc, idPart) => acc.headOption.map(prefix => prefix + "_" + idPart).getOrElse(idPart) :: acc
   }.flatMap(s => BlobId.of(s).toOption).take(parts.size).reverse
 
-  override def resolve(blobId: BlobId, mailboxSession: MailboxSession): BlobResolutionResult = {
+  override def resolve(blobId: BlobId, mailboxSession: MailboxSession): SMono[BlobResolutionResult] = {
     asMessageAndPartIds(blobId) match {
-      case Failure(_) => NonApplicable
+      case Failure(_) => SMono.just(NonApplicable)
       case Success((messageId, blobIds)) =>
-        Applicable(SMono.fromPublisher(
+        SMono.fromPublisher(
           messageIdManager.getMessagesReactive(List(messageId).asJava, FetchGroup.FULL_CONTENT, mailboxSession))
           .handle[MinimalEmailBodyPart] {
             case (message, sink) => MinimalEmailBodyPart.ofMessage(None, zoneIdSupplier.get(), BlobId.of(messageId).get, message)
@@ -224,8 +240,8 @@ class MessagePartBlobResolver @Inject()(val messageIdFactory: MessageId.Factory,
               }
                 .fold(sink.error(BlobNotFoundException(blobId)))(part => sink.next(part))
           }
-          .map[Blob](EmailBodyPartBlob(blobId, _))
-          .switchIfEmpty(SMono.error(BlobNotFoundException(blobId))))
+          .map(blob => Applicable(SMono.just(EmailBodyPartBlob(blobId, blob))))
+          .switchIfEmpty(SMono.just(NonApplicable))
     }
   }
 }
@@ -238,20 +254,27 @@ class BlobResolvers(blobResolvers: Set[BlobResolver]) {
   }
 
   def resolve(blobId: BlobId, mailboxSession: MailboxSession): SMono[Blob] =
-    blobResolvers.flatMap(resolver => resolver.resolve(blobId, mailboxSession).asOption)
-      .headOption
-      .getOrElse(SMono.error(BlobNotFoundException(blobId)))
+    SFlux.fromIterable(blobResolvers)
+      .concatMap(resolver => resolver.resolve(blobId, mailboxSession))
+      .filter {
+        case NonApplicable => false
+        case _: Applicable => true
+      }
+      .concatMap(result => result.asOption.getOrElse(SMono.error(BlobNotFoundException(blobId))))
+      .next().switchIfEmpty(SMono.error(BlobNotFoundException(blobId)))
 }
 
 class DownloadRoutes @Inject()(@Named(InjectionKeys.RFC_8621) val authenticator: Authenticator,
                                val blobResolvers: BlobResolvers,
-                               val sessionTranslator: SessionTranslator) extends JMAPRoutes {
+                               val sessionTranslator: SessionTranslator,
+                               val metricFactory: MetricFactory) extends JMAPRoutes {
 
   private val accountIdParam: String = "accountId"
   private val blobIdParam: String = "blobId"
   private val nameParam: String = "name"
   private val contentTypeParam: String = "type"
   private val downloadUri = s"/download/{$accountIdParam}/{$blobIdParam}"
+  private val pendingDownloadMetric: Metric = metricFactory.generate("jmap_pending_downloads")
 
   override def routes(): stream.Stream[JMAPRoute] = Stream.of(
     JMAPRoute.builder
@@ -268,23 +291,15 @@ class DownloadRoutes @Inject()(@Named(InjectionKeys.RFC_8621) val authenticator:
       .flatMap(mailboxSession => getIfOwner(request, response, mailboxSession))
       .onErrorResume {
         case _: ForbiddenException | _: AccountNotFoundException =>
-          respondDetails(response,
-            ProblemDetails(status = FORBIDDEN, detail = "You cannot download in others accounts"),
-            FORBIDDEN)
+          respondDetails(response, ProblemDetails(status = FORBIDDEN, detail = "You cannot download in others accounts"))
         case e: UnauthorizedException =>
           LOGGER.warn("Unauthorized", e)
-          respondDetails(e.addHeaders(response),
-            ProblemDetails(status = UNAUTHORIZED, detail = e.getMessage),
-            UNAUTHORIZED)
+          respondDetails(e.addHeaders(response), ProblemDetails(status = UNAUTHORIZED, detail = e.getMessage))
         case _: BlobNotFoundException =>
-          respondDetails(response,
-            ProblemDetails(status = NOT_FOUND, detail = "The resource could not be found"),
-            NOT_FOUND)
+          respondDetails(response, ProblemDetails(status = NOT_FOUND, detail = "The resource could not be found"))
         case e =>
-          LOGGER.error("Unexpected error upon downloads", e)
-          respondDetails(response,
-            ProblemDetails(status = INTERNAL_SERVER_ERROR, detail = e.getMessage),
-            INTERNAL_SERVER_ERROR)
+          LOGGER.error("Unexpected error upon download {}", request.uri(), e)
+          respondDetails(response, ProblemDetails(status = INTERNAL_SERVER_ERROR, detail = e.getMessage))
       }
       .subscribeOn(ReactorUtils.BLOCKING_CALL_WRAPPER)
       .asJava()
@@ -293,7 +308,8 @@ class DownloadRoutes @Inject()(@Named(InjectionKeys.RFC_8621) val authenticator:
   private def get(request: HttpServerRequest, response: HttpServerResponse, mailboxSession: MailboxSession): SMono[Unit] =
     BlobId.of(request.param(blobIdParam))
       .fold(e => SMono.error(e),
-        blobResolvers.resolve(_, mailboxSession))
+        blobResolvers.resolve(_, mailboxSession)
+          .doOnSubscribe(_ => pendingDownloadMetric.increment()))
       .flatMap(blob => downloadBlob(
         optionalName = queryParam(request, nameParam),
         response = response,
@@ -302,6 +318,7 @@ class DownloadRoutes @Inject()(@Named(InjectionKeys.RFC_8621) val authenticator:
           .getOrElse(blob.contentType),
         blob = blob)
         .`then`())
+      .doOnSuccess(_ => pendingDownloadMetric.decrement())
 
   private def getIfOwner(request: HttpServerRequest, response: HttpServerResponse, mailboxSession: MailboxSession): SMono[Unit] =
     Id.validate(request.param(accountIdParam)) match {
@@ -313,20 +330,25 @@ class DownloadRoutes @Inject()(@Named(InjectionKeys.RFC_8621) val authenticator:
   private def downloadBlob(optionalName: Option[String],
                            response: HttpServerResponse,
                            blobContentType: ContentType,
-                           blob: Blob): SMono[Unit] =
+                           blob: Blob): SMono[Unit] = {
+    val resourceSupplier: Callable[InputStream] = () => blob.content
+    val sourceSupplier: java.util.function.Function[InputStream, Mono[Void]] = stream => SMono(addContentDispositionHeader(optionalName)
+      .compose(addContentLengthHeader(blob.size))
+      .compose(addCacheControlHeader())
+      .apply(response)
+      .header(CONTENT_TYPE, sanitizeHeaderValue(blobContentType.asString))
+      .status(OK)
+      .send(ReactorUtils.toChunks(stream, BUFFER_SIZE)
+        .map(Unpooled.wrappedBuffer(_))
+        .subscribeOn(Schedulers.boundedElastic()))).asJava()
+    val resourceRelease: Consumer[InputStream] = (stream: InputStream) => stream.close()
+
     SMono.fromPublisher(Mono.using(
-      () => blob.content,
-      (stream: InputStream) => addContentDispositionHeader(optionalName)
-        .compose(addContentLengthHeader(blob.size))
-        .apply(response)
-        .header(CONTENT_TYPE, sanitizeHeaderValue(blobContentType.asString))
-        .status(OK)
-        .send(ReactorUtils.toChunks(stream, BUFFER_SIZE)
-          .map(Unpooled.wrappedBuffer(_))
-          .subscribeOn(Schedulers.boundedElastic()))
-        .`then`,
-      asJavaConsumer[InputStream]((stream: InputStream) => stream.close())))
+        resourceSupplier,
+        sourceSupplier,
+        resourceRelease))
       .`then`
+  }
 
   private def addContentDispositionHeader(optionalName: Option[String]): HttpServerResponse => HttpServerResponse =
     resp => optionalName.map(addContentDispositionHeaderRegardingEncoding(_, resp))
@@ -343,6 +365,9 @@ class DownloadRoutes @Inject()(@Named(InjectionKeys.RFC_8621) val authenticator:
     resp => sizeTry
       .map(size => resp.header("Content-Length", size.value.toString))
       .getOrElse(resp)
+
+  private def addCacheControlHeader(): HttpServerResponse => HttpServerResponse =
+    resp => resp.header(HttpHeaderNames.CACHE_CONTROL, "private, immutable, max-age=31536000")
 
   private def addContentDispositionHeaderRegardingEncoding(name: String, resp: HttpServerResponse): HttpServerResponse =
     if (CharMatcher.ascii.matchesAllOf(name)) {
@@ -364,12 +389,12 @@ class DownloadRoutes @Inject()(@Named(InjectionKeys.RFC_8621) val authenticator:
       .flatMap(_.asScala)
       .headOption
 
-  private def respondDetails(httpServerResponse: HttpServerResponse, details: ProblemDetails, statusCode: HttpResponseStatus = BAD_REQUEST): SMono[Unit] =
+  private def respondDetails(httpServerResponse: HttpServerResponse, details: ProblemDetails): SMono[Unit] =
     SMono.fromCallable(() => ResponseSerializer.serialize(details))
       .map(Json.stringify)
       .map(_.getBytes(StandardCharsets.UTF_8))
       .flatMap(bytes =>
-        SMono.fromPublisher(httpServerResponse.status(statusCode)
+        SMono.fromPublisher(httpServerResponse.status(details.status)
           .header(CONTENT_TYPE, JSON_CONTENT_TYPE)
           .header(CONTENT_LENGTH, Integer.toString(bytes.length))
           .sendByteArray(SMono.just(bytes))

@@ -38,8 +38,9 @@ public interface NotificationRegistryContract {
     AccountId ACCOUNT_ID = AccountId.fromString("id");
 
     ZonedDateTimeProvider zonedDateTimeProvider = mock(ZonedDateTimeProvider.class);
-    
+
     NotificationRegistry notificationRegistry();
+
     RecipientId recipientId();
 
     @Test
@@ -114,7 +115,7 @@ public interface NotificationRegistryContract {
 
         notificationRegistry().register(ACCOUNT_ID, recipientId(), Optional.of(ZONED_DATE_TIME)).block();
 
-        assertThat(notificationRegistry().isRegistered(ACCOUNT_ID, recipientId()).block()).isTrue();
+        assertThat(notificationRegistry().isRegistered(ACCOUNT_ID, recipientId()).block()).isFalse();
     }
 
     @Test

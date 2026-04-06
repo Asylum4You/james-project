@@ -21,37 +21,50 @@ package org.apache.james.imap.processor;
 
 import jakarta.inject.Inject;
 
+import org.apache.james.core.Username;
 import org.apache.james.imap.api.display.HumanReadableText;
 import org.apache.james.imap.api.message.response.StatusResponseFactory;
 import org.apache.james.imap.api.process.ImapSession;
 import org.apache.james.imap.api.process.SelectedMailbox;
 import org.apache.james.imap.main.PathConverter;
 import org.apache.james.imap.message.request.DeleteRequest;
+import org.apache.james.mailbox.DefaultMailboxes;
 import org.apache.james.mailbox.MailboxManager;
 import org.apache.james.mailbox.exception.MailboxException;
 import org.apache.james.mailbox.exception.MailboxNotFoundException;
 import org.apache.james.mailbox.exception.TooLongMailboxNameException;
 import org.apache.james.mailbox.model.MailboxPath;
 import org.apache.james.metrics.api.MetricFactory;
+import org.apache.james.util.AuditTrail;
 import org.apache.james.util.MDCBuilder;
 import org.apache.james.util.ReactorUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import com.google.common.collect.ImmutableMap;
 
 import reactor.core.publisher.Mono;
 
 public class DeleteProcessor extends AbstractMailboxProcessor<DeleteRequest> {
     private static final Logger LOGGER = LoggerFactory.getLogger(DeleteProcessor.class);
 
+    private final PathConverter.Factory pathConverterFactory;
+
     @Inject
-    public DeleteProcessor(MailboxManager mailboxManager, StatusResponseFactory factory, MetricFactory metricFactory) {
+    public DeleteProcessor(MailboxManager mailboxManager, StatusResponseFactory factory, MetricFactory metricFactory, PathConverter.Factory pathConverterFactory) {
         super(DeleteRequest.class, mailboxManager, factory, metricFactory);
+        this.pathConverterFactory = pathConverterFactory;
     }
 
     @Override
     protected Mono<Void> processRequestReactive(DeleteRequest request, ImapSession session, Responder responder) {
         MailboxManager mailboxManager = getMailboxManager();
-        MailboxPath mailboxPath = PathConverter.forSession(session).buildFullPath(request.getMailboxName());
+        MailboxPath mailboxPath = pathConverterFactory.forSession(session).buildFullPath(request.getMailboxName());
+        if (DefaultMailboxes.INBOX.equalsIgnoreCase(mailboxPath.getName())) {
+            LOGGER.info("Deleting INBOX mailbox is not allowed (request from user {})", session.getMailboxSession().getUser().asString());
+            no(request, responder, HumanReadableText.FAILURE_DELETE_INBOX_NOT_ALLOWED);
+            return Mono.empty();
+        }
         SelectedMailbox selected = session.getSelected();
 
         return deselect(session, selected, mailboxPath)
@@ -59,6 +72,7 @@ public class DeleteProcessor extends AbstractMailboxProcessor<DeleteRequest> {
             .then(unsolicitedResponses(session, responder, false))
             .then(Mono.fromRunnable(() -> okComplete(request, responder)))
             .then()
+            .doOnEach(ReactorUtils.logFinally(() -> auditTrail(session, mailboxPath)))
             .onErrorResume(MailboxNotFoundException.class, e -> {
                 no(request, responder, HumanReadableText.FAILURE_NO_SUCH_MAILBOX);
                 return ReactorUtils.logAsMono(() -> LOGGER.debug("Delete failed for mailbox {} as it doesn't exist", mailboxPath, e));
@@ -91,5 +105,16 @@ public class DeleteProcessor extends AbstractMailboxProcessor<DeleteRequest> {
         return MDCBuilder.create()
             .addToContext(MDCBuilder.ACTION, "DELETE")
             .addToContext("mailbox", request.getMailboxName());
+    }
+
+    private void auditTrail(ImapSession session, MailboxPath mailboxPath) {
+        AuditTrail.entry()
+            .username(() -> session.getUserName().asString())
+            .sessionId(() -> session.sessionId().asString())
+            .protocol("IMAP")
+            .action("DELETE")
+            .parameters(() -> ImmutableMap.of("loggedInUser", session.getMailboxSession().getLoggedInUser().map(Username::asString).orElse(""),
+                "mailboxPath", mailboxPath.asString()))
+            .log(String.format("IMAP DELETE succeeded."));
     }
 }

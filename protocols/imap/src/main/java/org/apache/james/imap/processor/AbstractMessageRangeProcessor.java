@@ -19,8 +19,10 @@
 
 package org.apache.james.imap.processor;
 
+import java.util.List;
 import java.util.Objects;
 
+import org.apache.james.core.Username;
 import org.apache.james.imap.api.display.HumanReadableText;
 import org.apache.james.imap.api.message.IdRange;
 import org.apache.james.imap.api.message.response.StatusResponse;
@@ -39,12 +41,14 @@ import org.apache.james.mailbox.model.MailboxPath;
 import org.apache.james.mailbox.model.MessageRange;
 import org.apache.james.mailbox.model.UidValidity;
 import org.apache.james.metrics.api.MetricFactory;
+import org.apache.james.util.AuditTrail;
 import org.apache.james.util.ReactorUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.github.fge.lambdas.Throwing;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -52,9 +56,12 @@ import reactor.core.publisher.Mono;
 public abstract class AbstractMessageRangeProcessor<R extends AbstractMessageRangeRequest> extends AbstractMailboxProcessor<R> {
     private static final Logger LOGGER = LoggerFactory.getLogger(AbstractMessageRangeProcessor.class);
 
+    private final PathConverter.Factory pathConverterFactory;
+
     public AbstractMessageRangeProcessor(Class<R> acceptableClass, MailboxManager mailboxManager, StatusResponseFactory factory,
-                                         MetricFactory metricFactory) {
+                                         MetricFactory metricFactory, PathConverter.Factory pathConverterFactory) {
         super(acceptableClass, mailboxManager, factory, metricFactory);
+        this.pathConverterFactory = pathConverterFactory;
     }
 
     protected abstract Flux<MessageRange> process(MailboxId targetMailbox,
@@ -62,11 +69,19 @@ public abstract class AbstractMessageRangeProcessor<R extends AbstractMessageRan
                                                   MailboxSession mailboxSession,
                                                   MessageRange messageSet);
 
+    protected Flux<MessageRange> processAll(MailboxId targetMailbox,
+                                            SelectedMailbox currentMailbox,
+                                            MailboxSession mailboxSession,
+                                            List<MessageRange> messageSets) {
+        return Flux.fromIterable(messageSets)
+            .concatMap(set -> process(targetMailbox, currentMailbox, mailboxSession, set));
+    }
+
     protected abstract String getOperationName();
 
     @Override
     protected Mono<Void> processRequestReactive(R request, ImapSession session, Responder responder) {
-        MailboxPath targetMailbox = PathConverter.forSession(session).buildFullPath(request.getMailboxName());
+        MailboxPath targetMailbox = pathConverterFactory.forSession(session).buildFullPath(request.getMailboxName());
         MailboxSession mailboxSession = session.getMailboxSession();
 
         return Mono.from(getMailboxManager().mailboxExists(targetMailbox, mailboxSession))
@@ -114,7 +129,17 @@ public abstract class AbstractMessageRangeProcessor<R extends AbstractMessageRan
                                 .orElseThrow(() -> new MessageRangeException(range.getFormattedString() + " is an invalid range")))
                             .sneakyThrow())
                         .filter(Objects::nonNull)
-                        .concatMap(range -> process(target.getId(), session.getSelected(), mailboxSession, range)
+                        .collectList()
+                        .flatMapMany(ranges -> processAll(target.getId(), session.getSelected(), mailboxSession, ranges)
+                            .doOnEach(ReactorUtils.logFinally(() -> AuditTrail.entry()
+                                .username(() -> mailboxSession.getUser().asString())
+                                .sessionId(() -> session.sessionId().asString())
+                                .protocol("IMAP")
+                                .action(getOperationName())
+                                .parameters(() -> ImmutableMap.of("loggedInUser", mailboxSession.getLoggedInUser().map(Username::asString).orElse(""),
+                                    "targetId", target.getId().serialize(),
+                                    "selectedMailboxId", session.getSelected().getMailboxId().serialize()))
+                                .log("IMAP " + getOperationName() + " succeeded.")))
                             .map(IdRange::from))
                         .collect(ImmutableList.<IdRange>toImmutableList())
                         .map(IdRange::mergeRanges)

@@ -85,6 +85,8 @@ public class HumanReadableText {
 
     public static final HumanReadableText FAILURE_NO_SUCH_MAILBOX = new HumanReadableText("org.apache.james.imap.FAILURE_NO_SUCH_MAILBOX", "failed. No such mailbox.");
 
+    public static final HumanReadableText FAILURE_DELETE_INBOX_NOT_ALLOWED = new HumanReadableText("org.apache.james.imap.DELETE_INBOX_NOT_ALLOWED", "failed. Deleting INBOX is forbidden.");
+
     public static final HumanReadableText FAILURE_OVERQUOTA = new HumanReadableText("org.apache.james.imap.OVERQUOTA", "failed. Over quota.");
 
     public static final HumanReadableText FAILURE_NO_QUOTA_RESOURCE = new HumanReadableText("org.apache.james.imap.FAILURE_NO_SUCH_QUOTA_RESOURCE", "failed. No such quota resource.");
@@ -103,7 +105,9 @@ public class HumanReadableText {
 
     public static final HumanReadableText SAVE_FAILED = new HumanReadableText("org.apache.james.imap.SAVE_FAILED", "failed. Save failed.");
 
-    public static final HumanReadableText FAILED = new HumanReadableText("org.apache.james.imap.SAVE_FAILED", "failed.");
+    public static final HumanReadableText FAILED = new HumanReadableText("org.apache.james.imap.FAILED", "failed.");
+
+    public static final HumanReadableText FAILED_LITERAL_SIZE_EXCEEDED = new HumanReadableText("org.apache.james.imap.FAILED_LITERAL_SIZE_EXCEEDED", "failed. Literal size exceeded.");
 
     public static final HumanReadableText UNSUPPORTED_SEARCH = new HumanReadableText("org.apache.james.imap.UNSUPPORTED_SEARCH", "failed. Unsupported search.");
 
@@ -177,6 +181,8 @@ public class HumanReadableText {
 
     public static final String UNSUFFICIENT_RIGHTS_DEFAULT_VALUE = "You need the {0} right to perform command {1} on mailbox {2}.";
     public static final String UNSUFFICIENT_RIGHTS_KEY = "org.apache.james.imap.UNSUFFICIENT_RIGHTS";
+
+    public static final HumanReadableText UNSUFFICIENT_RIGHTS = new HumanReadableText(UNSUFFICIENT_RIGHTS_KEY, "failed. Insufficient rights.");
 
     public static final String UNSUPPORTED_RIGHT_KEY = "org.apache.james.imap.UNSUPPORTED_RIGHT";
     public static final String UNSUPPORTED_RIGHT_DEFAULT_VALUE = "The {0} right is not supported.";

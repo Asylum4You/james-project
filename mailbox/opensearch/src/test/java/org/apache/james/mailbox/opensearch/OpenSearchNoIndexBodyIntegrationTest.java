@@ -45,7 +45,7 @@ import org.apache.james.mailbox.model.MailboxPath;
 import org.apache.james.mailbox.model.SearchQuery;
 import org.apache.james.mailbox.opensearch.events.OpenSearchListeningMessageSearchIndex;
 import org.apache.james.mailbox.opensearch.json.MessageToOpenSearchJson;
-import org.apache.james.mailbox.opensearch.query.CriterionConverter;
+import org.apache.james.mailbox.opensearch.query.DefaultCriterionConverter;
 import org.apache.james.mailbox.opensearch.query.QueryConverter;
 import org.apache.james.mailbox.opensearch.search.OpenSearchSearcher;
 import org.apache.james.mailbox.store.StoreMessageManager;
@@ -71,7 +71,7 @@ import com.google.common.collect.ImmutableSet;
 
 import reactor.core.publisher.Mono;
 
-public class OpenSearchNoIndexBodyIntegrationTest {
+class OpenSearchNoIndexBodyIntegrationTest {
     static final int SEARCH_SIZE = 1;
     private static final Username USERNAME = Username.of("user");
     private static final ConditionFactory CALMLY_AWAIT = Awaitility
@@ -111,7 +111,7 @@ public class OpenSearchNoIndexBodyIntegrationTest {
         WriteAliasName writeAliasName = new WriteAliasName(UUID.randomUUID().toString());
         indexName = new IndexName(UUID.randomUUID().toString());
         MailboxIndexCreationUtil.prepareClient(client, readAliasName, writeAliasName, indexName,
-            openSearch.getDockerOpenSearch().configuration());
+            openSearch.getDockerOpenSearch().configuration(), new DefaultMailboxMappingFactory());
 
         InMemoryIntegrationResources resources = InMemoryIntegrationResources.builder()
             .preProvisionnedFakeAuthenticator()
@@ -123,10 +123,11 @@ public class OpenSearchNoIndexBodyIntegrationTest {
                 preInstanciationStage.getMapperFactory(),
                 ImmutableSet.of(),
                 new OpenSearchIndexer(client, writeAliasName),
-                new OpenSearchSearcher(client, new QueryConverter(new CriterionConverter()), SEARCH_SIZE, readAliasName, routingKeyFactory),
+                new OpenSearchSearcher(client, new QueryConverter(new DefaultCriterionConverter()), SEARCH_SIZE, readAliasName, routingKeyFactory),
                 new MessageToOpenSearchJson(textExtractor, ZoneId.of("Europe/Paris"), IndexAttachments.YES, IndexHeaders.YES, IndexBody.NO),
                 preInstanciationStage.getSessionProvider(), routingKeyFactory, messageIdFactory,
-                OpenSearchMailboxConfiguration.builder().indexBody(IndexBody.NO).build(), new RecordingMetricFactory()))
+                OpenSearchMailboxConfiguration.builder().indexBody(IndexBody.NO).build(), new RecordingMetricFactory(),
+                ImmutableSet.of()))
             .noPreDeletionHooks()
             .storeQuotaManager()
             .build();
@@ -151,7 +152,7 @@ public class OpenSearchNoIndexBodyIntegrationTest {
     void searchingByBodyContentShouldNotReturnMessageWhenNoIndexBody() throws Exception {
         addMessage(session, inboxPath).block();
 
-        awaitForOpenSearch(QueryBuilders.matchAll().build()._toQuery(), 1L);
+        awaitForOpenSearch(QueryBuilders.matchAll().build().toQuery(), 1L);
 
         SearchQuery searchQuery = SearchQuery.of(SearchQuery.bodyContains("Hello"));
 
@@ -163,7 +164,7 @@ public class OpenSearchNoIndexBodyIntegrationTest {
     void searchingAllShoulReturnMessageWhenNoIndexBody() throws Exception {
         ComposedMessageId composedMessageId = addMessage(session, inboxPath).block();
 
-        awaitForOpenSearch(QueryBuilders.matchAll().build()._toQuery(), 1L);
+        awaitForOpenSearch(QueryBuilders.matchAll().build().toQuery(), 1L);
 
         SearchQuery searchQuery = SearchQuery.of(SearchQuery.all());
 

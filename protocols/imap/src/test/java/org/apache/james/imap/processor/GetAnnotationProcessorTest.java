@@ -23,7 +23,6 @@ import static org.apache.james.imap.ImapFixture.TAG;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -44,6 +43,7 @@ import org.apache.james.imap.api.message.response.StatusResponse.ResponseCode;
 import org.apache.james.imap.api.message.response.StatusResponseFactory;
 import org.apache.james.imap.api.process.ImapProcessor;
 import org.apache.james.imap.encode.FakeImapSession;
+import org.apache.james.imap.main.PathConverter;
 import org.apache.james.imap.message.request.GetMetadataRequest;
 import org.apache.james.imap.message.request.GetMetadataRequest.Depth;
 import org.apache.james.imap.message.response.MetadataResponse;
@@ -127,7 +127,7 @@ class GetAnnotationProcessorTest {
         MockitoAnnotations.initMocks(this);
         initAndMockData();
 
-        processor = new GetMetadataProcessor(mockMailboxManager, mockStatusResponseFactory, new RecordingMetricFactory());
+        processor = new GetMetadataProcessor(mockMailboxManager, mockStatusResponseFactory, new RecordingMetricFactory(), PathConverter.Factory.DEFAULT);
     }
 
     @Test

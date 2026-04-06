@@ -85,34 +85,34 @@ class AbstractConfigurableAsyncServerTest {
 
     private static class TestableConfigurableAsyncServer extends AbstractConfigurableAsyncServer {
         @Override
-        public String getServiceType () {
+        public String getServiceType() {
             return "Test Service";
         }
 
         @Override
-        protected int getDefaultPort () {
+        protected int getDefaultPort() {
             return 12345;
         }
 
         @Override
-        protected String getDefaultJMXName () {
+        protected String getDefaultJMXName() {
             return "testserver";
         }
 
         @Override
-        protected ChannelHandlerFactory createFrameHandlerFactory () {
+        protected ChannelHandlerFactory createFrameHandlerFactory() {
             return null;
         }
 
         @Override
-        protected ChannelInboundHandlerAdapter createCoreHandler () {
+        protected ChannelInboundHandlerAdapter createCoreHandler() {
             return null;
         }
 
 
         // test accessors
 
-        public int getConnPerIp () {
+        public int getConnPerIp() {
             return connPerIP;
         }
 
@@ -134,6 +134,7 @@ class AbstractConfigurableAsyncServerTest {
     private void initTestServer(String configFile) throws Exception {
         testServer = new TestableConfigurableAsyncServer();
         testServer.setFileSystem(memoryFileSystem);
+        testServer.setEncryptionFactory(new LegacyJavaEncryptionFactory(memoryFileSystem));
         testServer.configure(ConfigLoader.getConfig(ClassLoader.getSystemResourceAsStream(configFile)));
     }
 

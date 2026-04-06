@@ -37,10 +37,7 @@ import org.apache.james.mailbox.ModSeq;
 import org.apache.james.mailbox.extractor.ParsedContent;
 import org.apache.james.mailbox.extractor.TextExtractor;
 import org.apache.james.mailbox.inmemory.InMemoryMessageId;
-import org.apache.james.mailbox.model.AttachmentMetadata;
-import org.apache.james.mailbox.model.MessageAttachmentMetadata;
 import org.apache.james.mailbox.model.MessageId;
-import org.apache.james.mailbox.model.StringBackedAttachmentId;
 import org.apache.james.mailbox.model.TestId;
 import org.apache.james.mailbox.model.ThreadId;
 import org.apache.james.mailbox.opensearch.IndexAttachments;
@@ -90,21 +87,11 @@ class IndexableMessageTest {
         when(mailboxMessage.getMessageId())
             .thenReturn(messageId);
         when(mailboxMessage.getFullContent())
-            .thenReturn(ClassLoader.getSystemResourceAsStream("eml/mailWithHeaders.eml"));
+            .thenReturn(ClassLoader.getSystemResourceAsStream("eml/emailWithTextAttachment.eml"));
         when(mailboxMessage.createFlags())
             .thenReturn(new Flags());
         when(mailboxMessage.getUid())
             .thenReturn(MESSAGE_UID);
-        when(mailboxMessage.getAttachments())
-            .thenReturn(ImmutableList.of(MessageAttachmentMetadata.builder()
-                .attachment(AttachmentMetadata.builder()
-                    .messageId(messageId)
-                    .attachmentId(StringBackedAttachmentId.from("1"))
-                    .type("text/plain")
-                    .size(36)
-                    .build())
-                .isInline(false)
-                .build()));
 
         // When
         IndexableMessage indexableMessage = IndexableMessage.builder()
@@ -250,6 +237,41 @@ class IndexableMessageTest {
         assertThat(indexableMessage.getAttachments()).isNotEmpty();
     }
 
+    @Test
+    void attachmentsFilenameShouldFallbackToContentTypeWhenFilenameIsMissingInContentDisposition() throws Exception {
+        //Given
+        MailboxMessage mailboxMessage = mock(MailboxMessage.class);
+        TestId mailboxId = TestId.of(1);
+        when(mailboxMessage.getMailboxId())
+            .thenReturn(mailboxId);
+        when(mailboxMessage.getModSeq())
+            .thenReturn(ModSeq.first());
+        when(mailboxMessage.getMessageId())
+            .thenReturn(InMemoryMessageId.of(42));
+        when(mailboxMessage.getFullContent())
+            .thenReturn(ClassLoader.getSystemResourceAsStream("eml/attachments-filename-in-content-type.eml"));
+        when(mailboxMessage.createFlags())
+            .thenReturn(new Flags());
+        when(mailboxMessage.getUid())
+            .thenReturn(MESSAGE_UID);
+
+        // When
+        IndexableMessage indexableMessage = IndexableMessage.builder()
+            .message(mailboxMessage)
+            .extractor(new DefaultTextExtractor())
+            .zoneId(ZoneId.of("Europe/Paris"))
+            .indexAttachments(IndexAttachments.YES)
+            .indexHeaders(IndexHeaders.YES)
+            .build()
+            .block();
+
+        // Then
+        assertThat(indexableMessage.getAttachments().getFirst().fileName()).isEqualTo(Optional.of("1.txt"));
+        assertThat(indexableMessage.getAttachments().getFirst().fileExtension()).isEqualTo(Optional.of("txt"));
+        assertThat(indexableMessage.getAttachments().get(1).fileName()).isEqualTo(Optional.of("2.txt"));
+        assertThat(indexableMessage.getAttachments().get(1).fileExtension()).isEqualTo(Optional.of("txt"));
+    }
+
     @SuppressWarnings("checkstyle:LocalVariableName")
     @Test
     void otherAttachmentsShouldBeenIndexedWhenOneOfThemCannotBeParsed() throws Exception {
@@ -287,10 +309,10 @@ class IndexableMessageTest {
                 .block();
 
         // Then
-        String NO_TEXTUAL_BODY = "The textual body is not present";
+        String noTextualBody = "The textual body is not present";
         assertThat(indexableMessage.getAttachments())
-            .extracting(input -> input.getTextualBody().orElse(NO_TEXTUAL_BODY))
-            .contains("first attachment content", NO_TEXTUAL_BODY, "third attachment content");
+            .extracting(input -> input.bodyTextContent().orElse(noTextualBody))
+            .contains("first attachment content", noTextualBody, "third attachment content");
     }
 
     @Test

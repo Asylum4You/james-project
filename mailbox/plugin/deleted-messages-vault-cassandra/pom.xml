@@ -20,7 +20,7 @@
     <parent>
         <groupId>org.apache.james</groupId>
         <artifactId>apache-james-mailbox</artifactId>
-        <version>3.9.0-SNAPSHOT</version>
+        <version>3.10.0-SNAPSHOT</version>
         <relativePath>../../pom.xml</relativePath>
     </parent>
 
@@ -78,11 +78,6 @@
             <groupId>${project.groupId}</groupId>
             <artifactId>event-bus-api</artifactId>
             <type>test-jar</type>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>commons-codec</groupId>
-            <artifactId>commons-codec</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>

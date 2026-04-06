@@ -24,7 +24,7 @@
     <parent>
         <groupId>org.apache.james</groupId>
         <artifactId>james-server-guice</artifactId>
-        <version>3.9.0-SNAPSHOT</version>
+        <version>3.10.0-SNAPSHOT</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
 
@@ -39,6 +39,12 @@
     </properties>
 
     <dependencies>
+        <dependency>
+            <groupId>${james.groupId}</groupId>
+            <artifactId>apache-james-backends-opensearch</artifactId>
+            <type>test-jar</type>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>${james.groupId}</groupId>
             <artifactId>apache-james-mailbox-opensearch</artifactId>
@@ -57,6 +63,12 @@
         </dependency>
         <dependency>
             <groupId>${james.groupId}</groupId>
+            <artifactId>apache-james-mailbox-tika</artifactId>
+            <type>test-jar</type>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>${james.groupId}</groupId>
             <artifactId>james-server-filesystem-api</artifactId>
             <type>test-jar</type>
             <scope>test</scope>
@@ -64,6 +76,12 @@
         <dependency>
             <groupId>${james.groupId}</groupId>
             <artifactId>james-server-guice-common</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>${james.groupId}</groupId>
+            <artifactId>james-server-guice-common</artifactId>
+            <type>test-jar</type>
+            <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>${james.groupId}</groupId>

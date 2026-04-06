@@ -42,7 +42,7 @@ import reactor.rabbitmq.QueueSpecification;
 
 class RabbitMQEventBusDeadLetterQueueUpgradeTest {
     private static final GroupA REGISTERED_GROUP = new GroupA();
-    public static final NamingStrategy NAMING_STRATEGY = new NamingStrategy(new EventBusName("test"));
+    public static final NamingStrategy NAMING_STRATEGY = new DefaultNamingStrategy(new EventBusName("test"));
     private static final WorkQueueName WORK_QUEUE_NAME = NAMING_STRATEGY.workQueue(REGISTERED_GROUP);
 
     @RegisterExtension
@@ -59,9 +59,8 @@ class RabbitMQEventBusDeadLetterQueueUpgradeTest {
         RoutingKeyConverter routingKeyConverter = RoutingKeyConverter.forFactories(new TestRegistrationKeyFactory());
 
         eventBus = new RabbitMQEventBus(NAMING_STRATEGY, rabbitMQExtension.getSender(), rabbitMQExtension.getReceiverProvider(),
-            eventSerializer, RETRY_BACKOFF_CONFIGURATION, routingKeyConverter,
-            memoryEventDeadLetters, new RecordingMetricFactory(), rabbitMQExtension.getRabbitChannelPool(),
-            EventBusId.random(), rabbitMQExtension.getRabbitMQ().getConfiguration());
+            eventSerializer, routingKeyConverter, memoryEventDeadLetters, new RecordingMetricFactory(), rabbitMQExtension.getRabbitChannelPool(),
+            EventBusId.random(), new RabbitMQEventBus.Configurations(rabbitMQExtension.getRabbitMQ().getConfiguration(), RETRY_BACKOFF_CONFIGURATION));
 
         eventBus.start();
     }

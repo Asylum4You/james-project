@@ -45,18 +45,18 @@ import org.apache.commons.lang3.tuple.Pair;
 import org.apache.james.backends.cassandra.CassandraCluster;
 import org.apache.james.backends.cassandra.CassandraClusterExtension;
 import org.apache.james.backends.cassandra.Scenario;
-import org.apache.james.backends.cassandra.components.CassandraModule;
-import org.apache.james.backends.cassandra.init.CassandraZonedDateTimeModule;
-import org.apache.james.backends.cassandra.versions.CassandraSchemaVersionModule;
+import org.apache.james.backends.cassandra.components.CassandraDataDefinition;
+import org.apache.james.backends.cassandra.init.CassandraZonedDateTimeDataDefinition;
+import org.apache.james.backends.cassandra.versions.CassandraSchemaVersionDataDefinition;
 import org.apache.james.backends.rabbitmq.RabbitMQExtension;
 import org.apache.james.backends.rabbitmq.RabbitMQManagementAPI;
 import org.apache.james.backends.rabbitmq.ReceiverProvider;
 import org.apache.james.eventsourcing.Event;
 import org.apache.james.eventsourcing.EventSourcingSystem;
 import org.apache.james.eventsourcing.eventstore.EventStore;
-import org.apache.james.eventsourcing.eventstore.cassandra.CassandraEventStoreExtension;
-import org.apache.james.eventsourcing.eventstore.cassandra.CassandraEventStoreModule;
 import org.apache.james.eventsourcing.eventstore.JsonEventSerializer;
+import org.apache.james.eventsourcing.eventstore.cassandra.CassandraEventStoreDataDefinition;
+import org.apache.james.eventsourcing.eventstore.cassandra.CassandraEventStoreExtension;
 import org.apache.james.eventsourcing.eventstore.dto.EventDTO;
 import org.apache.james.eventsourcing.eventstore.dto.EventDTOModule;
 import org.apache.james.json.DTOConverter;
@@ -154,10 +154,10 @@ class DistributedTaskManagerTest implements TaskManagerContract {
 
     @RegisterExtension
     static final CassandraClusterExtension CASSANDRA_CLUSTER = new CassandraClusterExtension(
-        CassandraModule.aggregateModules(
-            CassandraSchemaVersionModule.MODULE,
-            CassandraEventStoreModule.MODULE(),
-            CassandraZonedDateTimeModule.MODULE,
+        CassandraDataDefinition.aggregateModules(
+            CassandraSchemaVersionDataDefinition.MODULE,
+            CassandraEventStoreDataDefinition.MODULE(),
+            CassandraZonedDateTimeDataDefinition.MODULE,
             CassandraTaskExecutionDetailsProjectionModule.MODULE()));
 
     MemoryReferenceTaskStore memoryReferenceTaskStore = new MemoryReferenceTaskStore();
@@ -690,12 +690,10 @@ class DistributedTaskManagerTest implements TaskManagerContract {
         }
 
         @Override
-        public Optional<TaskExecutionDetails.AdditionalInformation> details() {
+        public Mono<Optional<TaskExecutionDetails.AdditionalInformation>> detailsReactive() {
             // Some task requires cassandra query execution upon detail generation
-            Mono.from(session.executeReactive("SELECT dateof(now()) FROM system.local ;"))
-                .block();
-
-            return Optional.empty();
+            return Mono.from(session.executeReactive("SELECT dateof(now()) FROM system.local ;"))
+                .thenReturn(Optional.empty());
         }
     }
 

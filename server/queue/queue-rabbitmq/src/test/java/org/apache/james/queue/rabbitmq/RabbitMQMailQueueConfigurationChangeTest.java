@@ -32,18 +32,18 @@ import java.util.stream.Stream;
 
 import org.apache.james.backends.cassandra.CassandraCluster;
 import org.apache.james.backends.cassandra.CassandraClusterExtension;
-import org.apache.james.backends.cassandra.components.CassandraModule;
-import org.apache.james.backends.cassandra.versions.CassandraSchemaVersionModule;
+import org.apache.james.backends.cassandra.components.CassandraDataDefinition;
+import org.apache.james.backends.cassandra.versions.CassandraSchemaVersionDataDefinition;
 import org.apache.james.backends.rabbitmq.RabbitMQExtension;
 import org.apache.james.blob.api.BlobStore;
-import org.apache.james.blob.api.HashBlobId;
-import org.apache.james.blob.cassandra.CassandraBlobModule;
+import org.apache.james.blob.api.PlainBlobId;
+import org.apache.james.blob.cassandra.CassandraBlobDataDefinition;
 import org.apache.james.blob.cassandra.CassandraBlobStoreFactory;
 import org.apache.james.blob.mail.MimeMessageStore;
-import org.apache.james.eventsourcing.eventstore.cassandra.CassandraEventStore;
-import org.apache.james.eventsourcing.eventstore.cassandra.CassandraEventStoreModule;
-import org.apache.james.eventsourcing.eventstore.cassandra.EventStoreDao;
 import org.apache.james.eventsourcing.eventstore.JsonEventSerializer;
+import org.apache.james.eventsourcing.eventstore.cassandra.CassandraEventStore;
+import org.apache.james.eventsourcing.eventstore.cassandra.CassandraEventStoreDataDefinition;
+import org.apache.james.eventsourcing.eventstore.cassandra.EventStoreDao;
 import org.apache.james.lifecycle.api.StartUpCheck;
 import org.apache.james.metrics.api.NoopGaugeRegistry;
 import org.apache.james.metrics.tests.RecordingMetricFactory;
@@ -53,7 +53,7 @@ import org.apache.james.queue.api.ManageableMailQueue;
 import org.apache.james.queue.api.RawMailQueueItemDecoratorFactory;
 import org.apache.james.queue.rabbitmq.view.RabbitMQMailQueueConfiguration;
 import org.apache.james.queue.rabbitmq.view.cassandra.CassandraMailQueueView;
-import org.apache.james.queue.rabbitmq.view.cassandra.CassandraMailQueueViewModule;
+import org.apache.james.queue.rabbitmq.view.cassandra.CassandraMailQueueViewDataDefinition;
 import org.apache.james.queue.rabbitmq.view.cassandra.CassandraMailQueueViewStartUpCheck;
 import org.apache.james.queue.rabbitmq.view.cassandra.CassandraMailQueueViewTestFactory;
 import org.apache.james.queue.rabbitmq.view.cassandra.configuration.CassandraMailQueueViewConfiguration;
@@ -71,7 +71,7 @@ import com.datastax.oss.driver.api.core.CqlSession;
 import com.github.fge.lambdas.Throwing;
 
 class RabbitMQMailQueueConfigurationChangeTest {
-    private static final HashBlobId.Factory BLOB_ID_FACTORY = new HashBlobId.Factory();
+    private static final PlainBlobId.Factory BLOB_ID_FACTORY = new PlainBlobId.Factory();
     private static final int THREE_BUCKET_COUNT = 3;
     private static final int UPDATE_BROWSE_START_PACE = 2;
     private static final Duration ONE_HOUR_SLICE_WINDOW = Duration.ofHours(1);
@@ -86,11 +86,11 @@ class RabbitMQMailQueueConfigurationChangeTest {
     private static final Instant IN_SLICE_3 = IN_SLICE_1.plus(2, HOURS);
 
     @RegisterExtension
-    static CassandraClusterExtension cassandraCluster = new CassandraClusterExtension(CassandraModule.aggregateModules(
-        CassandraSchemaVersionModule.MODULE,
-        CassandraBlobModule.MODULE,
-        CassandraMailQueueViewModule.MODULE,
-        CassandraEventStoreModule.MODULE()));
+    static CassandraClusterExtension cassandraCluster = new CassandraClusterExtension(CassandraDataDefinition.aggregateModules(
+        CassandraSchemaVersionDataDefinition.MODULE,
+        CassandraBlobDataDefinition.MODULE,
+        CassandraMailQueueViewDataDefinition.MODULE,
+        CassandraEventStoreDataDefinition.MODULE()));
 
     @RegisterExtension
     static RabbitMQExtension rabbitMQExtension = RabbitMQExtension.singletonRabbitMQ()

@@ -37,6 +37,7 @@
         <connectionLimitPerIP>0</connectionLimitPerIP>
         <auth>
             <announce>never</announce>
+            <required>false</required>
             <requireSSL>false</requireSSL>
             <plainAuthEnabled>true</plainAuthEnabled>
         </auth>
@@ -45,9 +46,8 @@
         <maxmessagesize>0</maxmessagesize>
         <addressBracketsEnforcement>true</addressBracketsEnforcement>
         <smtpGreeting>Apache JAMES awesome SMTP Server</smtpGreeting>
-        <handlerchain>
+        <handlerchain coreHandlersPackage="org.apache.james.smtpserver.NoAuthCmdHandlerLoader">
             <handler class="org.apache.james.smtpserver.fastfail.ValidRcptHandler"/>
-            <handler class="org.apache.james.smtpserver.CoreCmdHandlerLoader"/>
         </handlerchain>
     </smtpserver>
     <smtpserver enabled="true">
@@ -67,6 +67,7 @@
             <announce>forUnauthorizedAddresses</announce>
             <requireSSL>true</requireSSL>
             <plainAuthEnabled>true</plainAuthEnabled>
+            <required>true</required>
             <!-- Sample OIDC configuration -->
             <!--
             <oidc>
@@ -104,6 +105,7 @@
             <announce>forUnauthorizedAddresses</announce>
             <requireSSL>true</requireSSL>
             <plainAuthEnabled>true</plainAuthEnabled>
+            <required>true</required>
             <!-- Sample OIDC configuration -->
             <!--
             <oidc>

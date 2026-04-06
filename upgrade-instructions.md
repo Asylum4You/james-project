@@ -11,12 +11,74 @@ software documentation. Do not follow this guide blindly!
 ## Unreleased
 
 Note: this section is in progress. It will be updated during all the development process until the release.
-No changes yet.
+
+Changes to apply between 3.9.x and 3.10.0 will be reported here.
+
+Change list:
+ - [Adding thread_id column to Cassandra email_query_view_sent_at and email_query_view_received_at tables](#adding-thread_id-column-to-cassandra-email_query_view_sent_at-and-email_query_view_received_at-tables)
+ - [Adding thread_id column to Postgresql email_query_view table](#adding-thread_id-column-to-postgresql-email_query_view-table)
+ - [Lucene mailbox index schema update for collapseThreads support](#lucene-mailbox-index-schema-update-for-collapsethreads-support)
+
+### Lucene mailbox index schema update for collapseThreads support
+
+Date: 06/02/2026
+
+Concerned products: James apps relying on Lucene as the search index
+
+JIRA: https://issues.apache.org/jira/browse/JAMES-4166
+
+James now requires the `threadId` field to be indexed as a SortedDocValuesField to support `collapseThreads` on mailbox search.
+
+After upgrading, you need to rebuild the Lucene mailbox index by [reindexing all mails](https://james.apache.org/server/manage-webadmin.html#ReIndexing_all_mails).
+
+### Adding thread_id column to Cassandra email_query_view_sent_at and email_query_view_received_at tables
+
+Date: 01/12/2025
+
+Concerned products: Distributed James
+
+JIRA: https://issues.apache.org/jira/browse/JAMES-3340
+
+James supports now collapseThreads Email/query option for the email query views (not the search).
+
+For this, we need to add the following columns to `email_query_view_sent_at` and `email_query_view_received_at` tables:
+
+- thread_id (UUID)
+
+To add these columns, run the following CQL commands:
+
+```sql
+ALTER TABLE james_keyspace.email_query_view_sent_at ADD thread_id UUID;
+ALTER TABLE james_keyspace.email_query_view_received_at ADD thread_id UUID;
+```
+
+### Adding thread_id column to Postgresql email_query_view table
+
+Date: 01/12/2025
+
+Concerned products: Postgresql James
+
+JIRA: https://issues.apache.org/jira/browse/JAMES-3340
+
+James supports now collapseThreads Email/query option for the email query views (not the search).
+
+For this, we need to add the following columns to `email_query_view` table:
+
+- thread_id (UUID)
+
+To add that column, run the following CQL command:
+
+```sql
+ALTER TABLE james_keyspace.email_query_view ADD COLUMN thread_id UUID;
+```
+
+## 3.9.0 version
 
 Changes to apply between 3.8.x and 3.9.0 will be reported here.
 
 Change list:
 
+ - [JAMES-4046 Refactor and update apache-james-mailbox-lucene](#james-4046-refactor-and-update-apache-james-mailbox-lucene)
  - [Imap Packages](#imap-packages)
  - [Jmap uploads](#jmap-uploads)
  - [Mutualize quota table](#mutualize-quota-table)
@@ -29,6 +91,188 @@ Change list:
  - [JMX authentication for Spring](#jmx-authentication-for-spring)
  - [Java 21](#java-21)
  - [javax -> jakarta](#javax---jakarta)
+ - [Make all queues on RabbitMQ quorum queue when `quorum.queues.enable=true`](#make-all-queues-on-rabbitmq-quorum-queue-when-quorumqueuesenabletrue)
+ - [Migrate RabbitMQ classic queues to version 2](#migrate-rabbitmq-classic-queues-to-version-2)
+ - [JAMES-3946 White list removals](#james-3946-white-list-removals)
+ - [JAMES-4052 Details in quota index](#james-4052-details-in-quota-index)
+ - [JAMES-1409 Change JPARecipientRewriteTable to store separate record per target address](#james-1409-change-jparecipientrewritetable-to-store-separate-record-per-target-address)
+ - [JAMES-4118 Cleanup message previews](#james-4118-cleanup-message-previews)
+ - [JAMES-4128 Breaking Mailet API changes](#james-4128-breaking-mailet-api-changes)
+
+### JAMES-4160 LDAP with spring update
+Date: 13/01/2026
+
+JIRA: https://issues.apache.org/jira/browse/JAMES-4160
+
+Users using Spring in addition with LDAP usersrepository needs to use `org.apache.james.user.ldap.LegacyReadOnlyUsersLDAPRepository` instead.
+
+### JAMES-4128 Breaking Mailet API changes
+Date: 02/04/2025
+
+JIRA: https://issues.apache.org/jira/browse/JAMES-4126
+
+The Mailet API has been slightly reworked to improve mailet encapsulation and make implementation easier. 
+    
+- Method getMailetConfig() has been removed
+- Method getName() has been added with a default to the simple class name
+- implementers no longer have to override getMailetInfo, init or destroy
+- implementers of mailets can inject the configuration through the constructor when using guice. Constructor injection of the config is not compatible with spring applications.
+
+### JAMES-4118 Cleanup message previews
+
+Date: 12/03/2025
+
+JIRA: https://issues.apache.org/jira/browse/JAMES-4118
+
+Because message previews were not deleted upon mailbox deletion, a message previews cleanup extension (https://github.com/apache/james-project/pull/2667) has been made to remove redundant previews. Follow the instruction in README.md in the pull request to use this extension.  
+
+### JAMES-1409 Change JPARecipientRewriteTable to store separate record per target address
+
+Date: 09/10/2024
+
+JIRA: https://issues.apache.org/jira/browse/JAMES-1409
+
+The JPARecipientRewriteTable was modified to store multiple mappings of a single source as separate database rows,
+each with a single target address, instead of a single row with a long semicolon-delimited multi-value target address.
+This solves both the limitation on the number of mappings (imposed by the column maximum length), and the broken query
+by target address.
+
+For JPA users, the database schema update and data migration can be performed as follows:
+
+- On the old James server (before the version upgrade), export all mappings using the webadmin
+  interface (GET /mappings) and save the JSON result.
+- Shut down the server.
+- Drop the old table using any database administration tool (DROP TABLE JAMES_RECIPIENT_REWRITE).
+- Upgrade and start the new James server. A new table will be created automatically with the new schema.
+- Import the saved JSON mappings via the webadmin interface (PUT /mappings).
+
+### JAMES-4052 Details in quota index and mailbox user
+
+Date: 23/07/2024
+
+JIRA: https://issues.apache.org/jira/browse/JAMES-4052
+
+In order to build a comprehensive view for quotas using OpenSearch dashboard, the quota document indexed was enriched 
+to include quota details.
+
+As the OpenSearch mapping was changed, one can either:
+
+ - Add the missing fields:
+
+```
+curl -X PUT \
+  http://ip:port/quota_ratio_v1/_mapping \
+  -H 'Content-Type: application/json' \
+  -d "{
+	\"properties\": {
+		\"sizeUsed\": {
+			\"type\": \"long\",
+		},
+		\"countUsed\": {
+			\"type\": \"long\",
+		},
+		\"sizeLimit\": {
+			\"type\": \"long\",
+		},
+		\"countLimit\": {
+			\"type\": \"long\",
+		},
+		\"date\": {
+			\"type\": \"date\",
+			\"format\": \"uuuu-MM-dd'T'HH:mm:ssX||uuuu-MM-dd'T'HH:mm:ssXXX||uuuu-MM-dd'T'HH:mm:ssXXXXX\"
+		}
+	}
+}"
+```
+
+ - Or consider this non-critical data and just start with a fresh index, which could be achieved with the following configuration:
+
+```
+opensearch.index.quota.ratio.name=james-quota-ratio-v2
+opensearch.alias.read.quota.ratio.name=james-quota-ratio-read-v2
+opensearch.alias.write.quota.ratio.name=james-quota-ratio-write-v2
+```
+
+We also added an optional field to the mailbox mapping for `user`. It allows doing per user analysis in OpenSearch dashboards.
+
+In order to activate that field, include in `opensearch.properties`: 
+
+```
+opensearch.indexUser=true
+```
+
+And create the field:
+
+```
+curl -X PUT \
+  http://ip:port/mailbox_v2/_mapping \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "properties": {
+        "user": {
+            "type": "keyword"
+        }
+    }
+}'
+```
+
+### JAMES-4046 Refactor and update apache-james-mailbox-lucene
+
+Date: 16/08/2024
+
+JIRA: https://issues.apache.org/jira/browse/JAMES-4046
+
+Lucene was upgraded from version 3 to version 9. Automatic upgrade is not supported with such a big upgrade thus it's required to delete/drop Lucene (file) index altogether and recreate it. 
+
+Index recreation can be done with [ReIndexing all mails REST API](https://james.apache.org/server/manage-webadmin.html#ReIndexing_all_mails)
+
+### JAMES-3946 White list removals
+
+Date: 14/06/2024
+
+JIRA: https://issues.apache.org/jira/browse/JAMES-3946
+
+The experimental classes pertaining to "white list" management have been removed.
+
+This includes:
+- AbstractSQLWhitelistMatcher, IsInWhiteList, WhiteListManager, NetworkIsInWhitelist. Please use IsInDropList matcher instead.
+
+### Migrate RabbitMQ classic queues to version 2
+
+Date: 14/05/2024
+
+It is recommended by RabbitMQ to upgrade the classic queues to version 2 for better performance: https://www.rabbitmq.com/blog/2023/05/17/rabbitmq-3.12-performance-improvements#classic-queues-massively-improved-classic-queues-v2-cqv2.
+
+Existing version 1 classic queues would need to be deleted and let James re-create them as version 2.
+
+Notice that to use classic queues version 2, you need at least RabbitMQ 3.10.0. If you want to stick with the older RabbitMQ 
+versions and avoid this breaking change, you could set the JVM property `fallback.classic.queues.v1` to `true` (defaults to `false`).
+
+Note that this fallback option would not work with RabbitMQ 4.0+ versions, as RabbitMQ 4.0 removed support for classic queues version 1.
+
+If you upgrade your RabbitMQ cluster to RabbitMQ 4.0+, it would automatically convert classic queues version 1 to version 2 upon the upgrade, so no need to delete them.
+
+### Change cluster.enabled in redis.properties to redis.topology
+
+Date: 05/09/2024
+
+Concerned products: Distributed James, Cassandra James
+
+JIRA: https://issues.apache.org/jira/browse/JAMES-3693
+
+Now James supports more than two topologies (previously there were just cluster and standalone).
+
+Use `redis.topology` property instead.
+
+### Make all queues on RabbitMQ quorum queue when `quorum.queues.enable=true`
+
+Date: 16/04/2024
+
+JIRA: https://issues.apache.org/jira/browse/JAMES-4027
+
+Now `quorum.queues.enable=true` enforces all the queues used by James to be quorum queue to achieve fully high availability.
+
+Some old classic queues (e.g. JMAP and mailbox eventbus work queues) would need to be deleted and let James re-create them as quorum queues.
 
 ### Java 21
 
@@ -94,7 +338,7 @@ This behaviour can be disabled via the RecipientRewriteTable mailet configuratio
 <mailet/>>
 ```
 
-Note that now `JMAPFiltering` mailet requires the `rrt-error` processor for handling forward loops. We thus recommand adding
+Note that now `JMAPFiltering` mailet requires the `rrt-error` processor for handling forward loops. We thus recommend adding
 this processor, that is part of the default configuration of your distribution.
 
 ### Change compaction strategy of blob_cache table
@@ -175,6 +419,10 @@ Date: 24/08/2023
 Date: 27/06/2023
 
 `imapserver.xml` needs to be modified to relocate `imapPackages` from imapServers tag into `imapServer` tags.
+
+## 3.8.2 version
+
+No specific operation to conduct from a 3.8.1 version.
 
 ## 3.8.1 version
 
@@ -404,6 +652,10 @@ In order to add this `authorized_users` column you need to run the following CQL
 ALTER TABLE james_keyspace.user ADD authorized_users set<text>;
 ```
 
+## 3.7.6 version
+
+No specific operation to conduct from a 3.7.5 version.
+
 ## 3.7.5 version
 
 No specific operation to conduct from a 3.7.4 version.
@@ -502,7 +754,7 @@ Date: 11/01/2022
 
 JIRA: https://issues.apache.org/jira/browse/JAMES-3690
 
-As a security safe guard, we now enforce the `host` configuration parameter defined in `webadmin.properties` when 
+As a security safeguard, we now enforce the `host` configuration parameter defined in `webadmin.properties` when 
 binding the listening interface for the webadmin server.
 
 By default, it listens on the loopback interface.
@@ -587,7 +839,7 @@ Date: 24/11/2021
 
 JIRA: https://issues.apache.org/jira/browse/JAMES-3674
 
-With this update, the password algorithm may include an option to salt the password hash with the user name, for increased security against rainbow table cracking. To use this feature, update your usersrepository.xml :
+With this update, the password algorithm may include an option to salt the password hash with the username, for increased security against rainbow table cracking. To use this feature, update your usersrepository.xml :
 ```
 <algorithm>SHA-512/salted</algorithm>
 ```
@@ -653,13 +905,13 @@ JIRA: https://issues.apache.org/jira/browse/JAMES-3629
 
 Concerned product: Distributed James
 
-In order to avoid uses of non frozen Cassandra collection by the MailQueue component,
+In order to avoid uses of non-frozen Cassandra collection by the MailQueue component,
 we introduced a new table, enqueuedMailsv4, not suffering from these pitfalls.
 
-Pre existing table, enqueuedMailsV3 is no longer read and can be dropped.
+Pre-existing table, enqueuedMailsV3 is no longer read and can be dropped.
 
 To avoid data loss (only noticeable when browsing the mailqueue email, no email
-in flight in the mailqueue will be lost, they will just be non-browseable) do your
+in flight in the mailqueue will be lost, they will just be non-browsable) do your
 rolling upgrade with an empty mailqueue. 
 
 To achieve an empty mailqueue, start a James server with SMTP and JMAP ports not exposed:
@@ -1049,8 +1301,8 @@ JIRA: https://issues.apache.org/jira/browse/JAMES-3300
 
 Concerned product: all products relying on LDAP users repository
 
-`useConnectionPool` is now false by default. If you really want it, you have to explicitely put it to `true` in `usersrepository.xml`.
-It is false by default because it can create too much connections on the LDAP server. If you have few users it can eventually still make sense.
+`useConnectionPool` is now false by default. If you really want it, you have to explicitly put it to `true` in `usersrepository.xml`.
+It is false by default because it can create too many connections on the LDAP server. If you have few users it can eventually still make sense.
 
 ### mailqueue.size.metricsEnabled now defaults to false
 
@@ -1129,7 +1381,7 @@ JIRA: https://issues.apache.org/jira/browse/JAMES-3121
 
 Impacted product: Guice distributed James
 
-Our usage of Cassandra for the time series have been improved by fine tuning the compaction strategy and
+Our usage of Cassandra for the time series have been improved by fine-tuning the compaction strategy and
 the read repair option.
 
 #### Upgrade procedure
@@ -1170,7 +1422,7 @@ SHA-1 58b1d879ab
 
 JIRA: https://issues.apache.org/jira/browse/JAMES-3119
 
-`ProtocolSession` have been reworked in order to increase type strengh
+`ProtocolSession` have been reworked in order to increase type strength
 and reduce errors.
 
 Now `setAttachment` and `getAttachment` are expecting an `AttachmentKey` as key
@@ -1263,7 +1515,7 @@ blob.export.linshare.technical.account.uuid
 blob.export.linshare.technical.account.password
 ```
 
--The legacy property `blob.export.linshare.token` will not used anymore, you can remove it.
+-The legacy property `blob.export.linshare.token` will not be used anymore, so you can remove it.
 ### Hybrid blobStore replaces Union blobStore
 
 Date 6/01/2020
@@ -1343,8 +1595,8 @@ SHA-1 9e976d3f49
 
 JIRA: https://issues.apache.org/jira/browse/JAMES-2949
 
-Many users recently complained about mails non received when sending to upper cased local recipients. We decided to simplify the handling of case for local recipients and users by always storing them lower cased.
-Now all the users repositories are storing user in lower case to ensure that. If you previously used to store users in a case sensitive way (which is very unlikely as it is broking delivery), you could need to update your user database to lower case all your users.
+Many users recently complained about mails non received when sending to upper-cased local recipients. We decided to simplify the handling of case for local recipients and users by always storing them lower cased.
+Now all the users repositories are storing user in lower case to ensure that. If you previously used to store users in a case-sensitive way (which is very unlikely as it is broking delivery), you could need to update your user database to lower case all your users.
 
 #### Cassandra keyspace creation configuration
 
@@ -1467,8 +1719,8 @@ JIRA: https://issues.apache.org/jira/browse/JAMES-2794
 Concerned products: (experimental) RabbitMQ MailQueue
 
 RabbitMQ mail queue combines RabbitMQ with projections in Cassandra to offer advanced management capabilities expected from
-a mail queue (browse, delete, size, clear). In these projections, the mails are identified by there name. Thus enqueuing a
-mail that had already been processed will lead the given email to be considered already deleted and it will be discarded 
+a mail queue (browse, delete, size, clear). In these projections, the mails are identified by their name. Thus, enqueuing a
+mail that had already been processed will lead the given email to be considered already deleted, and it will be discarded 
 and lost.
 
 This is an issue, as several other components build features around submitting a mail several time with the name. 
@@ -1501,7 +1753,7 @@ JIRA: https://issues.apache.org/jira/browse/JAMES-2766
 
 Concerned products: (experimental) Cassandra-guice products.
 
-In version 3.3.0 indexing for the Cassandra product was handled using ElasticSearch 2.2 released on the 31 march 2016. Some major upgrades had been included in recent ElasticSearch version.
+In version 3.3.0 indexing for the Cassandra product was handled using ElasticSearch 2.2 released on the 31 March 2016. Some major upgrades had been included in recent ElasticSearch version.
 
 Note that ElasticSearch APIs had been undergoing some major changes, making a smooth migration hard to provide. We proposed 2 migration strategies. A
 simple one leading to major search inconsistencies in the process, and another one mitigating these inconsistencies (but getting rid of them).
@@ -1661,9 +1913,9 @@ Concerned products: User developed extensions - mailet/matcher
 
 As part of the SMTP protocol, a mail can be sent without sender. This was represented implicitly in James by a potentially null MailAddress
 (`null` or `MailAddress.nullSender()`). This means that mailet/matcher implementers needs to be aware, and handle these cases. This implicit
-handling makes nullSender hard to work with, and prooved to be error prone as part of the 3.2.0 development process.
+handling makes nullSender hard to work with, and prooved to be error-prone as part of the 3.2.0 development process.
 
-Hence we propose an alternative API returning a `MaybeSender` object, requiring the caller to explicitly handle missing sender.
+Hence, we propose an alternative API returning a `MaybeSender` object, requiring the caller to explicitly handle missing sender.
 
 `Mail::getSender` had then been deprecated. We strongly encourage our users to rely on `Mail::getMaybeSender`.
 
@@ -1704,7 +1956,7 @@ Required: Yes
 Concerned products: Cassandra Guice products
 
 James Cassandra Guice now officially uses Cassandra 3.11.3 as a storage backend. After performing the upgrade, the team
-did perform some breaking changes, detailed below. James Cassandra Guice products are no more tested against Cassandra 2.2.x. Thus we strongly
+did perform some breaking changes, detailed below. James Cassandra Guice products are no more tested against Cassandra 2.2.x. Thus, we strongly
 advise our users to upgrade.
 
 #### Changes not compatible with Cassandra 2.2.x

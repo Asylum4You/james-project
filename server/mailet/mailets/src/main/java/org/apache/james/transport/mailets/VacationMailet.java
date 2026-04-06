@@ -20,16 +20,23 @@
 package org.apache.james.transport.mailets;
 
 import java.time.ZonedDateTime;
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.stream.Stream;
 
 import jakarta.inject.Inject;
+import jakarta.mail.Address;
 import jakarta.mail.MessagingException;
 import jakarta.mail.internet.AddressException;
+import jakarta.mail.internet.InternetAddress;
 
-import org.apache.commons.lang3.tuple.Pair;
 import org.apache.james.core.MailAddress;
+import org.apache.james.mime4j.dom.address.Mailbox;
+import org.apache.james.mime4j.field.address.LenientAddressParser;
 import org.apache.james.transport.util.MimeMessageBodyGenerator;
+import org.apache.james.util.StreamUtils;
 import org.apache.james.util.date.ZonedDateTimeProvider;
 import org.apache.james.vacation.api.AccountId;
 import org.apache.james.vacation.api.RecipientId;
@@ -38,13 +45,34 @@ import org.apache.james.vacation.api.VacationService;
 import org.apache.mailet.Mail;
 import org.apache.mailet.base.AutomaticallySentMailDetector;
 import org.apache.mailet.base.GenericMailet;
+import org.apache.mailet.base.MailetUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import com.github.fge.lambdas.Throwing;
+import com.google.common.collect.ImmutableList;
 
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 public class VacationMailet extends GenericMailet {
+
+    enum ReplyMode {
+        ENVELOPE("envelope"),
+        REPLY_TO_HEADER("replyToHeader");
+
+        public static Optional<ReplyMode> parse(String value) {
+            return Arrays.stream(ReplyMode.values())
+                .filter(replyMode -> replyMode.value.equalsIgnoreCase(value))
+                .findFirst();
+        }
+
+        private final String value;
+
+        ReplyMode(String value) {
+            this.value = value;
+        }
+    }
 
     private static final Logger LOGGER = LoggerFactory.getLogger(VacationMailet.class);
 
@@ -52,6 +80,8 @@ public class VacationMailet extends GenericMailet {
     private final ZonedDateTimeProvider zonedDateTimeProvider;
     private final AutomaticallySentMailDetector automaticallySentMailDetector;
     private final MimeMessageBodyGenerator mimeMessageBodyGenerator;
+    private boolean useUserAsMailFrom = false;
+    private ReplyMode replyMode = ReplyMode.REPLY_TO_HEADER;
 
     @Inject
     public VacationMailet(VacationService vacationService, ZonedDateTimeProvider zonedDateTimeProvider,
@@ -69,13 +99,13 @@ public class VacationMailet extends GenericMailet {
             if (!mail.hasSender()) {
                 return;
             }
-            boolean hasReplyToHeaderField = Optional.ofNullable(mail.getMessage().getReplyTo())
+            boolean hasReplyToHeaderField = Optional.ofNullable(getReplyTo(mail))
                 .map(replyToFields -> replyToFields.length > 0)
                 .orElse(false);
             if (!automaticallySentMailDetector.isAutomaticallySent(mail) && hasReplyToHeaderField && !isNoReplySender(mail)) {
                 ZonedDateTime processingDate = zonedDateTimeProvider.get();
                 mail.getRecipients()
-                    .forEach(mailAddress -> manageVacation(mailAddress, mail, processingDate));
+                    .forEach(Throwing.consumer(mailAddress -> manageVacation(mailAddress, mail, processingDate)));
             }
         } catch (AddressException e) {
             if (!e.getMessage().equals("Empty address")) {
@@ -86,31 +116,76 @@ public class VacationMailet extends GenericMailet {
         }
     }
 
-    private void manageVacation(MailAddress recipient, Mail processedMail, ZonedDateTime processingDate) {
+    @Override
+    public void init() throws MessagingException {
+        useUserAsMailFrom = MailetUtil.getInitParameter(getMailetConfig(), "useUserAsMailFrom").orElse(false);
+        replyMode = Optional.ofNullable(getInitParameter("replyMode"))
+            .map(value -> ReplyMode.parse(value).orElseThrow(() -> new IllegalArgumentException("Unsupported ReplyMode " + value)))
+            .orElse(ReplyMode.REPLY_TO_HEADER);
+    }
+
+    private static Address[] getReplyTo(Mail mail) throws MessagingException {
+        try {
+            return mail.getMessage().getReplyTo();
+        } catch (AddressException e) {
+            InternetAddress[] replyTo = parseReplyToField(mail)
+                .map(Throwing.function(InternetAddress::new))
+                .toArray(InternetAddress[]::new);
+
+            if (replyTo.length > 0) {
+                LOGGER.info("Recovering from badly formatted Reply-To. Original value {}, deduced value {}",
+                    ImmutableList.copyOf(mail.getMessage().getHeader("Reply-To")), ImmutableList.copyOf(replyTo), e);
+                mail.getMessage().setReplyTo(replyTo);
+                return replyTo;
+            } else {
+                throw e;
+            }
+        }
+    }
+
+    private static Stream<String> parseReplyToField(Mail mail) throws MessagingException {
+        return StreamUtils.ofNullable(mail.getMessage().getHeader("Reply-To"))
+            .map(LenientAddressParser.DEFAULT::parseAddressList)
+            .flatMap(Collection::stream)
+            .filter(Mailbox.class::isInstance)
+            .map(Mailbox.class::cast)
+            .map(Mailbox::getAddress);
+    }
+
+    private void manageVacation(MailAddress recipient, Mail processedMail, ZonedDateTime processingDate) throws MessagingException {
         if (isSentToSelf(processedMail.getMaybeSender().asOptional(), recipient)) {
             return;
         }
 
-        AccountId accountId = AccountId.fromString(recipient.toString());
+        RecipientId replyRecipient = computeReplyRecipient(processedMail);
+        VacationInformation vacationInformation = retrieveVacationInformation(recipient, replyRecipient);
 
-        Mono<Vacation> vacation = vacationService.retrieveVacation(accountId);
-        Mono<Boolean> alreadySent = vacationService.isNotificationRegistered(
-                AccountId.fromString(recipient.toString()),
-                RecipientId.fromMailAddress(processedMail.getMaybeSender().get()));
-        Pair<Vacation, Boolean> pair = Flux.combineLatest(vacation, alreadySent, Pair::of)
-            .blockFirst();
-
-        sendNotificationIfRequired(recipient, processedMail, processingDate, pair.getKey(), pair.getValue());
-    }
-
-    private void sendNotificationIfRequired(MailAddress recipient, Mail processedMail, ZonedDateTime processingDate, Vacation vacation, Boolean alreadySent) {
-        if (shouldSendNotification(vacation, processingDate, alreadySent)) {
-            sendNotification(recipient, processedMail, vacation);
+        boolean shouldSendNotification = vacationInformation.vacation().isActiveAtDate(processingDate) && !vacationInformation.alreadySent;
+        if (shouldSendNotification) {
+            sendNotification(processedMail, vacationInformation);
         }
     }
 
-    private boolean shouldSendNotification(Vacation vacation, ZonedDateTime processingDate, boolean alreadySent) {
-        return vacation.isActiveAtDate(processingDate) && !alreadySent;
+    private RecipientId computeReplyRecipient(Mail processedMail) throws MessagingException {
+        return switch (replyMode) {
+            case ENVELOPE -> RecipientId.fromMailAddress(processedMail.getMaybeSender().get());
+            case REPLY_TO_HEADER -> RecipientId.fromMailAddress(
+                parseReplyToField(processedMail)
+                    .findFirst()
+                    .map(Throwing.function(MailAddress::new))
+                    .orElse(processedMail.getMaybeSender().get()));
+        };
+    }
+
+    record VacationInformation(Vacation vacation, MailAddress recipient, AccountId accountId, RecipientId replyRecipient, Boolean alreadySent) {
+
+    }
+
+    private VacationInformation retrieveVacationInformation(MailAddress recipient, RecipientId replyRecipient) {
+        AccountId accountId = AccountId.fromString(recipient.toString());
+        Mono<Vacation> vacation = vacationService.retrieveVacation(accountId);
+        Mono<Boolean> alreadySent = vacationService.isNotificationRegistered(accountId, replyRecipient);
+        return Flux.combineLatest(vacation, alreadySent, (a, b) -> new VacationInformation(a, recipient, accountId, replyRecipient, b)).blockFirst();
     }
 
     private boolean isNoReplySender(Mail processedMail) {
@@ -128,27 +203,31 @@ public class VacationMailet extends GenericMailet {
             .orElse(false);
     }
 
-    private void sendNotification(MailAddress recipient, Mail processedMail, Vacation vacation) {
+    private void sendNotification(Mail processedMail, VacationInformation vacationInformation) {
         try {
             VacationReply vacationReply = VacationReply.builder(processedMail)
-                .receivedMailRecipient(recipient)
-                .vacation(vacation)
+                .replyRecipient(vacationInformation.replyRecipient.getMailAddress())
+                .receivedMailRecipient(vacationInformation.recipient())
+                .vacation(vacationInformation.vacation)
                 .build(mimeMessageBodyGenerator);
 
-            sendNotification(vacationReply);
+            getMailetContext().sendMail(getSender(vacationInformation.recipient),
+                vacationReply.getRecipients(),
+                vacationReply.getMimeMessage());
 
-            vacationService.registerNotification(AccountId.fromString(recipient.toString()),
-                RecipientId.fromMailAddress(processedMail.getMaybeSender().get()),
-                vacation.getToDate())
+            vacationService.registerNotification(vacationInformation.accountId(),
+                vacationInformation.replyRecipient(),
+                vacationInformation.vacation().getToDate())
                 .block();
         } catch (MessagingException e) {
-            LOGGER.warn("Failed to send JMAP vacation notification from {} to {}", recipient, processedMail.getMaybeSender(), e);
+            LOGGER.warn("Failed to send JMAP vacation notification from {} to {}", vacationInformation.recipient(), vacationInformation.replyRecipient().getAsString(), e);
         }
     }
 
-    private void sendNotification(VacationReply vacationReply) throws MessagingException {
-        getMailetContext().sendMail(MailAddress.nullSender(),
-            vacationReply.getRecipients(),
-            vacationReply.getMimeMessage());
+    private MailAddress getSender(MailAddress recipient) {
+        if (!useUserAsMailFrom) {
+            return MailAddress.nullSender();
+        }
+        return recipient;
     }
 }

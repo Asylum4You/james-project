@@ -38,8 +38,14 @@ public interface EmailChangeRepositoryContract {
     AccountId ACCOUNT_ID = AccountId.fromUsername(BOB);
     ZonedDateTime DATE = ZonedDateTime.now();
 
+    default AccountId accountId() {
+        return ACCOUNT_ID;
+    }
+
     EmailChangeRepository emailChangeRepository();
+
     MessageId generateNewMessageId();
+
     State generateNewState();
 
     @Test
@@ -47,7 +53,7 @@ public interface EmailChangeRepositoryContract {
         EmailChangeRepository repository = emailChangeRepository();
 
         EmailChange change = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE)
             .isShared(false)
@@ -62,7 +68,7 @@ public interface EmailChangeRepositoryContract {
     default void getLatestStateShouldReturnInitialWhenEmpty() {
         EmailChangeRepository repository = emailChangeRepository();
 
-        assertThat(repository.getLatestState(ACCOUNT_ID).block())
+        assertThat(repository.getLatestState(accountId()).block())
             .isEqualTo(State.INITIAL);
     }
 
@@ -75,21 +81,21 @@ public interface EmailChangeRepositoryContract {
         MessageId messageId3 = generateNewMessageId();
 
         EmailChange change1 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE.minusHours(2))
             .isShared(false)
             .created(messageId1)
             .build();
         EmailChange change2 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE.minusHours(1))
             .isShared(false)
             .created(messageId2)
             .build();
         EmailChange change3 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE)
             .isShared(false)
@@ -99,7 +105,7 @@ public interface EmailChangeRepositoryContract {
         repository.save(change2).block();
         repository.save(change3).block();
 
-        assertThat(repository.getLatestState(ACCOUNT_ID).block())
+        assertThat(repository.getLatestState(accountId()).block())
             .isEqualTo(change3.getState());
     }
 
@@ -112,21 +118,21 @@ public interface EmailChangeRepositoryContract {
         MessageId messageId3 = generateNewMessageId();
 
         EmailChange change1 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE.minusHours(2))
             .isShared(false)
             .created(messageId1)
             .build();
         EmailChange change2 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE.minusHours(1))
             .isShared(false)
             .created(messageId2)
             .build();
         EmailChange change3 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE)
             .isShared(true)
@@ -136,7 +142,7 @@ public interface EmailChangeRepositoryContract {
         repository.save(change2).block();
         repository.save(change3).block();
 
-        assertThat(repository.getLatestState(ACCOUNT_ID).block())
+        assertThat(repository.getLatestState(accountId()).block())
             .isEqualTo(change2.getState());
     }
 
@@ -148,14 +154,14 @@ public interface EmailChangeRepositoryContract {
         State state = generateNewState();
 
         EmailChange oldState = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(state)
             .date(DATE.minusHours(1))
             .isShared(false)
             .created(messageId)
             .build();
         EmailChange change = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE)
             .isShared(false)
@@ -164,7 +170,7 @@ public interface EmailChangeRepositoryContract {
         repository.save(oldState).block();
         repository.save(change).block();
 
-        assertThat(repository.getSinceState(ACCOUNT_ID, state, Optional.empty()).block().getAllChanges())
+        assertThat(repository.getSinceState(accountId(), state, Optional.empty()).block().getAllChanges())
             .hasSameElementsAs(change.getUpdated());
     }
 
@@ -174,7 +180,7 @@ public interface EmailChangeRepositoryContract {
         State state = generateNewState();
 
         EmailChange oldState = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(state)
             .date(DATE.minusHours(1))
             .isShared(false)
@@ -182,7 +188,7 @@ public interface EmailChangeRepositoryContract {
             .build();
         repository.save(oldState).block();
 
-        assertThat(repository.getSinceState(ACCOUNT_ID, state, Optional.empty()).block().getAllChanges())
+        assertThat(repository.getSinceState(accountId(), state, Optional.empty()).block().getAllChanges())
             .isEmpty();
     }
 
@@ -193,7 +199,7 @@ public interface EmailChangeRepositoryContract {
         State state = generateNewState();
 
         EmailChange oldState = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(state)
             .date(DATE.minusHours(1))
             .isShared(false)
@@ -201,7 +207,7 @@ public interface EmailChangeRepositoryContract {
             .build();
         repository.save(oldState).block();
 
-        assertThat(repository.getSinceState(ACCOUNT_ID, state, Optional.empty()).block().getNewState())
+        assertThat(repository.getSinceState(accountId(), state, Optional.empty()).block().getNewState())
             .isEqualTo(oldState.getState());
     }
 
@@ -217,35 +223,35 @@ public interface EmailChangeRepositoryContract {
         MessageId messageId5 = generateNewMessageId();
 
         EmailChange oldState = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(state)
             .date(DATE.minusHours(3))
             .isShared(false)
             .created(messageId1)
             .build();
         EmailChange change1 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE.minusHours(2))
             .isShared(false)
             .created(messageId2)
             .build();
         EmailChange change2 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE.minusHours(1))
             .isShared(false)
             .created(messageId3)
             .build();
         EmailChange change3 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE)
             .isShared(false)
             .created(messageId4)
             .build();
         EmailChange change4 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE.plusHours(1))
             .isShared(false)
@@ -257,7 +263,7 @@ public interface EmailChangeRepositoryContract {
         repository.save(change3).block();
         repository.save(change4).block();
 
-        assertThat(repository.getSinceState(ACCOUNT_ID, state, Optional.of(Limit.of(3))).block().getCreated())
+        assertThat(repository.getSinceState(accountId(), state, Optional.of(Limit.of(3))).block().getCreated())
             .containsExactlyInAnyOrder(messageId2, messageId3, messageId4);
     }
 
@@ -272,28 +278,28 @@ public interface EmailChangeRepositoryContract {
         MessageId messageId4 = generateNewMessageId();
 
         EmailChange oldState = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(state)
             .date(DATE.minusHours(3))
             .isShared(false)
             .created(messageId1)
             .build();
         EmailChange change1 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE.minusHours(2))
             .isShared(false)
             .created(messageId2)
             .build();
         EmailChange change2 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE.minusHours(1))
             .isShared(false)
             .created(messageId3)
             .build();
         EmailChange change3 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE)
             .isShared(false)
@@ -304,7 +310,7 @@ public interface EmailChangeRepositoryContract {
         repository.save(change2).block();
         repository.save(change3).block();
 
-        assertThat(repository.getSinceState(ACCOUNT_ID, State.INITIAL, Optional.of(Limit.of(3))).block().getCreated())
+        assertThat(repository.getSinceState(accountId(), State.INITIAL, Optional.of(Limit.of(3))).block().getCreated())
             .containsExactlyInAnyOrder(messageId1, messageId2, messageId3);
     }
 
@@ -323,28 +329,28 @@ public interface EmailChangeRepositoryContract {
         MessageId messageId4 = generateNewMessageId();
 
         EmailChange change1 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(state)
             .date(DATE.minusHours(3))
             .isShared(false)
             .created(messageId1)
             .build();
         EmailChange change2 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(state2)
             .date(DATE.minusHours(2))
             .isShared(false)
             .created(messageId2)
             .build();
         EmailChange change3 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(state3)
             .date(DATE.minusHours(1))
             .isShared(false)
             .created(messageId3)
             .build();
         EmailChange change4 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(state4)
             .date(DATE)
             .isShared(false)
@@ -356,7 +362,7 @@ public interface EmailChangeRepositoryContract {
         repository.save(change3).block();
         repository.save(change4).block();
 
-        assertThat(repository.getSinceState(ACCOUNT_ID, State.INITIAL, Optional.of(Limit.of(3))).block().getNewState())
+        assertThat(repository.getSinceState(accountId(), State.INITIAL, Optional.of(Limit.of(3))).block().getNewState())
             .isEqualTo(state3);
     }
 
@@ -375,21 +381,21 @@ public interface EmailChangeRepositoryContract {
         MessageId messageId7 = generateNewMessageId();
 
         EmailChange oldState = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(state)
             .date(DATE.minusHours(2))
             .isShared(false)
             .created(messageId1)
             .build();
         EmailChange change1 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE.minusHours(1))
             .isShared(false)
             .created(messageId2, messageId3, messageId4, messageId5, messageId6)
             .build();
         EmailChange change2 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE)
             .isShared(false)
@@ -400,7 +406,7 @@ public interface EmailChangeRepositoryContract {
         repository.save(change1).block();
         repository.save(change2).block();
 
-        assertThat(repository.getSinceState(ACCOUNT_ID, state, Optional.empty()).block().getAllChanges())
+        assertThat(repository.getSinceState(accountId(), state, Optional.empty()).block().getAllChanges())
             .hasSameElementsAs(change1.getCreated());
     }
 
@@ -417,21 +423,21 @@ public interface EmailChangeRepositoryContract {
         MessageId messageId5 = generateNewMessageId();
 
         EmailChange oldState = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(state)
             .date(DATE.minusHours(2))
             .isShared(false)
             .created(messageId1)
             .build();
         EmailChange change1 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE.minusHours(1))
             .isShared(false)
             .created(messageId2, messageId3)
             .build();
         EmailChange change2 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE)
             .isShared(false)
@@ -441,7 +447,7 @@ public interface EmailChangeRepositoryContract {
         repository.save(change1).block();
         repository.save(change2).block();
 
-        assertThat(repository.getSinceState(ACCOUNT_ID, state, Optional.of(Limit.of(3))).block().getAllChanges())
+        assertThat(repository.getSinceState(accountId(), state, Optional.of(Limit.of(3))).block().getAllChanges())
             .hasSameElementsAs(change1.getCreated());
     }
 
@@ -458,14 +464,14 @@ public interface EmailChangeRepositoryContract {
         MessageId messageId5 = generateNewMessageId();
 
         EmailChange oldState = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(state)
             .date(DATE.minusHours(2))
             .isShared(false)
             .created(messageId1)
             .build();
         EmailChange change1 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE.minusHours(1))
             .isShared(false)
@@ -474,7 +480,7 @@ public interface EmailChangeRepositoryContract {
         repository.save(oldState).block();
         repository.save(change1).block();
 
-        assertThatThrownBy(() -> repository.getSinceState(ACCOUNT_ID, state, Optional.of(Limit.of(1))).block().getAllChanges())
+        assertThatThrownBy(() -> repository.getSinceState(accountId(), state, Optional.of(Limit.of(1))).block().getAllChanges())
             .isInstanceOf(CanNotCalculateChangesException.class)
             .hasMessage("Current change collector limit 1 is exceeded by a single change, hence we cannot calculate changes.");
     }
@@ -490,21 +496,21 @@ public interface EmailChangeRepositoryContract {
         MessageId messageId3 = generateNewMessageId();
 
         EmailChange oldState = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(state)
             .date(DATE.minusHours(2))
             .isShared(false)
             .created(messageId1)
             .build();
         EmailChange change1 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE.minusHours(1))
             .isShared(false)
             .created(messageId2, messageId3)
             .build();
         EmailChange change2 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE)
             .isShared(false)
@@ -514,7 +520,7 @@ public interface EmailChangeRepositoryContract {
         repository.save(change1).block();
         repository.save(change2).block();
 
-        assertThat(repository.getSinceState(ACCOUNT_ID, state, Optional.empty()).block().getNewState())
+        assertThat(repository.getSinceState(accountId(), state, Optional.empty()).block().getNewState())
             .isEqualTo(change2.getState());
     }
 
@@ -529,21 +535,21 @@ public interface EmailChangeRepositoryContract {
         MessageId messageId3 = generateNewMessageId();
 
         EmailChange oldState = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(state)
             .date(DATE.minusHours(2))
             .isShared(false)
             .created(messageId1)
             .build();
         EmailChange change1 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE.minusHours(1))
             .isShared(false)
             .created(messageId2, messageId3)
             .build();
         EmailChange change2 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE)
             .isShared(false)
@@ -553,7 +559,7 @@ public interface EmailChangeRepositoryContract {
         repository.save(change1).block();
         repository.save(change2).block();
 
-        assertThat(repository.getSinceState(ACCOUNT_ID, state, Optional.of(Limit.of(2))).block().hasMoreChanges())
+        assertThat(repository.getSinceState(accountId(), state, Optional.of(Limit.of(2))).block().hasMoreChanges())
             .isTrue();
     }
 
@@ -568,21 +574,21 @@ public interface EmailChangeRepositoryContract {
         MessageId messageId3 = generateNewMessageId();
 
         EmailChange oldState = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(state)
             .date(DATE.minusHours(2))
             .isShared(false)
             .created(messageId1)
             .build();
         EmailChange change1 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE.minusHours(1))
             .isShared(false)
             .created(messageId2, messageId3)
             .build();
         EmailChange change2 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE)
             .isShared(false)
@@ -592,7 +598,7 @@ public interface EmailChangeRepositoryContract {
         repository.save(change1).block();
         repository.save(change2).block();
 
-        assertThat(repository.getSinceState(ACCOUNT_ID, state, Optional.of(Limit.of(4))).block().hasMoreChanges())
+        assertThat(repository.getSinceState(accountId(), state, Optional.of(Limit.of(4))).block().hasMoreChanges())
             .isFalse();
     }
 
@@ -614,21 +620,21 @@ public interface EmailChangeRepositoryContract {
         MessageId messageId10 = generateNewMessageId();
 
         EmailChange oldState = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(state)
             .date(DATE.minusHours(3))
             .isShared(false)
             .created(messageId1, messageId9, messageId10)
             .build();
         EmailChange change1 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE.minusHours(2))
             .isShared(false)
             .created(messageId2, messageId3, messageId4, messageId5)
             .build();
         EmailChange change2 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE.minusHours(1))
             .isShared(false)
@@ -637,7 +643,7 @@ public interface EmailChangeRepositoryContract {
             .destroyed(messageId4, messageId9)
             .build();
         EmailChange change3 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE)
             .isShared(false)
@@ -650,7 +656,7 @@ public interface EmailChangeRepositoryContract {
         repository.save(change2).block();
         repository.save(change3).block();
 
-        EmailChanges emailChanges = repository.getSinceState(ACCOUNT_ID, state, Optional.of(Limit.of(20))).block();
+        EmailChanges emailChanges = repository.getSinceState(accountId(), state, Optional.of(Limit.of(20))).block();
 
         SoftAssertions.assertSoftly(softly -> {
             softly.assertThat(emailChanges.getCreated()).containsExactlyInAnyOrder(messageId2, messageId3, messageId6, messageId7, messageId8);
@@ -675,28 +681,28 @@ public interface EmailChangeRepositoryContract {
         MessageId messageId8 = generateNewMessageId();
 
         EmailChange oldState = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(state)
             .date(DATE.minusHours(3))
             .isShared(false)
             .created(messageId1)
             .build();
         EmailChange change1 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE.minusHours(2))
             .isShared(false)
             .created(messageId2, messageId3, messageId4, messageId5)
             .build();
         EmailChange change2 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE.minusHours(1))
             .isShared(true)
             .created(messageId6, messageId7)
             .build();
         EmailChange change3 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE)
             .isShared(false)
@@ -707,7 +713,7 @@ public interface EmailChangeRepositoryContract {
         repository.save(change2).block();
         repository.save(change3).block();
 
-        EmailChanges emailChanges = repository.getSinceState(ACCOUNT_ID, state, Optional.of(Limit.of(20))).block();
+        EmailChanges emailChanges = repository.getSinceState(accountId(), state, Optional.of(Limit.of(20))).block();
 
         assertThat(emailChanges.getCreated())
             .containsExactlyInAnyOrder(messageId2, messageId3, messageId4, messageId5, messageId8);
@@ -724,21 +730,21 @@ public interface EmailChangeRepositoryContract {
         MessageId messageId3 = generateNewMessageId();
 
         EmailChange oldState = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(state)
             .date(DATE.minusHours(2))
             .isShared(false)
             .created(messageId1)
             .build();
         EmailChange change1 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE.minusHours(1))
             .isShared(false)
             .updated(messageId1, messageId2)
             .build();
         EmailChange change2 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE)
             .isShared(false)
@@ -749,7 +755,7 @@ public interface EmailChangeRepositoryContract {
         repository.save(change1).block();
         repository.save(change2).block();
 
-        EmailChanges emailChanges = repository.getSinceState(ACCOUNT_ID, state, Optional.of(Limit.of(3))).block();
+        EmailChanges emailChanges = repository.getSinceState(accountId(), state, Optional.of(Limit.of(3))).block();
         SoftAssertions.assertSoftly(softly -> {
             softly.assertThat(emailChanges.getUpdated()).containsExactly(messageId1, messageId2);
             softly.assertThat(emailChanges.getCreated()).containsExactly(messageId3);
@@ -760,7 +766,7 @@ public interface EmailChangeRepositoryContract {
     default void getChangesShouldFailWhenSinceStateNotFound() {
         EmailChangeRepository repository = emailChangeRepository();
 
-        assertThatThrownBy(() -> repository.getSinceState(ACCOUNT_ID, generateNewState(), Optional.empty()).block())
+        assertThatThrownBy(() -> repository.getSinceState(accountId(), generateNewState(), Optional.empty()).block())
             .isInstanceOf(ChangeNotFoundException.class);
     }
 
@@ -768,7 +774,7 @@ public interface EmailChangeRepositoryContract {
     default void getLatestStateWithDelegationShouldReturnInitialWhenEmpty() {
         EmailChangeRepository repository = emailChangeRepository();
 
-        assertThat(repository.getLatestStateWithDelegation(ACCOUNT_ID).block())
+        assertThat(repository.getLatestStateWithDelegation(accountId()).block())
             .isEqualTo(State.INITIAL);
     }
 
@@ -777,21 +783,21 @@ public interface EmailChangeRepositoryContract {
         EmailChangeRepository repository = emailChangeRepository();
 
         EmailChange change1 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE.minusHours(2))
             .isShared(false)
             .created(generateNewMessageId())
             .build();
         EmailChange change2 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE.minusHours(1))
             .isShared(false)
             .created(generateNewMessageId())
             .build();
         EmailChange change3 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE)
             .isShared(false)
@@ -801,7 +807,7 @@ public interface EmailChangeRepositoryContract {
         repository.save(change2).block();
         repository.save(change3).block();
 
-        assertThat(repository.getLatestStateWithDelegation(ACCOUNT_ID).block())
+        assertThat(repository.getLatestStateWithDelegation(accountId()).block())
             .isEqualTo(change3.getState());
     }
 
@@ -810,21 +816,21 @@ public interface EmailChangeRepositoryContract {
         EmailChangeRepository repository = emailChangeRepository();
 
         EmailChange change1 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE.minusHours(2))
             .isShared(false)
             .created(generateNewMessageId())
             .build();
         EmailChange change2 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE.minusHours(1))
             .isShared(false)
             .created(generateNewMessageId())
             .build();
         EmailChange change3 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE)
             .isShared(true)
@@ -834,7 +840,7 @@ public interface EmailChangeRepositoryContract {
         repository.save(change2).block();
         repository.save(change3).block();
 
-        assertThat(repository.getLatestStateWithDelegation(ACCOUNT_ID).block())
+        assertThat(repository.getLatestStateWithDelegation(accountId()).block())
             .isEqualTo(change3.getState());
     }
 
@@ -845,14 +851,14 @@ public interface EmailChangeRepositoryContract {
         State state = generateNewState();
 
         EmailChange oldState = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(state)
             .date(DATE.minusHours(1))
             .isShared(false)
             .created(generateNewMessageId())
             .build();
         EmailChange change = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE)
             .isShared(false)
@@ -861,7 +867,7 @@ public interface EmailChangeRepositoryContract {
         repository.save(oldState).block();
         repository.save(change).block();
 
-        assertThat(repository.getSinceStateWithDelegation(ACCOUNT_ID, state, Optional.empty()).block().getAllChanges())
+        assertThat(repository.getSinceStateWithDelegation(accountId(), state, Optional.empty()).block().getAllChanges())
             .hasSameElementsAs(change.getUpdated());
     }
 
@@ -872,7 +878,7 @@ public interface EmailChangeRepositoryContract {
         State state = generateNewState();
 
         EmailChange oldState = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(state)
             .date(DATE.minusHours(1))
             .isShared(false)
@@ -880,7 +886,7 @@ public interface EmailChangeRepositoryContract {
             .build();
         repository.save(oldState).block();
 
-        assertThat(repository.getSinceStateWithDelegation(ACCOUNT_ID, state, Optional.empty()).block().getAllChanges())
+        assertThat(repository.getSinceStateWithDelegation(accountId(), state, Optional.empty()).block().getAllChanges())
             .isEmpty();
     }
 
@@ -891,7 +897,7 @@ public interface EmailChangeRepositoryContract {
         State state = generateNewState();
 
         EmailChange oldState = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(state)
             .date(DATE.minusHours(1))
             .isShared(false)
@@ -899,7 +905,7 @@ public interface EmailChangeRepositoryContract {
             .build();
         repository.save(oldState).block();
 
-        assertThat(repository.getSinceStateWithDelegation(ACCOUNT_ID, state, Optional.empty()).block().getNewState())
+        assertThat(repository.getSinceStateWithDelegation(accountId(), state, Optional.empty()).block().getNewState())
             .isEqualTo(oldState.getState());
     }
 
@@ -916,35 +922,35 @@ public interface EmailChangeRepositoryContract {
         MessageId messageId5 = generateNewMessageId();
 
         EmailChange oldState = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(state)
             .date(DATE.minusHours(3))
             .isShared(false)
             .created(messageId1)
             .build();
         EmailChange change1 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE.minusHours(2))
             .isShared(false)
             .created(messageId2)
             .build();
         EmailChange change2 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE.minusHours(1))
             .isShared(false)
             .created(messageId3)
             .build();
         EmailChange change3 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE)
             .isShared(false)
             .created(messageId4)
             .build();
         EmailChange change4 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE.plusHours(1))
             .isShared(false)
@@ -956,7 +962,7 @@ public interface EmailChangeRepositoryContract {
         repository.save(change3).block();
         repository.save(change4).block();
 
-        assertThat(repository.getSinceStateWithDelegation(ACCOUNT_ID, state, Optional.of(Limit.of(3))).block().getCreated())
+        assertThat(repository.getSinceStateWithDelegation(accountId(), state, Optional.of(Limit.of(3))).block().getCreated())
             .containsExactlyInAnyOrder(messageId2, messageId3, messageId4);
     }
 
@@ -970,28 +976,28 @@ public interface EmailChangeRepositoryContract {
         MessageId messageId4 = generateNewMessageId();
 
         EmailChange oldState = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE.minusHours(3))
             .isShared(false)
             .created(messageId1)
             .build();
         EmailChange change1 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE.minusHours(2))
             .isShared(false)
             .created(messageId2)
             .build();
         EmailChange change2 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE.minusHours(1))
             .isShared(false)
             .created(messageId3)
             .build();
         EmailChange change3 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE)
             .isShared(false)
@@ -1002,7 +1008,7 @@ public interface EmailChangeRepositoryContract {
         repository.save(change2).block();
         repository.save(change3).block();
 
-        assertThat(repository.getSinceStateWithDelegation(ACCOUNT_ID, State.INITIAL, Optional.of(Limit.of(3))).block().getCreated())
+        assertThat(repository.getSinceStateWithDelegation(accountId(), State.INITIAL, Optional.of(Limit.of(3))).block().getCreated())
             .containsExactlyInAnyOrder(messageId1, messageId2, messageId3);
     }
 
@@ -1013,21 +1019,21 @@ public interface EmailChangeRepositoryContract {
         State state = generateNewState();
 
         EmailChange oldState = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(state)
             .date(DATE.minusHours(2))
             .isShared(false)
             .created(generateNewMessageId())
             .build();
         EmailChange change1 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE.minusHours(1))
             .isShared(false)
             .created(generateNewMessageId(), generateNewMessageId(), generateNewMessageId(), generateNewMessageId(), generateNewMessageId())
             .build();
         EmailChange change2 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE)
             .isShared(false)
@@ -1038,7 +1044,7 @@ public interface EmailChangeRepositoryContract {
         repository.save(change1).block();
         repository.save(change2).block();
 
-        assertThat(repository.getSinceStateWithDelegation(ACCOUNT_ID, state, Optional.empty()).block().getAllChanges())
+        assertThat(repository.getSinceStateWithDelegation(accountId(), state, Optional.empty()).block().getAllChanges())
             .hasSameElementsAs(change1.getCreated());
     }
 
@@ -1049,21 +1055,21 @@ public interface EmailChangeRepositoryContract {
         State state = generateNewState();
 
         EmailChange oldState = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(state)
             .date(DATE.minusHours(2))
             .isShared(false)
             .created(generateNewMessageId())
             .build();
         EmailChange change1 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE.minusHours(1))
             .isShared(false)
             .created(generateNewMessageId(), generateNewMessageId())
             .build();
         EmailChange change2 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE)
             .isShared(false)
@@ -1073,7 +1079,7 @@ public interface EmailChangeRepositoryContract {
         repository.save(change1).block();
         repository.save(change2).block();
 
-        assertThat(repository.getSinceStateWithDelegation(ACCOUNT_ID, state, Optional.of(Limit.of(3))).block().getAllChanges())
+        assertThat(repository.getSinceStateWithDelegation(accountId(), state, Optional.of(Limit.of(3))).block().getAllChanges())
             .hasSameElementsAs(change1.getCreated());
     }
 
@@ -1084,21 +1090,21 @@ public interface EmailChangeRepositoryContract {
         State state = generateNewState();
 
         EmailChange oldState = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(state)
             .date(DATE.minusHours(2))
             .isShared(false)
             .created(generateNewMessageId())
             .build();
         EmailChange change1 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE.minusHours(1))
             .isShared(false)
             .created(generateNewMessageId(), generateNewMessageId())
             .build();
         EmailChange change2 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE)
             .isShared(false)
@@ -1107,7 +1113,7 @@ public interface EmailChangeRepositoryContract {
         repository.save(oldState).block();
         repository.save(change1).block();
 
-        assertThatThrownBy(() -> repository.getSinceStateWithDelegation(ACCOUNT_ID, state, Optional.of(Limit.of(1))).block().getAllChanges())
+        assertThatThrownBy(() -> repository.getSinceStateWithDelegation(accountId(), state, Optional.of(Limit.of(1))).block().getAllChanges())
             .isInstanceOf(CanNotCalculateChangesException.class)
             .hasMessage("Current change collector limit 1 is exceeded by a single change, hence we cannot calculate changes.");
     }
@@ -1119,21 +1125,21 @@ public interface EmailChangeRepositoryContract {
         State state = generateNewState();
 
         EmailChange oldState = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(state)
             .date(DATE.minusHours(2))
             .isShared(false)
             .created(generateNewMessageId())
             .build();
         EmailChange change1 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE.minusHours(1))
             .isShared(false)
             .created(generateNewMessageId(), generateNewMessageId())
             .build();
         EmailChange change2 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE)
             .isShared(false)
@@ -1143,7 +1149,7 @@ public interface EmailChangeRepositoryContract {
         repository.save(change1).block();
         repository.save(change2).block();
 
-        assertThat(repository.getSinceStateWithDelegation(ACCOUNT_ID, state, Optional.empty()).block().getNewState())
+        assertThat(repository.getSinceStateWithDelegation(accountId(), state, Optional.empty()).block().getNewState())
             .isEqualTo(change2.getState());
     }
 
@@ -1154,21 +1160,21 @@ public interface EmailChangeRepositoryContract {
         State state = generateNewState();
 
         EmailChange oldState = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(state)
             .date(DATE.minusHours(2))
             .isShared(false)
             .created(generateNewMessageId())
             .build();
         EmailChange change1 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE.minusHours(1))
             .isShared(false)
             .created(generateNewMessageId(), generateNewMessageId())
             .build();
         EmailChange change2 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE)
             .isShared(false)
@@ -1178,7 +1184,7 @@ public interface EmailChangeRepositoryContract {
         repository.save(change1).block();
         repository.save(change2).block();
 
-        assertThat(repository.getSinceStateWithDelegation(ACCOUNT_ID, state, Optional.of(Limit.of(2))).block().hasMoreChanges())
+        assertThat(repository.getSinceStateWithDelegation(accountId(), state, Optional.of(Limit.of(2))).block().hasMoreChanges())
             .isTrue();
     }
 
@@ -1189,21 +1195,21 @@ public interface EmailChangeRepositoryContract {
         State state = generateNewState();
 
         EmailChange oldState = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(state)
             .date(DATE.minusHours(2))
             .isShared(false)
             .created(generateNewMessageId())
             .build();
         EmailChange change1 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE.minusHours(1))
             .isShared(false)
             .created(generateNewMessageId(), generateNewMessageId())
             .build();
         EmailChange change2 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE)
             .isShared(false)
@@ -1213,7 +1219,7 @@ public interface EmailChangeRepositoryContract {
         repository.save(change1).block();
         repository.save(change2).block();
 
-        assertThat(repository.getSinceStateWithDelegation(ACCOUNT_ID, state, Optional.of(Limit.of(4))).block().hasMoreChanges())
+        assertThat(repository.getSinceStateWithDelegation(accountId(), state, Optional.of(Limit.of(4))).block().hasMoreChanges())
             .isFalse();
     }
 
@@ -1235,21 +1241,21 @@ public interface EmailChangeRepositoryContract {
         MessageId messageId10 = generateNewMessageId();
 
         EmailChange oldState = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(state)
             .date(DATE.minusHours(3))
             .isShared(false)
             .created(messageId1, messageId9, messageId10)
             .build();
         EmailChange change1 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE.minusHours(2))
             .isShared(false)
             .created(messageId2, messageId3, messageId4, messageId5)
             .build();
         EmailChange change2 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE.minusHours(1))
             .isShared(false)
@@ -1258,7 +1264,7 @@ public interface EmailChangeRepositoryContract {
             .destroyed(messageId4, messageId9)
             .build();
         EmailChange change3 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE)
             .isShared(false)
@@ -1271,7 +1277,7 @@ public interface EmailChangeRepositoryContract {
         repository.save(change2).block();
         repository.save(change3).block();
 
-        EmailChanges emailChanges = repository.getSinceState(ACCOUNT_ID, state, Optional.of(Limit.of(20))).block();
+        EmailChanges emailChanges = repository.getSinceState(accountId(), state, Optional.of(Limit.of(20))).block();
 
         SoftAssertions.assertSoftly(softly -> {
             softly.assertThat(emailChanges.getCreated()).containsExactlyInAnyOrder(messageId2, messageId3, messageId6, messageId7, messageId8);
@@ -1295,28 +1301,28 @@ public interface EmailChangeRepositoryContract {
         MessageId messageId8 = generateNewMessageId();
 
         EmailChange oldState = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(state)
             .date(DATE.minusHours(3))
             .isShared(false)
             .created(messageId1)
             .build();
         EmailChange change1 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE.minusHours(2))
             .isShared(false)
             .created(messageId2, messageId3, messageId4, messageId5)
             .build();
         EmailChange change2 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE.minusHours(1))
             .isShared(true)
             .created(messageId6, messageId7)
             .build();
         EmailChange change3 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE)
             .isShared(false)
@@ -1327,7 +1333,7 @@ public interface EmailChangeRepositoryContract {
         repository.save(change2).block();
         repository.save(change3).block();
 
-        EmailChanges emailChanges = repository.getSinceStateWithDelegation(ACCOUNT_ID, state, Optional.of(Limit.of(20))).block();
+        EmailChanges emailChanges = repository.getSinceStateWithDelegation(accountId(), state, Optional.of(Limit.of(20))).block();
 
         assertThat(emailChanges.getCreated())
             .containsExactlyInAnyOrder(messageId2, messageId3, messageId4, messageId5, messageId6, messageId7, messageId8);
@@ -1344,21 +1350,21 @@ public interface EmailChangeRepositoryContract {
         MessageId messageId3 = generateNewMessageId();
 
         EmailChange oldState = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(state)
             .date(DATE.minusHours(2))
             .isShared(false)
             .created(messageId1)
             .build();
         EmailChange change1 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE.minusHours(1))
             .isShared(false)
             .updated(messageId1, messageId2)
             .build();
         EmailChange change2 = EmailChange.builder()
-            .accountId(ACCOUNT_ID)
+            .accountId(accountId())
             .state(generateNewState())
             .date(DATE)
             .isShared(false)
@@ -1369,7 +1375,7 @@ public interface EmailChangeRepositoryContract {
         repository.save(change1).block();
         repository.save(change2).block();
 
-        EmailChanges emailChanges = repository.getSinceStateWithDelegation(ACCOUNT_ID, state, Optional.of(Limit.of(3))).block();
+        EmailChanges emailChanges = repository.getSinceStateWithDelegation(accountId(), state, Optional.of(Limit.of(3))).block();
         SoftAssertions.assertSoftly(softly -> {
             softly.assertThat(emailChanges.getUpdated()).containsExactly(messageId1, messageId2);
             softly.assertThat(emailChanges.getCreated()).containsExactly(messageId3);
@@ -1380,7 +1386,7 @@ public interface EmailChangeRepositoryContract {
     default void getSinceStateWithDelegationShouldFailWhenSinceStateNotFound() {
         EmailChangeRepository repository = emailChangeRepository();
 
-        assertThatThrownBy(() -> repository.getSinceStateWithDelegation(ACCOUNT_ID, generateNewState(), Optional.empty()).block())
+        assertThatThrownBy(() -> repository.getSinceStateWithDelegation(accountId(), generateNewState(), Optional.empty()).block())
             .isInstanceOf(ChangeNotFoundException.class);
     }
 }

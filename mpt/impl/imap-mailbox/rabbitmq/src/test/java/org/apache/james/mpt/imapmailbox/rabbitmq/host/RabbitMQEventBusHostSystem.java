@@ -32,9 +32,7 @@ import org.apache.james.core.quota.QuotaCountLimit;
 import org.apache.james.core.quota.QuotaSizeLimit;
 import org.apache.james.event.json.MailboxEventSerializer;
 import org.apache.james.events.EventBusId;
-import org.apache.james.events.EventBusName;
 import org.apache.james.events.MemoryEventDeadLetters;
-import org.apache.james.events.NamingStrategy;
 import org.apache.james.events.RabbitMQEventBus;
 import org.apache.james.events.RetryBackoffConfiguration;
 import org.apache.james.events.RoutingKeyConverter;
@@ -49,6 +47,7 @@ import org.apache.james.mailbox.inmemory.InMemoryMessageId;
 import org.apache.james.mailbox.inmemory.manager.InMemoryIntegrationResources;
 import org.apache.james.mailbox.store.StoreSubscriptionManager;
 import org.apache.james.mailbox.store.quota.DefaultUserQuotaRootResolver;
+import org.apache.james.metrics.api.NoopGaugeRegistry;
 import org.apache.james.metrics.logger.DefaultMetricFactory;
 import org.apache.james.metrics.tests.RecordingMetricFactory;
 import org.apache.james.mpt.api.ImapFeatures;
@@ -84,7 +83,7 @@ public class RabbitMQEventBusHostSystem extends JamesImapHostSystem {
                 .initialDelay(Duration.ofMillis(5)));
         reactorRabbitMQChannelPool = new ReactorRabbitMQChannelPool(connectionPool.getResilientConnection(),
             ReactorRabbitMQChannelPool.Configuration.DEFAULT,
-            new DefaultMetricFactory());
+            new DefaultMetricFactory(), new NoopGaugeRegistry());
         reactorRabbitMQChannelPool.start();
         eventBus = createEventBus();
         eventBus.start();
@@ -120,9 +119,8 @@ public class RabbitMQEventBusHostSystem extends JamesImapHostSystem {
         MailboxEventSerializer eventSerializer = new MailboxEventSerializer(mailboxIdFactory, messageIdFactory, new DefaultUserQuotaRootResolver.DefaultQuotaRootDeserializer());
         RoutingKeyConverter routingKeyConverter = new RoutingKeyConverter(ImmutableSet.of(new MailboxIdRegistrationKey.Factory(mailboxIdFactory)));
         return new RabbitMQEventBus(MAILBOX_EVENT_NAMING_STRATEGY, reactorRabbitMQChannelPool.getSender(), reactorRabbitMQChannelPool::createReceiver,
-            eventSerializer, RetryBackoffConfiguration.DEFAULT, routingKeyConverter, new MemoryEventDeadLetters(),
-            new RecordingMetricFactory(),
-            reactorRabbitMQChannelPool, EventBusId.random(), dockerRabbitMQ.getConfiguration());
+            eventSerializer, routingKeyConverter, new MemoryEventDeadLetters(), new RecordingMetricFactory(),
+            reactorRabbitMQChannelPool, EventBusId.random(), new RabbitMQEventBus.Configurations(dockerRabbitMQ.getConfiguration(), RetryBackoffConfiguration.DEFAULT));
     }
 
     @Override

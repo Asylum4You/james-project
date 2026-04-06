@@ -29,17 +29,22 @@ public class PartialRange {
     private final long upVal;
 
     public PartialRange(long lowVal, long upVal) throws DecodingException {
-        checkArgument(lowVal != 0);
-        checkArgument(upVal != 0);
-        checkArgument(lowVal > 0 == upVal > 0);
-        checkArgument(Math.abs(lowVal) <= Math.abs(upVal));
-        this.lowVal = lowVal;
-        this.upVal = upVal;
+        checkArgument(lowVal != 0, "'lowVal' cannot be equal to 0");
+        checkArgument(upVal != 0, "'upVal' cannot be equal to 0");
+        checkArgument(lowVal > 0 == upVal > 0, "Both 'upVal' and 'lowVal' must have the same sign, got lowVal=" + lowVal + " and upVal=" + upVal);
+
+        if (Math.abs(lowVal) <= Math.abs(upVal)) {
+            this.lowVal = lowVal;
+            this.upVal = upVal;
+        } else {
+            this.lowVal = upVal;
+            this.upVal = lowVal;
+        }
     }
 
-    public void checkArgument(boolean condition) throws DecodingException {
+    public void checkArgument(boolean condition, String explanation) throws DecodingException {
         if (!condition) {
-            throw new DecodingException(HumanReadableText.ILLEGAL_ARGUMENTS, "Invalid partial range");
+            throw new DecodingException(HumanReadableText.ILLEGAL_ARGUMENTS, "Invalid partial range: " + explanation);
         }
     }
 

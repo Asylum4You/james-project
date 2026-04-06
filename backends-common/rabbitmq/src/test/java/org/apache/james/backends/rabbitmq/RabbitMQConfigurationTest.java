@@ -40,7 +40,8 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import org.testcontainers.shaded.com.google.common.collect.ImmutableList;
+
+import com.google.common.collect.ImmutableList;
 
 import nl.jqno.equalsverifier.EqualsVerifier;
 
@@ -571,6 +572,32 @@ class RabbitMQConfigurationTest {
             .isEqualTo(Optional.of("vhosttest"));
     }
 
+    @Test
+    void eventBusPropagateDispatchErrorShouldBeTrueByDefault() {
+        PropertiesConfiguration configuration = new PropertiesConfiguration();
+        configuration.addProperty("uri", "amqp://james:james@rabbitmqhost:5672");
+        configuration.addProperty("management.uri", "http://james:james@rabbitmqhost:15672/api/");
+        configuration.addProperty("management.user", DEFAULT_USER);
+        configuration.addProperty("management.password", DEFAULT_PASSWORD_STRING);
+
+        assertThat(RabbitMQConfiguration.from(configuration).eventBusPropagateDispatchError())
+            .isTrue();
+    }
+
+    @Test
+    void eventBusPropagateDispatchErrorShouldBeDisabledWhenConfiguredFalse() {
+        PropertiesConfiguration configuration = new PropertiesConfiguration();
+        configuration.addProperty("uri", "amqp://james:james@rabbitmqhost:5672");
+        configuration.addProperty("management.uri", "http://james:james@rabbitmqhost:15672/api/");
+        configuration.addProperty("management.user", DEFAULT_USER);
+        configuration.addProperty("management.password", DEFAULT_PASSWORD_STRING);
+
+        configuration.addProperty("event.bus.propagate.dispatch.error", "false");
+
+        assertThat(RabbitMQConfiguration.from(configuration).eventBusPropagateDispatchError())
+            .isFalse();
+    }
+
     @Nested
     class ManagementCredentialsTest {
         @Test
@@ -653,6 +680,22 @@ class RabbitMQConfigurationTest {
         assertThat(RabbitMQConfiguration.from(configuration).rabbitMQHosts())
             .containsExactlyInAnyOrder(Host.from("rabbitmqhost1", 5672),
                 Host.from("rabbitmqhost2", 5672));
+    }
+
+    @Test
+    void shouldReturnQuorumQueueReplicationFactorWhenConfigured() {
+        PropertiesConfiguration configuration = new PropertiesConfiguration();
+        String amqpUri = "amqp://james:james@rabbitmqhost:5672";
+        configuration.addProperty("uri", amqpUri);
+        String managementUri = "http://james:james@rabbitmqhost:15672/api/";
+        configuration.addProperty("management.uri", managementUri);
+        configuration.addProperty("management.user", DEFAULT_USER);
+        configuration.addProperty("management.password", DEFAULT_PASSWORD_STRING);
+
+        configuration.addProperty("quorum.queues.replication.factor", 3);
+
+        assertThat(RabbitMQConfiguration.from(configuration).getQuorumQueueReplicationFactor())
+            .isEqualTo(3);
     }
 
     @Nested

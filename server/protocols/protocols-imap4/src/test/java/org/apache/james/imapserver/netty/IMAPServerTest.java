@@ -45,6 +45,7 @@ import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
 import java.security.cert.X509Certificate;
 import java.time.Duration;
+import java.util.Base64;
 import java.util.List;
 import java.util.Properties;
 import java.util.Set;
@@ -56,6 +57,7 @@ import java.util.stream.IntStream;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.X509TrustManager;
+
 import jakarta.mail.FetchProfile;
 import jakarta.mail.Flags;
 import jakarta.mail.Folder;
@@ -80,6 +82,7 @@ import org.apache.james.imap.api.ConnectionCheck;
 import org.apache.james.imap.encode.main.DefaultImapEncoderFactory;
 import org.apache.james.imap.main.DefaultImapDecoderFactory;
 import org.apache.james.imap.processor.base.AbstractProcessor;
+import org.apache.james.imap.processor.fetch.FetchProcessor;
 import org.apache.james.imap.processor.main.DefaultImapProcessorFactory;
 import org.apache.james.jwt.OidcTokenFixture;
 import org.apache.james.mailbox.MailboxSession;
@@ -88,6 +91,7 @@ import org.apache.james.mailbox.MessageUid;
 import org.apache.james.mailbox.ModSeq;
 import org.apache.james.mailbox.inmemory.InMemoryMailboxManager;
 import org.apache.james.mailbox.inmemory.manager.InMemoryIntegrationResources;
+import org.apache.james.mailbox.model.MailboxACL;
 import org.apache.james.mailbox.model.MailboxPath;
 import org.apache.james.mailbox.model.MessageRange;
 import org.apache.james.mailbox.model.UidValidity;
@@ -99,6 +103,7 @@ import org.apache.james.metrics.tests.RecordingMetricFactory;
 import org.apache.james.protocols.api.OIDCSASLHelper;
 import org.apache.james.protocols.api.utils.BogusSslContextFactory;
 import org.apache.james.protocols.api.utils.BogusTrustManagerFactory;
+import org.apache.james.protocols.lib.LegacyJavaEncryptionFactory;
 import org.apache.james.protocols.lib.mock.ConfigLoader;
 import org.apache.james.server.core.filesystem.FileSystemImpl;
 import org.apache.james.util.ClassLoaderUtils;
@@ -109,11 +114,11 @@ import org.awaitility.Awaitility;
 import org.eclipse.angus.mail.imap.IMAPFolder;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
-import org.mockito.invocation.InvocationOnMock;
 import org.mockito.stubbing.Answer;
 import org.mockserver.integration.ClientAndServer;
 import org.mockserver.model.HttpRequest;
@@ -141,12 +146,13 @@ import reactor.core.scheduler.Schedulers;
 import reactor.netty.Connection;
 import reactor.netty.tcp.TcpClient;
 
+@SuppressWarnings("checkstyle:membername")
 class IMAPServerTest {
     private static final String _129K_MESSAGE = "header: value\r\n" + "012345678\r\n".repeat(13107);
     private static final String _65K_MESSAGE = "header: value\r\n" + "012345678\r\n".repeat(6553);
     private static final Username USER = Username.of("user@domain.org");
     private static final Username USER2 = Username.of("bobo@domain.org");
-    private static final Username USER3= Username.of("user3@domain.org");
+    private static final Username USER3 = Username.of("user3@domain.org");
     private static final String USER_PASS = "pass";
     public static final String SMALL_MESSAGE = "header: value\r\n\r\nBODY";
     private InMemoryIntegrationResources memoryIntegrationResources;
@@ -157,14 +163,15 @@ class IMAPServerTest {
     private InMemoryMailboxManager mailboxManager;
 
     private IMAPServer createImapServer(HierarchicalConfiguration<ImmutableNode> config,
-                                        InMemoryIntegrationResources inMemoryIntegrationResources) throws Exception {
+                                        InMemoryIntegrationResources inMemoryIntegrationResources,
+                                        FetchProcessor.LocalCacheConfiguration localCacheConfiguration) throws Exception {
         memoryIntegrationResources = inMemoryIntegrationResources;
 
         RecordingMetricFactory metricFactory = new RecordingMetricFactory();
         Set<ConnectionCheck> connectionChecks = defaultConnectionChecks();
         mailboxManager = spy(memoryIntegrationResources.getMailboxManager());
         IMAPServer imapServer = new IMAPServer(
-            DefaultImapDecoderFactory.createDecoder(),
+            new DefaultImapDecoderFactory().buildImapDecoder(),
             new DefaultImapEncoderFactory().buildImapEncoder(),
             DefaultImapProcessorFactory.createXListSupportingProcessor(
                 mailboxManager,
@@ -175,19 +182,22 @@ class IMAPServerTest {
                 null,
                 memoryIntegrationResources.getQuotaManager(),
                 memoryIntegrationResources.getQuotaRootResolver(),
-                metricFactory),
+                metricFactory,
+                localCacheConfiguration),
             new ImapMetrics(metricFactory),
             new NoopGaugeRegistry(), connectionChecks);
 
         FileSystemImpl fileSystem = FileSystemImpl.forTestingWithConfigurationFromClasspath();
         imapServer.setFileSystem(fileSystem);
+        imapServer.setEncryptionFactory(new LegacyJavaEncryptionFactory(fileSystem));
 
         imapServer.configure(config);
         imapServer.init();
 
         return imapServer;
     }
-    private IMAPServer createImapServer(HierarchicalConfiguration<ImmutableNode> config) throws Exception {
+
+    private IMAPServer createImapServer(HierarchicalConfiguration<ImmutableNode> config, FetchProcessor.LocalCacheConfiguration localCacheConfiguration) throws Exception {
         authenticator = new FakeAuthenticator();
         authenticator.addUser(USER, USER_PASS);
         authenticator.addUser(USER2, USER_PASS);
@@ -204,11 +214,19 @@ class IMAPServerTest {
             .storeQuotaManager()
             .build();
 
-        return createImapServer(config, memoryIntegrationResources);
+        return createImapServer(config, memoryIntegrationResources, localCacheConfiguration);
+    }
+
+    private IMAPServer createImapServer(HierarchicalConfiguration<ImmutableNode> config) throws Exception {
+        return createImapServer(config, FetchProcessor.LocalCacheConfiguration.DEFAULT);
+    }
+
+    private IMAPServer createImapServer(String configurationFile, FetchProcessor.LocalCacheConfiguration localCacheConfiguration) throws Exception {
+        return createImapServer(ConfigLoader.getConfig(ClassLoaderUtils.getSystemResourceAsSharedStream(configurationFile)), localCacheConfiguration);
     }
 
     private IMAPServer createImapServer(String configurationFile) throws Exception {
-        return createImapServer(ConfigLoader.getConfig(ClassLoaderUtils.getSystemResourceAsSharedStream(configurationFile)));
+        return createImapServer(configurationFile, FetchProcessor.LocalCacheConfiguration.DEFAULT);
     }
 
     private Set<ConnectionCheck> defaultConnectionChecks() {
@@ -219,7 +237,6 @@ class IMAPServerTest {
     class ConnectionCheckTest {
 
         IMAPServer imapServer;
-        private final IpConnectionCheck ipConnectionCheck = new IpConnectionCheck();
         private int port;
 
         @BeforeEach
@@ -243,6 +260,17 @@ class IMAPServerTest {
 
             assertThatThrownBy(() -> testIMAPClient.connect("127.0.0.1", port)
                 .login(USER.asString(), USER_PASS)
+                .append("INBOX", SMALL_MESSAGE));
+        }
+
+        @Test
+        void logoutShouldDisconnectUser() throws Exception {
+            testIMAPClient.connect("127.0.0.1", port)
+                .login(USER.asString(), USER_PASS);
+
+            imapServer.disconnect(USER::equals);
+
+            assertThatThrownBy(() -> testIMAPClient
                 .append("INBOX", SMALL_MESSAGE));
         }
 
@@ -271,7 +299,7 @@ class IMAPServerTest {
 
         @BeforeEach
         void beforeEach() throws Exception {
-            imapServer = createImapServer("imapServer.xml");
+            imapServer = createImapServer("imapServer.xml", FetchProcessor.LocalCacheConfiguration.DEFAULT);
             port = imapServer.getListenAddresses().get(0).getPort();
         }
 
@@ -287,8 +315,8 @@ class IMAPServerTest {
                 .append("INBOX", SMALL_MESSAGE);
 
             assertThat(testIMAPClient
-                    .select("INBOX")
-                    .readFirstMessage())
+                .select("INBOX")
+                .readFirstMessage())
                 .contains("* 1 FETCH (FLAGS (\\Recent \\Seen) BODY[] {21}\r\nheader: value\r\n\r\nBODY)\r\n");
         }
 
@@ -299,8 +327,8 @@ class IMAPServerTest {
                 .append("INBOX", SMALL_MESSAGE);
 
             assertThat(testIMAPClient
-                    .select("INBOX")
-                    .readFirstMessageInMailbox("BODY[]<8.20>"))
+                .select("INBOX")
+                .readFirstMessageInMailbox("BODY[]<8.20>"))
                 .contains("* 1 FETCH (FLAGS (\\Recent \\Seen) BODY[]<8> {13}\r\nvalue\r\n\r\nBODY)\r\n");
         }
 
@@ -311,8 +339,8 @@ class IMAPServerTest {
                 .append("INBOX", SMALL_MESSAGE);
 
             assertThat(testIMAPClient
-                    .select("INBOX")
-                    .readFirstMessageInMailbox("BODY[]<8.13>"))
+                .select("INBOX")
+                .readFirstMessageInMailbox("BODY[]<8.13>"))
                 .contains("* 1 FETCH (FLAGS (\\Recent \\Seen) BODY[]<8> {13}\r\nvalue\r\n\r\nBODY)\r\n");
         }
 
@@ -323,9 +351,14 @@ class IMAPServerTest {
                 .append("INBOX", SMALL_MESSAGE);
 
             assertThat(testIMAPClient
-                    .select("INBOX")
-                    .readFirstMessageInMailbox("BODY[]<8.12>"))
+                .select("INBOX")
+                .readFirstMessageInMailbox("BODY[]<8.12>"))
                 .contains("* 1 FETCH (FLAGS (\\Recent \\Seen) BODY[]<8> {12}\r\nvalue\r\n\r\nBOD)\r\n");
+
+            assertThat(testIMAPClient
+                .select("INBOX")
+                .readFirstMessageInMailbox("BODY[]<8.12>"))
+                .contains("* 1 FETCH (BODY[]<8> {12}\r\nvalue\r\n\r\nBOD)\r\n");
         }
 
         @Test
@@ -335,8 +368,8 @@ class IMAPServerTest {
                 .append("INBOX", SMALL_MESSAGE);
 
             assertThat(testIMAPClient
-                    .select("INBOX")
-                    .readFirstMessageInMailbox("BODY[]<8>"))
+                .select("INBOX")
+                .readFirstMessageInMailbox("BODY[]<8>"))
                 .contains("* 1 FETCH (FLAGS (\\Recent \\Seen) BODY[]<8> {13}\r\nvalue\r\n\r\nBODY)\r\n");
         }
     }
@@ -366,7 +399,7 @@ class IMAPServerTest {
                 .doesNotThrowAnyException();
 
             assertThat(testIMAPClient.select("INBOX")
-                    .readFirstMessage())
+                .readFirstMessage())
                 .contains("\r\n" + SMALL_MESSAGE + ")\r\n");
         }
 
@@ -398,7 +431,7 @@ class IMAPServerTest {
                 .doesNotThrowAnyException();
 
             assertThat(testIMAPClient.select("INBOX")
-                    .readFirstMessage())
+                .readFirstMessage())
                 .contains("\r\n" + _65K_MESSAGE + ")\r\n");
         }
 
@@ -430,7 +463,7 @@ class IMAPServerTest {
                 .doesNotThrowAnyException();
 
             assertThat(testIMAPClient.select("INBOX")
-                    .readFirstMessage())
+                .readFirstMessage())
                 .contains("\r\n" + _129K_MESSAGE + ")\r\n");
         }
     }
@@ -987,7 +1020,7 @@ class IMAPServerTest {
                 .doesNotThrowAnyException();
 
             assertThat(testIMAPClient.select("INBOX")
-                    .readFirstMessage())
+                .readFirstMessage())
                 .contains("\r\n" + SMALL_MESSAGE + ")\r\n");
         }
 
@@ -1000,7 +1033,7 @@ class IMAPServerTest {
                 .doesNotThrowAnyException();
 
             assertThat(testIMAPClient.select("INBOX")
-                    .readFirstMessage())
+                .readFirstMessage())
                 .contains("\r\n" + _65K_MESSAGE + ")\r\n");
         }
 
@@ -1030,6 +1063,41 @@ class IMAPServerTest {
                     .login(USER.asString(), USER_PASS)
                     .sendCommand("STATUS \"INBOX\" (APPENDLIMIT)"))
                 .contains("* STATUS \"INBOX\" (APPENDLIMIT 131072)");
+        }
+    }
+
+    @Nested
+    class AdminUsers {
+        IMAPServer imapServer;
+        private int port;
+        private SocketChannel clientConnection;
+
+        @BeforeEach
+        void beforeEach() throws Exception {
+            imapServer = createImapServer("imapServerAdminUsers.xml");
+            port = imapServer.getListenAddresses().get(0).getPort();
+
+
+            clientConnection = SocketChannel.open();
+            clientConnection.connect(new InetSocketAddress(LOCALHOST_IP, port));
+            readBytes(clientConnection);
+        }
+
+        @AfterEach
+        void tearDown() throws Exception {
+            clientConnection.close();
+            imapServer.destroy();
+        }
+
+        @Test
+        void shouldSupportPerPortAdminUsers() throws Exception {
+            clientConnection.write(ByteBuffer.wrap("a0 AUTHENTICATE PLAIN\r\n".getBytes(StandardCharsets.UTF_8)));
+            readStringUntil(clientConnection, s -> s.startsWith("+"));
+            clientConnection.write(ByteBuffer.wrap((Base64.getEncoder().encodeToString((USER2.asString() + "\0" + USER.asString() + "\0" + USER_PASS).getBytes(StandardCharsets.US_ASCII)) + "\r\n").getBytes(StandardCharsets.US_ASCII)));
+
+            String reply = readStringUntil(clientConnection, s -> s.startsWith("a0")).getLast();
+
+            assertThat(reply).startsWith("a0 OK");
         }
     }
 
@@ -1299,7 +1367,7 @@ class IMAPServerTest {
             config.addProperty("auth.oidc.oidcConfigurationURL", "https://example.com/jwks");
             config.addProperty("auth.oidc.scope", "email");
 
-            imapServer = createImapServer(config, integrationResources);
+            imapServer = createImapServer(config, integrationResources, FetchProcessor.LocalCacheConfiguration.DEFAULT);
             port = imapServer.getListenAddresses().get(0).getPort();
         }
 
@@ -1313,7 +1381,7 @@ class IMAPServerTest {
 
         @Test
         void oauthShouldSuccessWhenValidToken() throws Exception {
-            String oauthBearer = OIDCSASLHelper.generateOauthBearer(USER.asString(), OidcTokenFixture.VALID_TOKEN);
+            String oauthBearer = OIDCSASLHelper.generateEncodedOauthbearerInitialClientResponse(USER.asString(), OidcTokenFixture.VALID_TOKEN);
             IMAPSClient client = imapsClient(port);
             client.sendCommand("AUTHENTICATE OAUTHBEARER " + oauthBearer);
             assertThat(client.getReplyString()).contains("OK AUTHENTICATE completed.");
@@ -1354,9 +1422,9 @@ class IMAPServerTest {
 
         @Test
         void oauthShouldSupportOAUTH2Type() throws Exception {
-            String oauthBearer = OIDCSASLHelper.generateOauthBearer(USER.asString(), OidcTokenFixture.VALID_TOKEN);
+            String xoauth2 = OIDCSASLHelper.generateEncodedXOauth2InitialClientResponse(USER.asString(), OidcTokenFixture.VALID_TOKEN);
             IMAPSClient client = imapsClient(port);
-            client.sendCommand("AUTHENTICATE XOAUTH2 " + oauthBearer);
+            client.sendCommand("AUTHENTICATE XOAUTH2 " + xoauth2);
             assertThat(client.getReplyString()).contains("OK AUTHENTICATE completed.");
         }
 
@@ -1375,7 +1443,7 @@ class IMAPServerTest {
 
         @Test
         void shouldNotOauthWhenAuthIsReady() throws Exception {
-            String oauthBearer = OIDCSASLHelper.generateOauthBearer(USER.asString(), OidcTokenFixture.VALID_TOKEN);
+            String oauthBearer = OIDCSASLHelper.generateEncodedOauthbearerInitialClientResponse(USER.asString(), OidcTokenFixture.VALID_TOKEN);
             IMAPSClient client = imapsClient(port);
             client.sendCommand("AUTHENTICATE OAUTHBEARER " + oauthBearer);
             client.sendCommand("AUTHENTICATE OAUTHBEARER " + oauthBearer);
@@ -1384,7 +1452,7 @@ class IMAPServerTest {
 
         @Test
         void appendShouldSuccessWhenAuthenticated() throws Exception {
-            String oauthBearer = OIDCSASLHelper.generateOauthBearer(USER.asString(), OidcTokenFixture.VALID_TOKEN);
+            String oauthBearer = OIDCSASLHelper.generateEncodedOauthbearerInitialClientResponse(USER.asString(), OidcTokenFixture.VALID_TOKEN);
             IMAPSClient imapsClient = imapsClient(port);
             imapsClient.sendCommand("AUTHENTICATE OAUTHBEARER " + oauthBearer);
             imapsClient.create("INBOX");
@@ -1421,7 +1489,7 @@ class IMAPServerTest {
 
             int port = imapServer.getListenAddresses().get(0).getPort();
 
-            String oauthBearer = OIDCSASLHelper.generateOauthBearer(USER.asString(), OidcTokenFixture.VALID_TOKEN);
+            String oauthBearer = OIDCSASLHelper.generateEncodedOauthbearerInitialClientResponse(USER.asString(), OidcTokenFixture.VALID_TOKEN);
             IMAPSClient client = imapsClient(port);
             client.sendCommand("AUTHENTICATE OAUTHBEARER " + oauthBearer);
             assertThat(client.getReplyString()).contains("NO AUTHENTICATE failed.");
@@ -1448,7 +1516,7 @@ class IMAPServerTest {
 
             int port = imapServer.getListenAddresses().get(0).getPort();
 
-            String oauthBearer = OIDCSASLHelper.generateOauthBearer(USER.asString(), OidcTokenFixture.VALID_TOKEN);
+            String oauthBearer = OIDCSASLHelper.generateEncodedOauthbearerInitialClientResponse(USER.asString(), OidcTokenFixture.VALID_TOKEN);
             IMAPSClient client = imapsClient(port);
             client.sendCommand("AUTHENTICATE OAUTHBEARER " + oauthBearer);
             assertThat(client.getReplyString()).contains("OK AUTHENTICATE completed.");
@@ -1473,7 +1541,7 @@ class IMAPServerTest {
 
             int port = imapServer.getListenAddresses().get(0).getPort();
 
-            String oauthBearer = OIDCSASLHelper.generateOauthBearer(USER.asString(), OidcTokenFixture.VALID_TOKEN);
+            String oauthBearer = OIDCSASLHelper.generateEncodedOauthbearerInitialClientResponse(USER.asString(), OidcTokenFixture.VALID_TOKEN);
             IMAPSClient client = imapsClient(port);
             client.sendCommand("AUTHENTICATE OAUTHBEARER " + oauthBearer);
             assertThat(client.getReplyString()).contains("NO AUTHENTICATE processing failed.");
@@ -1500,7 +1568,7 @@ class IMAPServerTest {
 
             int port = imapServer.getListenAddresses().get(0).getPort();
 
-            String oauthBearer = OIDCSASLHelper.generateOauthBearer(USER.asString(), OidcTokenFixture.VALID_TOKEN);
+            String oauthBearer = OIDCSASLHelper.generateEncodedOauthbearerInitialClientResponse(USER.asString(), OidcTokenFixture.VALID_TOKEN);
             IMAPSClient client = imapsClient(port);
             client.sendCommand("AUTHENTICATE OAUTHBEARER " + oauthBearer);
             assertThat(client.getReplyString()).contains("OK AUTHENTICATE completed.");
@@ -1526,7 +1594,7 @@ class IMAPServerTest {
 
             int port = imapServer.getListenAddresses().get(0).getPort();
 
-            String oauthBearer = OIDCSASLHelper.generateOauthBearer(USER.asString(), OidcTokenFixture.VALID_TOKEN);
+            String oauthBearer = OIDCSASLHelper.generateEncodedOauthbearerInitialClientResponse(USER.asString(), OidcTokenFixture.VALID_TOKEN);
             IMAPSClient client = imapsClient(port);
             client.sendCommand("AUTHENTICATE OAUTHBEARER " + oauthBearer);
             assertThat(client.getReplyString()).contains("NO AUTHENTICATE processing failed.");
@@ -1534,7 +1602,7 @@ class IMAPServerTest {
 
         @Test
         void oauthShouldImpersonateFailWhenNOTDelegated() throws Exception {
-            String oauthBearer = OIDCSASLHelper.generateOauthBearer(USER3.asString(), OidcTokenFixture.VALID_TOKEN);
+            String oauthBearer = OIDCSASLHelper.generateEncodedOauthbearerInitialClientResponse(USER3.asString(), OidcTokenFixture.VALID_TOKEN);
             IMAPSClient client = imapsClient(port);
             client.sendCommand("AUTHENTICATE OAUTHBEARER " + oauthBearer);
             assertThat(client.getReplyString()).contains("NO AUTHENTICATE");
@@ -1542,7 +1610,7 @@ class IMAPServerTest {
 
         @Test
         void oauthShouldImpersonateSuccessWhenDelegated() throws Exception {
-            String oauthBearer = OIDCSASLHelper.generateOauthBearer(USER2.asString(), OidcTokenFixture.VALID_TOKEN);
+            String oauthBearer = OIDCSASLHelper.generateEncodedOauthbearerInitialClientResponse(USER2.asString(), OidcTokenFixture.VALID_TOKEN);
             IMAPSClient client = imapsClient(port);
             client.sendCommand("AUTHENTICATE OAUTHBEARER " + oauthBearer);
             assertThat(client.getReplyString()).contains("OK AUTHENTICATE completed.");
@@ -1558,7 +1626,7 @@ class IMAPServerTest {
 
             // USER1 authenticate and impersonate as USER2
             try (TestIMAPClient client = new TestIMAPClient(imapsClient(port))) {
-                String oauthBearer = OIDCSASLHelper.generateOauthBearer(USER2.asString(), OidcTokenFixture.VALID_TOKEN);
+                String oauthBearer = OIDCSASLHelper.generateEncodedOauthbearerInitialClientResponse(USER2.asString(), OidcTokenFixture.VALID_TOKEN);
                 String authenticateResponse = client.sendCommand("AUTHENTICATE OAUTHBEARER " + oauthBearer);
                 assertThat(authenticateResponse).contains("OK AUTHENTICATE completed.");
 
@@ -1659,6 +1727,174 @@ class IMAPServerTest {
         }
 
         @Test
+        void shouldConsiderCumulativeSizeForLiterals() throws Exception {
+            MailboxSession mailboxSession = memoryIntegrationResources.getMailboxManager().createSystemSession(USER);
+            memoryIntegrationResources.getMailboxManager()
+                .createMailbox(MailboxPath.inbox(USER), mailboxSession);
+
+            clientConnection.write(ByteBuffer.wrap(String.format("a0 LOGIN %s %s\r\n", USER.asString(), USER_PASS).getBytes(StandardCharsets.UTF_8)));
+            readStringUntil(clientConnection, s -> s.contains("a0 OK"));
+            clientConnection.write(ByteBuffer.wrap("a1 SELECT INBOX\r\n".getBytes(StandardCharsets.UTF_8)));
+            readStringUntil(clientConnection, s -> s.contains("a1 OK"));
+
+
+            String literal = "a".repeat(32 * 1024); // 32 KB
+            clientConnection.write(ByteBuffer.wrap(("a2 SEARCH CHARSET UTF-8 TO {" + literal.length() + "+}\r\n").getBytes(StandardCharsets.UTF_8)));
+
+            assertThatThrownBy(() -> {
+                    for (int i = 0; i < 7000; i++) {
+                        clientConnection.write(ByteBuffer.wrap((literal + " TO {" + literal.length() + "+}\r\n").getBytes(StandardCharsets.UTF_8)));
+                    }
+                    clientConnection.write(ByteBuffer.wrap((literal + " ALL\r\n").getBytes(StandardCharsets.UTF_8)));
+                }).isInstanceOf(IOException.class);
+        }
+
+        @Test
+        void shouldRejectTooManyLiterals() throws Exception {
+            MailboxSession mailboxSession = memoryIntegrationResources.getMailboxManager().createSystemSession(USER);
+            memoryIntegrationResources.getMailboxManager()
+                .createMailbox(MailboxPath.inbox(USER), mailboxSession);
+
+            clientConnection.write(ByteBuffer.wrap(String.format("a0 LOGIN %s %s\r\n", USER.asString(), USER_PASS).getBytes(StandardCharsets.UTF_8)));
+            readStringUntil(clientConnection, s -> s.contains("a0 OK"));
+            clientConnection.write(ByteBuffer.wrap("a1 SELECT INBOX\r\n".getBytes(StandardCharsets.UTF_8)));
+            readStringUntil(clientConnection, s -> s.contains("a1 OK"));
+
+
+            String literal = "a";
+            clientConnection.write(ByteBuffer.wrap(("a2 SEARCH CHARSET UTF-8 TO {" + literal.length() + "+}\r\n").getBytes(StandardCharsets.UTF_8)));
+
+            try {
+                for (int i = 0; i < 7000; i++) {
+                    clientConnection.write(ByteBuffer.wrap((literal + " TO {" + literal.length() + "+}\r\n").getBytes(StandardCharsets.UTF_8)));
+                }
+                clientConnection.write(ByteBuffer.wrap((literal + " ALL\r\n").getBytes(StandardCharsets.UTF_8)));
+            } catch (IOException e) {
+                // ignore
+            }
+            readStringUntil(clientConnection, s -> s.contains(("a2 BAD ")));
+        }
+
+        @Test
+        void shouldRejectLongLineAfterLiteral() throws Exception {
+            MailboxSession mailboxSession = memoryIntegrationResources.getMailboxManager().createSystemSession(USER);
+            memoryIntegrationResources.getMailboxManager()
+                .createMailbox(MailboxPath.inbox(USER), mailboxSession);
+
+            clientConnection.write(ByteBuffer.wrap(String.format("a0 LOGIN %s %s\r\n", USER.asString(), USER_PASS).getBytes(StandardCharsets.UTF_8)));
+            readStringUntil(clientConnection, s -> s.contains("a0 OK"));
+            clientConnection.write(ByteBuffer.wrap("a1 SELECT INBOX\r\n".getBytes(StandardCharsets.UTF_8)));
+            readStringUntil(clientConnection, s -> s.contains("a1 OK"));
+
+            String litteral = "a".repeat(8);
+            clientConnection.write(ByteBuffer.wrap(("a2 SEARCH CHARSET UTF-8 TO {" + litteral.length() + "+}\r\n").getBytes(StandardCharsets.UTF_8)));
+            String longLine = " ALL".repeat(1024 * 1024);
+            clientConnection.write(ByteBuffer.wrap((litteral + longLine + "\r\n").getBytes(StandardCharsets.UTF_8)));
+
+            readStringUntil(clientConnection, s -> s.contains(("a2 BAD ")));
+        }
+
+        @Test
+        void passing2literalOnDifferentNetworkPackage() throws Exception {
+            MailboxSession mailboxSession = memoryIntegrationResources.getMailboxManager().createSystemSession(USER);
+            memoryIntegrationResources.getMailboxManager()
+                .createMailbox(MailboxPath.inbox(USER), mailboxSession);
+
+            clientConnection.write(ByteBuffer.wrap(String.format("a0 LOGIN %s %s\r\n", USER.asString(), USER_PASS).getBytes(StandardCharsets.UTF_8)));
+            readStringUntil(clientConnection, s -> s.contains("a0 OK"));
+            clientConnection.write(ByteBuffer.wrap("a1 SELECT INBOX\r\n".getBytes(StandardCharsets.UTF_8)));
+            readStringUntil(clientConnection, s -> s.contains("a1 OK"));
+
+            String literal = "a".repeat(20);
+            clientConnection.write(ByteBuffer.wrap(("a2 SEARCH CHARSET UTF-8 TO {" + literal.length() + "+}\r\n").getBytes()));
+            clientConnection.write(ByteBuffer.wrap((literal + " TO {" + literal.length() + "+}\r\n").getBytes()));
+            clientConnection.write(ByteBuffer.wrap((literal + " ALL\r\n").getBytes()));
+
+            readStringUntil(clientConnection, s -> s.contains(("a2 OK ")));
+        }
+
+        @Test
+        void passing2literalOnSameNetworkPackage() throws Exception {
+            MailboxSession mailboxSession = memoryIntegrationResources.getMailboxManager().createSystemSession(USER);
+            memoryIntegrationResources.getMailboxManager()
+                .createMailbox(MailboxPath.inbox(USER), mailboxSession);
+
+            clientConnection.write(ByteBuffer.wrap(String.format("a0 LOGIN %s %s\r\n", USER.asString(), USER_PASS).getBytes(StandardCharsets.UTF_8)));
+            readStringUntil(clientConnection, s -> s.contains("a0 OK"));
+            clientConnection.write(ByteBuffer.wrap("a1 SELECT INBOX\r\n".getBytes(StandardCharsets.UTF_8)));
+            readStringUntil(clientConnection, s -> s.contains("a1 OK"));
+
+            String literal = "a".repeat(16);
+            String s1 = "a2 SEARCH CHARSET UTF-8 TO {" + literal.length() + "+}\r\n" +
+                literal + " TO {" + literal.length() + "+}\r\n" + literal + " ALL\r\n";
+            clientConnection.write(ByteBuffer.wrap(s1.getBytes()));
+
+            readStringUntil(clientConnection, s -> s.contains(("a2 OK ")));
+        }
+
+        @Test
+        void passing2literalOnSameNetworkPackageWhenMoreThan16Chars() throws Exception {
+            MailboxSession mailboxSession = memoryIntegrationResources.getMailboxManager().createSystemSession(USER);
+            memoryIntegrationResources.getMailboxManager()
+                .createMailbox(MailboxPath.inbox(USER), mailboxSession);
+
+            clientConnection.write(ByteBuffer.wrap(String.format("a0 LOGIN %s %s\r\n", USER.asString(), USER_PASS).getBytes(StandardCharsets.UTF_8)));
+            readStringUntil(clientConnection, s -> s.contains("a0 OK"));
+            clientConnection.write(ByteBuffer.wrap("a1 SELECT INBOX\r\n".getBytes(StandardCharsets.UTF_8)));
+            readStringUntil(clientConnection, s -> s.contains("a1 OK"));
+
+            String literal = "a".repeat(17);
+            String s1 = "a2 SEARCH CHARSET UTF-8 TO {" + literal.length() + "+}\r\n" +
+                literal + " TO {" + literal.length() + "+}\r\n" + literal + " ALL\r\n";
+            clientConnection.write(ByteBuffer.wrap(s1.getBytes()));
+
+            readStringUntil(clientConnection, s -> s.contains(("a2 OK ")));
+        }
+
+        @Disabled("JAMES-4043 Multiple literals and file literals are buggy")
+        @Test
+        void shouldAcceptSeveralFileLiteral() throws Exception {
+            MailboxSession mailboxSession = memoryIntegrationResources.getMailboxManager().createSystemSession(USER);
+            memoryIntegrationResources.getMailboxManager()
+                .createMailbox(MailboxPath.inbox(USER), mailboxSession);
+
+            clientConnection.write(ByteBuffer.wrap(String.format("a0 LOGIN %s %s\r\n", USER.asString(), USER_PASS).getBytes(StandardCharsets.UTF_8)));
+            readStringUntil(clientConnection, s -> s.contains("a0 OK"));
+            clientConnection.write(ByteBuffer.wrap("a1 SELECT INBOX\r\n".getBytes(StandardCharsets.UTF_8)));
+            readStringUntil(clientConnection, s -> s.contains("a1 OK"));
+
+            String litteral = "a".repeat(72 * 1024);
+            clientConnection.write(ByteBuffer.wrap(("a2 SEARCH CHARSET UTF-8 TO {" + litteral.length() + "+}\r\n").getBytes()));
+            clientConnection.write(ByteBuffer.wrap((litteral + " TO {2+}\r\n").getBytes()));
+            clientConnection.write(ByteBuffer.wrap(("aa ALL\r\n").getBytes()));
+
+            readStringUntil(clientConnection, s -> s.contains(("a2 OK ")));
+        }
+
+        @Test
+        void shouldRejectLongLineAfterLiteralWhenLogin() throws Exception {
+            MailboxSession mailboxSession = memoryIntegrationResources.getMailboxManager().createSystemSession(USER);
+            memoryIntegrationResources.getMailboxManager()
+                .createMailbox(MailboxPath.inbox(USER), mailboxSession);
+
+            clientConnection.write(ByteBuffer.wrap(("a0 LOGIN {" + USER.asString().length() + "+}\r\n").getBytes(StandardCharsets.UTF_8)));
+            clientConnection.write(ByteBuffer.wrap((USER.asString() + " " + "0123456789".repeat(1024 * 1024)).getBytes()));
+            readStringUntil(clientConnection, s -> s.contains("a0 BAD"));
+        }
+
+        @Test
+        void shouldRejectLongLiteralsWhenUnauthenticated() throws Exception {
+            MailboxSession mailboxSession = memoryIntegrationResources.getMailboxManager().createSystemSession(USER);
+            memoryIntegrationResources.getMailboxManager()
+                .createMailbox(MailboxPath.inbox(USER), mailboxSession);
+
+            clientConnection.write(ByteBuffer.wrap(("a0 LOGIN " + USER.asString() + " {" + (10 * 1024) + "+}\r\n").getBytes(StandardCharsets.UTF_8)));
+            clientConnection.write(ByteBuffer.wrap(("0123456789".repeat(1024) + " \r\n").getBytes()));
+
+            readStringUntil(clientConnection, s -> s.contains(("a0 BAD ")));
+        }
+
+        @Test
         void searchingShouldSupportMultipleUTF8Criteria() throws Exception {
             String host = "127.0.0.1";
             Properties props = new Properties();
@@ -1671,9 +1907,9 @@ class IMAPServerTest {
 
             SearchTerm subjectTerm = new SubjectTerm("java培训");
             SearchTerm fromTerm = new FromStringTerm("采购");
-            SearchTerm recipientTerm = new RecipientStringTerm(Message.RecipientType.TO,"张三");
-            SearchTerm ccRecipientTerm = new RecipientStringTerm(Message.RecipientType.CC,"李四");
-            SearchTerm bccRecipientTerm = new RecipientStringTerm(Message.RecipientType.BCC,"王五");
+            SearchTerm recipientTerm = new RecipientStringTerm(Message.RecipientType.TO, "张三");
+            SearchTerm ccRecipientTerm = new RecipientStringTerm(Message.RecipientType.CC, "李四");
+            SearchTerm bccRecipientTerm = new RecipientStringTerm(Message.RecipientType.BCC, "王五");
             SearchTerm bodyTerm = new BodyTerm("天天向上");
             SearchTerm[] searchTerms = new SearchTerm[6];
             searchTerms[0] = subjectTerm;
@@ -1745,7 +1981,7 @@ class IMAPServerTest {
             inbox = memoryIntegrationResources.getMailboxManager().getMailbox(MailboxPath.inbox(USER), mailboxSession);
 
             SSLContext ctx = SSLContext.getInstance("TLS");
-            ctx.init(null, new TrustManager[] { new BlindTrustManager() }, null);
+            ctx.init(null, new TrustManager[]{new BlindTrustManager()}, null);
             clientConnection = ctx.getSocketFactory().createSocket();
             clientConnection.connect(new InetSocketAddress(LOCALHOST_IP, port));
             byte[] buffer = new byte[8193];
@@ -1893,7 +2129,7 @@ class IMAPServerTest {
             inbox = memoryIntegrationResources.getMailboxManager().getMailbox(MailboxPath.inbox(USER), mailboxSession);
 
             SSLContext ctx = SSLContext.getInstance("TLS");
-            ctx.init(null, new TrustManager[] { new BlindTrustManager() }, null);
+            ctx.init(null, new TrustManager[]{new BlindTrustManager()}, null);
             clientConnection = ctx.getSocketFactory().createSocket();
             clientConnection.connect(new InetSocketAddress(LOCALHOST_IP, port));
             byte[] buffer = new byte[8193];
@@ -1940,7 +2176,7 @@ class IMAPServerTest {
                 .createMailbox(MailboxPath.inbox(USER), mailboxSession);
 
             connection = TcpClient.create()
-                .secure(ssl -> ssl.sslContext(SslContextBuilder.forClient().trustManager(new BlindTrustManager())))
+                .secure(Throwing.consumer(ssl -> ssl.sslContext(SslContextBuilder.forClient().trustManager(new BlindTrustManager()).build())))
                 .remoteAddress(() -> new InetSocketAddress(LOCALHOST_IP, port))
                 .connectNow();
             responses = new ConcurrentLinkedDeque<>();
@@ -2027,6 +2263,63 @@ class IMAPServerTest {
         }
 
         @Test
+        void idleShouldBeAllowedWhenAuthenticatedState() throws Exception {
+            // Given an authenticated user
+            clientConnection.write(ByteBuffer.wrap(String.format("a0 LOGIN %s %s\r\n", USER.asString(), USER_PASS).getBytes(StandardCharsets.UTF_8)));
+            readBytes(clientConnection);
+
+            // When IDLE command is issued (Authenticated state)
+            clientConnection.write(ByteBuffer.wrap(("a3 IDLE\r\n").getBytes(StandardCharsets.UTF_8)));
+
+            // Then the server should respond Idling response
+            Awaitility.await().atMost(Duration.ofSeconds(2)).untilAsserted(() ->
+                assertThat(readStringUntil(clientConnection, s -> s.contains("+ Idling")))
+                    .isNotNull());
+        }
+
+        @Test
+        void idleShouldDoNothingResponseWhenAuthenticatedStateAndHasNewMessages() throws Exception {
+            // Given an authenticated user
+            clientConnection.write(ByteBuffer.wrap(String.format("a0 LOGIN %s %s\r\n", USER.asString(), USER_PASS).getBytes(StandardCharsets.UTF_8)));
+            readBytes(clientConnection);
+
+            // When IDLE command is issued (Authenticated state)
+            clientConnection.write(ByteBuffer.wrap(("a3 IDLE\r\n").getBytes(StandardCharsets.UTF_8)));
+            readStringUntil(clientConnection, s -> s.contains("+ Idling"));
+
+            // And a new message is appended
+            inbox.appendMessage(MessageManager.AppendCommand.builder().build("h: value\r\n\r\nbody".getBytes()), mailboxSession);
+
+            ImmutableList.Builder<String> listenerResult = ImmutableList.builder();
+            Mono.fromCallable(() -> new String(readBytes(clientConnection), StandardCharsets.US_ASCII))
+                .doOnNext(listenerResult::add)
+                .subscribeOn(Schedulers.boundedElastic()).subscribe();
+
+            Thread.sleep(200);
+            // Then the server should not send any response
+            assertThat(listenerResult.build()).isEmpty();
+        }
+
+        @Test
+        void idleShouldBeInterruptibleWhenAuthenticatedState() throws Exception {
+            // Given an authenticated user
+            clientConnection.write(ByteBuffer.wrap(String.format("a0 LOGIN %s %s\r\n", USER.asString(), USER_PASS).getBytes(StandardCharsets.UTF_8)));
+            readBytes(clientConnection);
+
+            // When IDLE command is issued (Authenticated state)
+            clientConnection.write(ByteBuffer.wrap(("a3 IDLE\r\n").getBytes(StandardCharsets.UTF_8)));
+            readStringUntil(clientConnection, s -> s.contains("+ Idling"));
+
+            // And DONE command is issued
+            clientConnection.write(ByteBuffer.wrap(("DONE\r\n").getBytes(StandardCharsets.UTF_8)));
+
+            // Then the server should respond IDLE completed
+            Awaitility.await().atMost(Duration.ofSeconds(2)).untilAsserted(() ->
+                assertThat(readStringUntil(clientConnection, s -> s.contains("a3 OK IDLE completed.")))
+                    .isNotNull());
+        }
+
+        @Test
         void idleShouldSendInitialContinuation() throws Exception {
             clientConnection.write(ByteBuffer.wrap(String.format("a0 LOGIN %s %s\r\n", USER.asString(), USER_PASS).getBytes(StandardCharsets.UTF_8)));
             readBytes(clientConnection);
@@ -2039,7 +2332,7 @@ class IMAPServerTest {
 
             Awaitility.await().atMost(Duration.ofSeconds(2)).untilAsserted(() ->
                 assertThat(readStringUntil(clientConnection, s -> s.contains("+ Idling")))
-                .isNotNull());
+                    .isNotNull());
         }
 
         @Test
@@ -2123,7 +2416,7 @@ class IMAPServerTest {
 
             Awaitility.await().atMost(Duration.ofSeconds(2)).untilAsserted(() ->
                 assertThat(readStringUntil(clientConnection, s -> s.contains("* 1 EXISTS")))
-                .isNotNull());
+                    .isNotNull());
         }
     }
 
@@ -2459,11 +2752,12 @@ class IMAPServerTest {
         private MailboxSession mailboxSession;
         private MessageManager inbox;
         private SocketChannel clientConnection;
+        private int port;
 
         @BeforeEach
         void beforeEach() throws Exception {
             imapServer = createImapServer("imapServer.xml");
-            int port = imapServer.getListenAddresses().get(0).getPort();
+            port = imapServer.getListenAddresses().get(0).getPort();
             mailboxSession = memoryIntegrationResources.getMailboxManager().createSystemSession(USER);
             memoryIntegrationResources.getMailboxManager()
                 .createMailbox(MailboxPath.inbox(USER), mailboxSession);
@@ -2494,6 +2788,28 @@ class IMAPServerTest {
                 .sendCommand("COMPRESS DEFLATE");
 
             assertThat(reply).contains("AAAB BAD COMPRESS failed. Unknown command.");
+        }
+
+        @Test
+        void linearizerShouldBeUsableConcurrently() throws Exception {
+            ConcurrentTestRunner.builder()
+                .operation((a, b) ->  {
+                    SocketChannel clientConnection = SocketChannel.open();
+                    clientConnection.connect(new InetSocketAddress(LOCALHOST_IP, port));
+                    readBytes(clientConnection);
+
+                    clientConnection.write(ByteBuffer.wrap(String.format("a0 LOGIN %s %s\r\n", USER.asString(), USER_PASS).getBytes(StandardCharsets.UTF_8)));
+                    readBytes(clientConnection);
+
+                    for (int i = 0; i < 100; i++) {
+                        clientConnection.write(ByteBuffer.wrap("a0 SELECT INBOX\r\na0 UNSELECT\r\n".getBytes()));
+                    }
+                    clientConnection.write(ByteBuffer.wrap("a1 NOOP\r\n".getBytes()));
+
+                    readStringUntil(clientConnection, s -> s.contains("a1 OK"));
+                }).threadCount(32)
+                .operationCount(1)
+                .runSuccessfullyWithin(Duration.ofMinutes(10));
         }
 
         @Test
@@ -2534,7 +2850,6 @@ class IMAPServerTest {
             readStringUntil(clientConnection, s -> s.contains("A1 OK [READ-WRITE] SELECT completed."));
             clientConnection.write(ByteBuffer.wrap(("A2 UID FETCH 1:500 (BODY[])\r\n").getBytes(StandardCharsets.UTF_8)));
 
-            Thread.sleep(1000);
 
             assertThat(loaded.get()).isLessThan(500);
             readStringUntil(clientConnection, s -> s.contains("A2 OK FETCH completed."));
@@ -2819,8 +3134,8 @@ class IMAPServerTest {
                 .getMailboxEntity().getUidValidity();
 
             inbox.delete(ImmutableList.of(MessageUid.of(10), MessageUid.of(11), MessageUid.of(12),
-                    MessageUid.of(25), MessageUid.of(26),
-                    MessageUid.of(32)), mailboxSession);
+                MessageUid.of(25), MessageUid.of(26),
+                MessageUid.of(32)), mailboxSession);
 
             clientConnection.write(ByteBuffer.wrap(String.format("a0 LOGIN %s %s\r\n", USER.asString(), USER_PASS).getBytes(StandardCharsets.UTF_8)));
             readBytes(clientConnection);
@@ -2846,8 +3161,8 @@ class IMAPServerTest {
                 .getMailboxEntity().getUidValidity();
 
             inbox.delete(ImmutableList.of(MessageUid.of(10), MessageUid.of(11), MessageUid.of(12),
-                    MessageUid.of(25), MessageUid.of(26),
-                    MessageUid.of(32)), mailboxSession);
+                MessageUid.of(25), MessageUid.of(26),
+                MessageUid.of(32)), mailboxSession);
 
             clientConnection.write(ByteBuffer.wrap(String.format("a0 LOGIN %s %s\r\n", USER.asString(), USER_PASS).getBytes(StandardCharsets.UTF_8)));
             readBytes(clientConnection);
@@ -3153,4 +3468,167 @@ class IMAPServerTest {
             return client;
         }
     }
+
+    @Nested
+    class PlainAuthenticateThenAnotherCommand {
+        IMAPServer imapServer;
+        int port;
+
+        @BeforeEach
+        void setup() throws Exception {
+            imapServer = createImapServer("imapServer.xml");
+            port = imapServer.getListenAddresses().get(0).getPort();
+        }
+
+        @AfterEach
+        void tearDown() {
+            if (imapServer != null) {
+                imapServer.destroy();
+            }
+        }
+
+        @Test
+        void authenticateShouldOnlyConsumeAuthDataCommandNotTheNextCommand() throws Exception {
+            ConcurrentTestRunner.builder()
+                    .operation((threadNumber, step) -> {
+                        AuthenticatingIMAPClient imapClient = new AuthenticatingIMAPClient();
+                        imapClient.connect("127.0.0.1", port);
+                        assertThat(imapClient.authenticate(AuthenticatingIMAPClient.AUTH_METHOD.PLAIN, USER.asString(),
+                                USER_PASS)).isTrue();
+                        assertThat(imapClient.logout()).isTrue();
+                        imapClient.disconnect();
+                    })
+                    .threadCount(10)
+                    .operationCount(200)
+                    .runSuccessfullyWithin(Duration.ofMinutes(10));
+        }
+    }
+    
+    @Nested
+    class IDCommandTest {
+        IMAPServer imapServer;
+
+        @AfterEach
+        void tearDown() {
+            if (imapServer != null) {   
+                imapServer.destroy();
+            }
+        }
+
+        @Test
+        void idCommandShouldReturnNILWhenNoConfigured() throws Exception {
+            imapServer = createImapServer("imapServer.xml");
+
+            assertThat(
+                testIMAPClient.connect("127.0.0.1", imapServer.getListenAddresses().getFirst().getPort())
+                    .sendCommand("ID (\"name\" \"Apache James\")"))
+                .contains("* ID NIL")
+                .contains("OK ID completed.");
+        }
+
+        @Test
+        void idCommandShouldReturnConfiguredResponse() throws Exception {
+            imapServer = createImapServer("imapServerIdCommandResponseFields.xml");
+            assertThat(
+                testIMAPClient.connect("127.0.0.1", imapServer.getListenAddresses().getFirst().getPort())
+                    .sendCommand("ID (\"name\" \"Apache James\")"))
+                .contains("* ID (\"name\" \"Apache James\" \"version\" \"3.9.0\")")
+                .contains("OK ID completed.");
+        }
+
+        @Test
+        void concurrentIdCommandsInTheSameSessionShouldSucceed() throws Exception {
+            imapServer = createImapServer("imapServer.xml");
+
+            testIMAPClient.connect("127.0.0.1", imapServer.getListenAddresses().getFirst().getPort());
+            ConcurrentTestRunner.builder()
+                .operation((threadNumber, step) -> {
+                    assertThat(testIMAPClient.sendCommand("ID (\"name\" \"Apache James\")"))
+                        .contains("* ID NIL")
+                        .contains("OK ID completed.");
+                })
+                .threadCount(20)
+                .operationCount(1)
+                .runSuccessfullyWithin(Duration.ofMinutes(5));
+        }
+    }
+
+    @Nested
+    class RenameMailboxTest {
+        IMAPServer imapServer;
+        private int port;
+
+        @BeforeEach
+        void beforeEach() throws Exception {
+            imapServer = createImapServer("imapServer.xml");
+            port = imapServer.getListenAddresses().get(0).getPort();
+            MailboxSession mailboxSession = memoryIntegrationResources.getMailboxManager().createSystemSession(USER);
+            memoryIntegrationResources.getMailboxManager()
+                .createMailbox(MailboxPath.forUser(USER, "mailbox1"), mailboxSession);
+            memoryIntegrationResources.getMailboxManager()
+                .createMailbox(MailboxPath.forUser(USER, "mailbox2"), mailboxSession);
+        }
+
+        @AfterEach
+        void tearDown() {
+            imapServer.destroy();
+        }
+
+        @Test
+        void renameShouldFailWhenTargetMailboxAlreadyExists() throws Exception {
+            testIMAPClient.connect("127.0.0.1", port)
+                .login(USER.asString(), USER_PASS);
+
+            String response = testIMAPClient.sendCommand("RENAME mailbox1 mailbox2");
+
+            assertThat(response).contains("NO RENAME failed. Mailbox already exists.");
+        }
+
+        @Test
+        void renameShouldFailWhenRequestedMailboxDoesNotExist() throws Exception {
+            testIMAPClient.connect("127.0.0.1", port)
+                .login(USER.asString(), USER_PASS);
+
+            String response = testIMAPClient.sendCommand("RENAME nonExistingMailbox newMailboxName");
+
+            assertThat(response).contains("NO RENAME failed. Mailbox not found.");
+        }
+
+        @Test
+        void renameShouldFailWhenInsufficientRightsOnSharedMailbox() throws Exception {
+            // Create a mailbox for another user
+            memoryIntegrationResources.getMailboxManager()
+                .createMailbox(MailboxPath.forUser(USER2, "sharedMailbox.child1"),
+                    memoryIntegrationResources.getMailboxManager().createSystemSession(USER2));
+
+            // Ensure the current user does not have the "delete mailbox" right on the shared mailbox
+            memoryIntegrationResources.getMailboxManager()
+                .applyRightsCommand(MailboxPath.forUser(USER2, "sharedMailbox"),
+                    MailboxACL.command()
+                        .forUser(USER)
+                        .rights(MailboxACL.Right.Lookup, MailboxACL.Right.Read, MailboxACL.Right.Insert,
+                            MailboxACL.Right.CreateMailbox,
+                            MailboxACL.Right.Administer, MailboxACL.Right.Write)
+                        .asAddition(),
+                    memoryIntegrationResources.getMailboxManager().createSystemSession(USER2));
+            memoryIntegrationResources.getMailboxManager()
+                .applyRightsCommand(MailboxPath.forUser(USER2, "sharedMailbox.child1"),
+                    MailboxACL.command()
+                        .forUser(USER)
+                        .rights(MailboxACL.Right.Lookup, MailboxACL.Right.Read, MailboxACL.Right.Insert,
+                            MailboxACL.Right.CreateMailbox,
+                            MailboxACL.Right.Administer, MailboxACL.Right.Write)
+                        .asAddition(),
+                    memoryIntegrationResources.getMailboxManager().createSystemSession(USER2));
+
+            // Connect and attempt to rename the shared mailbox
+            testIMAPClient.connect("127.0.0.1", port)
+                .login(USER.asString(), USER_PASS);
+            String response = testIMAPClient.sendCommand("RENAME #user.bobo.sharedMailbox.child1 #user.bobo.sharedMailbox.newChild");
+
+            // Assert that the operation fails due to insufficient rights
+            assertThat(response).contains("NO RENAME failed. Insufficient rights.");
+        }
+    }
+
 }

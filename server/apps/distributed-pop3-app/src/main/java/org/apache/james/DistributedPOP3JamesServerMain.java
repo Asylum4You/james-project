@@ -23,6 +23,7 @@ import java.util.Set;
 
 import org.apache.james.data.UsersRepositoryModuleChooser;
 import org.apache.james.eventsourcing.eventstore.EventNestedTypes;
+import org.apache.james.jmap.JMAPModule;
 import org.apache.james.json.DTO;
 import org.apache.james.json.DTOModule;
 import org.apache.james.mailbox.NoACLMapper;
@@ -38,6 +39,7 @@ import org.apache.james.modules.CassandraConsistencyTaskSerializationModule;
 import org.apache.james.modules.DistributedPop3Module;
 import org.apache.james.modules.DistributedTaskManagerModule;
 import org.apache.james.modules.DistributedTaskSerializationModule;
+import org.apache.james.modules.LegacyEncryptionModule;
 import org.apache.james.modules.MailboxModule;
 import org.apache.james.modules.MailetProcessingModule;
 import org.apache.james.modules.Pop3FixInconsistenciesWebAdminModule;
@@ -55,11 +57,11 @@ import org.apache.james.modules.data.CassandraSieveQuotaModule;
 import org.apache.james.modules.data.CassandraSieveRepositoryModule;
 import org.apache.james.modules.data.CassandraUsersRepositoryModule;
 import org.apache.james.modules.data.CassandraVacationModule;
+import org.apache.james.modules.event.ContentDeletionEventBusModule;
 import org.apache.james.modules.event.JMAPEventBusModule;
-import org.apache.james.modules.event.RabbitMQEventBusModule;
+import org.apache.james.modules.event.MailboxEventBusModule;
 import org.apache.james.modules.eventstore.CassandraEventStoreModule;
 import org.apache.james.modules.mailbox.CassandraBlobStoreDependenciesModule;
-import org.apache.james.modules.mailbox.CassandraDeletedMessageVaultModule;
 import org.apache.james.modules.mailbox.CassandraMailboxModule;
 import org.apache.james.modules.mailbox.CassandraMailboxQuotaLegacyModule;
 import org.apache.james.modules.mailbox.CassandraMailboxQuotaModule;
@@ -125,8 +127,10 @@ public class DistributedPOP3JamesServerMain implements JamesServerMain {
         new UserIdentityModule());
 
     public static final Module PROTOCOLS = Modules.combine(
+        new LegacyEncryptionModule(),
         new LMTPServerModule(),
         new JMAPServerModule(),
+        JMAPModule.INSTANCE,
         new JMAPEventBusModule(),
         new ManageSieveServerModule(),
         new POP3ServerModule(),
@@ -173,7 +177,8 @@ public class DistributedPOP3JamesServerMain implements JamesServerMain {
         .with(new RabbitMQModule(),
             new RabbitMQMailQueueModule(),
             new RabbitMailQueueRoutesModule(),
-            new RabbitMQEventBusModule(),
+            new MailboxEventBusModule(),
+            new ContentDeletionEventBusModule(),
             new DistributedTaskSerializationModule());
 
     public static void main(String[] args) throws Exception {
@@ -217,15 +222,10 @@ public class DistributedPOP3JamesServerMain implements JamesServerMain {
     }
 
     private static Module chooseDeletedMessageVault(VaultConfiguration vaultConfiguration) {
-        if (vaultConfiguration.isEnabled() && vaultConfiguration.isWorkQueueEnabled()) {
-            return Modules.combine(
-                new DistributedDeletedMessageVaultModule(),
-                new DeletedMessageVaultRoutesModule());
-        }
         if (vaultConfiguration.isEnabled()) {
             return Modules.combine(
                 new DistributedDeletedMessageVaultModule(),
-                new CassandraDeletedMessageVaultModule());
+                new DeletedMessageVaultRoutesModule());
         }
         return binder -> {
 

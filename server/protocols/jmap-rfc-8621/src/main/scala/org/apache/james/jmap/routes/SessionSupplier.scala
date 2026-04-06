@@ -25,14 +25,15 @@ import cats.instances.list._
 import jakarta.inject.Inject
 import org.apache.james.core.Username
 import org.apache.james.jmap.core.CapabilityIdentifier.CapabilityIdentifier
-import org.apache.james.jmap.core.{Account, AccountId, Capabilities, Capability, CapabilityFactory, IsPersonal, IsReadOnly, Session, URL, UrlPrefixes}
+import org.apache.james.jmap.core.{Account, AccountId, Capabilities, Capability, CapabilityFactory, IsPersonal, IsReadOnly, JmapRfc8621Configuration, Session, URL, UrlPrefixes}
+import reactor.core.scala.publisher.{SFlux, SMono}
 
 import scala.jdk.CollectionConverters._
 
-class SessionSupplier(capabilityFactories: Set[CapabilityFactory]) {
+class SessionSupplier(capabilityFactories: Set[CapabilityFactory], configuration: JmapRfc8621Configuration) {
   @Inject
-  def this(defaultCapabilities: java.util.Set[CapabilityFactory]) = {
-    this(defaultCapabilities.asScala.toSet)
+  def this(defaultCapabilities: java.util.Set[CapabilityFactory], configuration: JmapRfc8621Configuration) = {
+    this(defaultCapabilities.asScala.toSet, configuration)
   }
 
   def validate(username: Username, accountId: AccountId): Boolean = AccountId.from(username)
@@ -40,14 +41,13 @@ class SessionSupplier(capabilityFactories: Set[CapabilityFactory]) {
     .toOption
     .getOrElse(false)
 
-  def generate(username: Username, delegatedUsers: Set[Username], urlPrefixes: UrlPrefixes): Either[IllegalArgumentException, Session] = {
+  def generate(username: Username, delegatedUsers: Set[Username], urlPrefixes: UrlPrefixes): SMono[Session] = {
     val urlEndpointResolver: JmapUrlEndpointResolver = new JmapUrlEndpointResolver(urlPrefixes)
-    val capabilities: Set[Capability] = capabilityFactories
-      .map(cf => cf.create(urlPrefixes))
 
     for {
-      account <- accounts(username, capabilities)
-      delegatedAccounts <- delegatedAccounts(delegatedUsers, capabilities)
+      capabilities <- evaluateCapabilities(username, urlPrefixes)
+      account <- SMono.fromTry(accounts(username, capabilities).toTry)
+      delegatedAccounts <- SMono.fromTry(delegatedAccounts(delegatedUsers, capabilities).toTry)
     } yield {
       Session(
         Capabilities(capabilities),
@@ -60,6 +60,13 @@ class SessionSupplier(capabilityFactories: Set[CapabilityFactory]) {
         eventSourceUrl = urlEndpointResolver.eventSourceUrl)
     }
   }
+
+  private def evaluateCapabilities(username: Username, urlPrefixes: UrlPrefixes): SMono[Set[Capability]] =
+    SFlux.fromIterable(capabilityFactories)
+      .flatMap(capabilityFactory => SMono.fromPublisher(capabilityFactory.createReactive(urlPrefixes, username)))
+      .filter(capability => !configuration.disabledCapabilities.contains(capability.identifier()))
+      .collectSeq()
+      .map(_.toSet)
 
   private def accounts(username: Username, capabilities: Set[Capability]): Either[IllegalArgumentException, Account] =
     Account.from(username, IsPersonal(true), IsReadOnly(false), capabilities)
