@@ -43,10 +43,15 @@ import org.apache.james.mailbox.store.mail.model.MailboxMessage;
 import org.apache.james.mailbox.store.mail.model.MimeMessageId;
 import org.apache.james.mailbox.store.mail.model.Subject;
 import org.apache.james.mailbox.store.mail.model.impl.MessageParser;
-import org.apache.james.mailbox.store.mail.model.impl.PropertyBuilder;
 import org.apache.james.mailbox.store.mail.utils.MimeMessageHeadersUtil;
+import org.apache.james.mime4j.codec.DecodeMonitor;
 import org.apache.james.mime4j.dom.Message;
+import org.apache.james.mime4j.dom.field.ContentDispositionField;
+import org.apache.james.mime4j.dom.field.ContentTypeField;
+import org.apache.james.mime4j.field.ContentDispositionFieldLenientImpl;
+import org.apache.james.mime4j.field.ContentTypeFieldLenientImpl;
 import org.apache.james.mime4j.message.HeaderImpl;
+import org.apache.james.mime4j.stream.Field;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -64,7 +69,7 @@ public interface MessageStorer {
      * <p>
      * Otherwize an empty optional will be returned on the right side of the pair.
      */
-    Mono<Pair<MessageMetaData, Optional<List<MessageAttachmentMetadata>>>> appendMessageToStore(Mailbox mailbox, Date internalDate, int size, int bodyStartOctet, Content content, Flags flags, PropertyBuilder propertyBuilder, Optional<Message> maybeMessage, MailboxSession session, HeaderImpl headers) throws MailboxException;
+    Mono<Pair<MessageMetaData, Optional<List<MessageAttachmentMetadata>>>> appendMessageToStore(Mailbox mailbox, Date internalDate, int size, int bodyStartOctet, Content content, Flags flags, Optional<Message> maybeMessage, MailboxSession session, HeaderImpl headers) throws MailboxException;
 
     /**
      * MessageStorer parsing, storing and returning AttachmentMetadata
@@ -95,7 +100,7 @@ public interface MessageStorer {
         }
 
         @Override
-        public Mono<Pair<MessageMetaData, Optional<List<MessageAttachmentMetadata>>>> appendMessageToStore(Mailbox mailbox, Date internalDate, int size, int bodyStartOctet, Content content, Flags flags, PropertyBuilder propertyBuilder, Optional<Message> maybeMessage, MailboxSession session, HeaderImpl headers) {
+        public Mono<Pair<MessageMetaData, Optional<List<MessageAttachmentMetadata>>>> appendMessageToStore(Mailbox mailbox, Date internalDate, int size, int bodyStartOctet, Content content, Flags flags, Optional<Message> maybeMessage, MailboxSession session, HeaderImpl headers) {
             MessageMapper messageMapper = mapperFactory.getMessageMapper(session);
             MessageId messageId = messageIdFactory.generate();
             Optional<MimeMessageId> mimeMessageId = MimeMessageHeadersUtil.parseMimeMessageId(headers);
@@ -105,7 +110,7 @@ public interface MessageStorer {
 
             return mapperFactory.getMessageMapper(session)
                 .executeReactive(
-                    storeAttachments(messageId, content, maybeMessage, session)
+                    storeAttachments(messageId, content, maybeMessage, session, headers)
                         .subscribeOn(Schedulers.boundedElastic())
                         .zipWith(threadIdGuessingAlgorithm.guessThreadIdReactive(messageId, mimeMessageId, inReplyTo, references, subject, session))
                         .flatMap(Throwing.function((Tuple2<List<MessageAttachmentMetadata>, ThreadId> pair) -> {
@@ -113,17 +118,37 @@ public interface MessageStorer {
                             ThreadId threadId = pair.getT2();
                             Date saveDate = Date.from(clock.instant());
 
-                            MailboxMessage message = messageFactory.createMessage(messageId, threadId, mailbox, internalDate, saveDate, size, bodyStartOctet, content, flags, propertyBuilder, attachments);
+                            MailboxMessage message = messageFactory.createMessage(messageId, threadId, mailbox, internalDate, saveDate, size, bodyStartOctet, content, flags, attachments);
                             return Mono.from(messageMapper.addReactive(mailbox, message))
                                 .map(metadata -> Pair.of(metadata, Optional.of(attachments)));
                         }).sneakyThrow()));
         }
 
-        private Mono<List<MessageAttachmentMetadata>> storeAttachments(MessageId messageId, Content messageContent, Optional<Message> maybeMessage, MailboxSession session) {
+        private Mono<List<MessageAttachmentMetadata>> storeAttachments(MessageId messageId, Content messageContent, Optional<Message> maybeMessage, MailboxSession session, HeaderImpl headers) {
+            if (!mayNeedAttachmentParsing(headers)) {
+                return Mono.just(ImmutableList.of());
+            }
             return Mono.usingWhen(Mono.fromCallable(() -> extractAttachments(messageContent, maybeMessage)),
                 attachments -> attachmentMapperFactory.getAttachmentMapper(session)
                     .storeAttachmentsReactive(attachments.getAttachments(), messageId),
                 parsingResults -> Mono.fromRunnable(parsingResults::dispose).subscribeOn(Schedulers.boundedElastic()));
+        }
+
+        private boolean mayNeedAttachmentParsing(HeaderImpl headers) {
+            Field rawContentType = headers.getField("Content-Type");
+            if (rawContentType != null) {
+                ContentTypeField contentTypeField = ContentTypeFieldLenientImpl.PARSER.parse(rawContentType, DecodeMonitor.SILENT);
+                if (contentTypeField.getMediaType().equalsIgnoreCase("multipart")) {
+                    return true;
+                }
+            }
+            Field rawDisposition = headers.getField("Content-Disposition");
+            if (rawDisposition != null) {
+                ContentDispositionField dispositionField = ContentDispositionFieldLenientImpl.PARSER.parse(rawDisposition, DecodeMonitor.SILENT);
+                return ContentDispositionField.DISPOSITION_TYPE_ATTACHMENT
+                    .equalsIgnoreCase(dispositionField.getDispositionType());
+            }
+            return false;
         }
 
         private MessageParser.ParsingResult extractAttachments(Content contentIn, Optional<Message> maybeMessage) {
@@ -168,7 +193,7 @@ public interface MessageStorer {
         }
 
         @Override
-        public Mono<Pair<MessageMetaData, Optional<List<MessageAttachmentMetadata>>>> appendMessageToStore(Mailbox mailbox, Date internalDate, int size, int bodyStartOctet, Content content, Flags flags, PropertyBuilder propertyBuilder, Optional<Message> maybeMessage, MailboxSession session, HeaderImpl headers) throws MailboxException {
+        public Mono<Pair<MessageMetaData, Optional<List<MessageAttachmentMetadata>>>> appendMessageToStore(Mailbox mailbox, Date internalDate, int size, int bodyStartOctet, Content content, Flags flags, Optional<Message> maybeMessage, MailboxSession session, HeaderImpl headers) throws MailboxException {
             MessageMapper messageMapper = mapperFactory.getMessageMapper(session);
             MessageId messageId = messageIdFactory.generate();
             Optional<MimeMessageId> mimeMessageId = MimeMessageHeadersUtil.parseMimeMessageId(headers);
@@ -181,7 +206,7 @@ public interface MessageStorer {
                     .flatMap(Throwing.function((ThreadId threadId) -> {
                         Date saveDate = Date.from(clock.instant());
 
-                        MailboxMessage message = messageFactory.createMessage(messageId, threadId, mailbox, internalDate, saveDate, size, bodyStartOctet, content, flags, propertyBuilder, ImmutableList.of());
+                        MailboxMessage message = messageFactory.createMessage(messageId, threadId, mailbox, internalDate, saveDate, size, bodyStartOctet, content, flags, ImmutableList.of());
                         return Mono.from(messageMapper.addReactive(mailbox, message))
                             .map(metadata -> Pair.of(metadata, Optional.empty()));
                     })));

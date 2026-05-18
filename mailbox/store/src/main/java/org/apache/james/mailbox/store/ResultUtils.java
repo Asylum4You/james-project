@@ -231,37 +231,30 @@ public class ResultUtils {
         return result;
     }
 
+    private static boolean isNonMultipart(MailboxMessage message) throws IOException {
+        return createHeaders(message).stream()
+            .filter(h -> h.getName().equalsIgnoreCase("Content-Type"))
+            .map(Header::getValue)
+            .findFirst()
+            .map(ct -> !ct.toLowerCase().trim().startsWith("multipart"))
+            .orElse(true);
+    }
+
     private static PartContentBuilder buildHandleSinglePart(int[] path, MailboxMessage message) throws IOException, MimeException {
         // CF RFC-3501 section 6.4.5
         //
         // Every message has at least one part number.  Non-[MIME-IMB]
         // messages, and non-multipart [MIME-IMB] messages with no
         // encapsulated message, only have a part 1.
-
-
-        if (!message.getProperties().getMediaType().equalsIgnoreCase("multipart")
-            && path.length == 1 && path[0] == 1) {
-
+        if (path.length == 1 && path[0] == 1 && isNonMultipart(message)) {
             InputStream stream = message.getFullContent();
             PartContentBuilder result = new PartContentBuilder();
             result.parse(stream);
             return result;
         }
-        InputStream stream = message.getFullContent();
-        PartContentBuilder result = new PartContentBuilder();
-        result.parse(stream);
-        try {
-            for (int next : path) {
-                result.to(next);
-            }
-        } catch (PartContentBuilder.PartNotFoundException e) {
-            // Missing parts should return zero sized content
-            // See http://markmail.org/message/2jconrj7scvdi5dj
-            result.markEmpty();
-        }
-        return result;
+        return build(path, message);
     }
-  
+
     private static int[] path(MimePath mimePath) {
         if (mimePath == null) {
             return null;

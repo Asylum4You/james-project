@@ -32,6 +32,10 @@ import java.util.UUID;
 
 import org.apache.james.core.MailAddress;
 import org.apache.james.core.Username;
+import org.apache.james.events.InVMEventBus;
+import org.apache.james.events.MemoryEventDeadLetters;
+import org.apache.james.events.RetryBackoffConfiguration;
+import org.apache.james.events.delivery.InVmEventDelivery;
 import org.apache.james.jmap.api.identity.DefaultIdentitySupplier;
 import org.apache.james.jmap.api.identity.IdentityCreationRequest;
 import org.apache.james.jmap.api.identity.IdentityRepository;
@@ -40,6 +44,7 @@ import org.apache.james.jmap.api.model.EmailAddress;
 import org.apache.james.jmap.api.model.Identity;
 import org.apache.james.jmap.memory.identity.MemoryCustomIdentityDAO;
 import org.apache.james.json.DTOConverter;
+import org.apache.james.metrics.tests.RecordingMetricFactory;
 import org.apache.james.task.Hostname;
 import org.apache.james.task.MemoryTaskManager;
 import org.apache.james.webadmin.WebAdminServer;
@@ -73,7 +78,8 @@ class UserIdentitiesRoutesTest {
         identityFactory = mock(DefaultIdentitySupplier.class);
         Mockito.when(identityFactory.userCanSendFrom(any(), any())).thenReturn(SMono.just(true).hasElement());
 
-        identityRepository = new IdentityRepository(new MemoryCustomIdentityDAO(), identityFactory);
+        InVMEventBus eventBus = new InVMEventBus(new InVmEventDelivery(new RecordingMetricFactory()), RetryBackoffConfiguration.FAST, new MemoryEventDeadLetters());
+        identityRepository = new IdentityRepository(new MemoryCustomIdentityDAO(eventBus), identityFactory);
 
         JsonTransformer jsonTransformer = new JsonTransformer();
         TasksRoutes tasksRoutes = new TasksRoutes(taskManager, jsonTransformer, DTOConverter.of(UploadCleanupTaskAdditionalInformationDTO.SERIALIZATION_MODULE));
@@ -689,6 +695,69 @@ class UserIdentitiesRoutesTest {
                 "    \"id\": \"%s\"," +
                 "    \"mayDelete\": true" +
                 "}", customIdentityId));
+    }
+
+    @Test
+    void deleteIdentityShouldWork() throws Exception {
+        Mockito.when(identityFactory.listIdentities(BOB))
+            .thenReturn(Flux.empty());
+
+        IdentityCreationRequest creationRequest = IdentityCreationRequest.fromJava(
+            BOB.asMailAddress(),
+            Optional.of("identity name 1"),
+            Optional.empty(),
+            Optional.empty(),
+            Optional.empty(),
+            Optional.empty(),
+            Optional.empty());
+
+        Identity customIdentity = Mono.from(identityRepository.save(BOB, creationRequest)).block();
+        String customIdentityId = customIdentity.id().id().toString();
+
+        given()
+            .delete(String.format(GET_IDENTITIES_USERS_PATH, BOB.asString()) + "/" + customIdentityId)
+        .then()
+            .statusCode(HttpStatus.NO_CONTENT_204);
+
+        assertThat(Flux.from(identityRepository.list(BOB)).collectList().block())
+            .isEmpty();
+    }
+
+    @Test
+    void deleteIdentityShouldReturnNoContentWhenIdentityNotFound() {
+        Mockito.when(identityFactory.listIdentities(BOB))
+            .thenReturn(Flux.empty());
+
+        String notFoundIdentityId = UUID.randomUUID().toString();
+
+        given()
+            .delete(String.format(GET_IDENTITIES_USERS_PATH, BOB.asString()) + "/" + notFoundIdentityId)
+        .then()
+            .statusCode(HttpStatus.NO_CONTENT_204);
+    }
+
+    @Test
+    void deleteIdentityShouldReturnForbiddenWhenServerSetIdentity() throws Exception {
+        Mockito.when(identityFactory.listIdentities(BOB))
+            .thenReturn(Flux.just(IdentityRepositoryTest.IDENTITY1()));
+
+        String serverSetIdentityId = IdentityRepositoryTest.IDENTITY1().id().id().toString();
+
+        String response = given()
+            .delete(String.format(GET_IDENTITIES_USERS_PATH, BOB.asString()) + "/" + serverSetIdentityId)
+        .then()
+            .statusCode(HttpStatus.FORBIDDEN_403)
+            .extract()
+            .body()
+            .asString();
+
+        assertThatJson(response)
+            .isEqualTo(String.format("{" +
+                "    \"statusCode\": 403," +
+                "    \"type\": \"InvalidArgument\"," +
+                "    \"message\": \"IdentityId '%s' can not be deleted\"," +
+                "    \"details\": null" +
+                "}", serverSetIdentityId));
     }
 
     @Test
