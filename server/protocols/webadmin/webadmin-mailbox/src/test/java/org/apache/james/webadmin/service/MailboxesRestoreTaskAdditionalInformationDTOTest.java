@@ -16,35 +16,26 @@
  * specific language governing permissions and limitations      *
  * under the License.                                           *
  ****************************************************************/
-package org.apache.james.mailbox.backup;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
+package org.apache.james.webadmin.service;
 
+import java.time.Instant;
+
+import org.apache.james.JsonSerializationVerifier;
 import org.apache.james.core.Username;
-import org.apache.james.mailbox.exception.MailboxException;
-import org.reactivestreams.Publisher;
+import org.apache.james.util.ClassLoaderUtils;
+import org.junit.jupiter.api.Test;
 
-public interface MailboxBackup {
+class MailboxesRestoreTaskAdditionalInformationDTOTest {
+    private static final Instant INSTANT = Instant.parse("2007-12-03T10:15:30.00Z");
+    private static final MailboxesRestoreTask.AdditionalInformation DOMAIN_OBJECT = new MailboxesRestoreTask.AdditionalInformation(
+        Username.of("bob"), INSTANT);
 
-    enum BackupStatus {
-        NON_EMPTY_RECEIVER_ACCOUNT,
-        FAILED,
-        DONE
+    @Test
+    void shouldMatchJsonSerializationContract() throws Exception {
+        JsonSerializationVerifier.dtoModule(MailboxesRestoreTaskAdditionalInformationDTO.SERIALIZATION_MODULE)
+            .bean(DOMAIN_OBJECT)
+            .json(ClassLoaderUtils.getSystemResourceAsString("json/mailboxesRestore.additionalInformation.json"))
+            .verify();
     }
-
-    /**
-     * @param username the user account to export
-     */
-    void backupAccount(Username username, OutputStream destination) throws IOException, MailboxException;
-
-    /**
-     * @param username   the user in which account the restored elements will be stored.
-     * @param source the input stream to the archive containing the account elements.
-     * @param force if true, delete the user's existing mailbox data before restoring.
-     * @return a Publisher indicating when the action is completed
-     */
-    Publisher<BackupStatus> restore(Username username, InputStream source, boolean force) throws IOException, MailboxException;
-
 }
