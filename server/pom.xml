@@ -74,6 +74,7 @@
         <module>data/data-library</module>
         <module>data/data-memory</module>
         <module>data/data-postgres</module>
+        <module>data/data-redis</module>
 
         <module>dns-service/dnsservice-api</module>
         <module>dns-service/dnsservice-dnsjava</module>

@@ -36,6 +36,7 @@ import static org.mockito.Mockito.when;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
@@ -1087,6 +1088,28 @@ public abstract class MailboxManagerTest<T extends MailboxManager> {
         }
 
         @Test
+        void setFlagsReactiveShouldSupportOverlappingRanges() throws Exception {
+            inboxManager.appendMessage(MessageManager.AppendCommand.builder().build(message), session);
+            inboxManager.appendMessage(MessageManager.AppendCommand.builder().build(message), session);
+
+            Mono.from(retrieveEventBus(mailboxManager).register(listener, new MailboxIdRegistrationKey(inboxId))).block();
+
+            // Clients may supply overlapping ranges (eg. STORE 1:5,3:7), in which case the same UID
+            // is updated several times. This must not fail nor produce duplicated entries. See JAMES issue #5570.
+            Map<MessageUid, Flags> result = Mono.from(inboxManager.setFlagsReactive(
+                new Flags(Flags.Flag.SEEN), MessageManager.FlagsUpdateMode.ADD,
+                List.of(MessageRange.all(), MessageRange.all()), session)).block();
+
+            assertThat(result).hasSize(2);
+            assertThat(listener.getEvents())
+                .filteredOn(event -> event instanceof FlagsUpdated)
+                .hasSize(1)
+                .extracting(event -> (FlagsUpdated) event)
+                .element(0)
+                .satisfies(event -> assertThat(event.getUids()).hasSize(2));
+        }
+
+        @Test
         void moveShouldFireAddedEventInTargetMailbox() throws Exception {
             assumeTrue(mailboxManager.hasCapability(MailboxCapabilities.Move));
             Optional<MailboxId> targetMailboxId = mailboxManager.createMailbox(newPath, session);
@@ -2119,6 +2142,27 @@ public abstract class MailboxManagerTest<T extends MailboxManager> {
 
             assertThat(mailboxManager.getMailbox(mailboxId.get(), session).getMailboxPath())
                 .isEqualTo(mailboxPath2);
+        }
+
+        @Test
+        protected void renameMailboxByIdShouldChangeTheMailboxNamespace() throws Exception {
+            MailboxSession session = mailboxManager.createSystemSession(USER_1);
+
+            MailboxPath oldMailboxPath = new MailboxPath("#source", USER_1, "mbx1");
+            MailboxPath oldMailboxPathChild = new MailboxPath("#source", USER_1, "mbx1.child");
+            MailboxPath newMailboxPath = new MailboxPath("#destination", USER_1, "mbx2");
+            Optional<MailboxId> mailboxId = mailboxManager.createMailbox(oldMailboxPath, session);
+            Optional<MailboxId> childMailboxId = mailboxManager.createMailbox(oldMailboxPathChild, session);
+
+            mailboxManager.renameMailbox(mailboxId.get(), newMailboxPath, session);
+
+            MailboxPath renamedMailboxPath = mailboxManager.getMailbox(mailboxId.get(), session).getMailboxPath();
+            MailboxPath renamedChildMailboxPath = mailboxManager.getMailbox(childMailboxId.get(), session).getMailboxPath();
+
+            SoftAssertions.assertSoftly(softly -> {
+                softly.assertThat(renamedMailboxPath).isEqualTo(newMailboxPath);
+                softly.assertThat(renamedChildMailboxPath).isEqualTo(new MailboxPath("#destination", USER_1, "mbx2.child"));
+            });
         }
 
         @Test

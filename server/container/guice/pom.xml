@@ -44,6 +44,7 @@
         <module>configuration</module>
         <module>data-cassandra</module>
         <module>data-ldap</module>
+        <module>data-redis</module>
         <module>distributed</module>
         <module>jmx</module>
         <module>jpa-common</module>
@@ -100,6 +101,11 @@
             </dependency>
             <dependency>
                 <groupId>${james.groupId}</groupId>
+                <artifactId>james-server-data-redis</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>${james.groupId}</groupId>
                 <artifactId>james-server-guice-cassandra</artifactId>
                 <version>${project.version}</version>
             </dependency>
@@ -118,6 +124,11 @@
                 <artifactId>james-server-guice-data-ldap</artifactId>
                 <version>${project.version}</version>
                 <type>test-jar</type>
+            </dependency>
+            <dependency>
+                <groupId>${james.groupId}</groupId>
+                <artifactId>james-server-guice-data-redis</artifactId>
+                <version>${project.version}</version>
             </dependency>
             <dependency>
                 <groupId>${james.groupId}</groupId>

@@ -19,9 +19,12 @@
 
 package org.apache.james.webadmin.routes;
 
+import java.util.Optional;
+
 import jakarta.inject.Inject;
 
 import org.apache.james.mailbox.cassandra.mail.task.SolveMailboxInconsistenciesService;
+import org.apache.james.mailbox.cassandra.mail.task.SolveMailboxInconsistenciesService.RunningOptions;
 import org.apache.james.mailbox.cassandra.mail.task.SolveMailboxInconsistenciesTask;
 import org.apache.james.webadmin.tasks.TaskFromRequestRegistry;
 import org.apache.james.webadmin.tasks.TaskRegistrationKey;
@@ -42,7 +45,13 @@ public class SolveMailboxInconsistenciesRequestToTask extends TaskFromRequestReg
                         "`ALL-SERVICES-ARE-OFFLINE` in order to prevent accidental calls. " +
                         "Check the documentation for details.");
 
-                return new SolveMailboxInconsistenciesTask(service);
+                int maxIterations = RunningOptionsParser.intQueryParameter(request, "maxIterations")
+                    .orElse(RunningOptions.DEFAULT_MAX_ITERATIONS);
+                boolean autoMerge = Optional.ofNullable(request.queryParams("autoMerge"))
+                    .map(Boolean::parseBoolean)
+                    .orElse(RunningOptions.DEFAULT_AUTO_MERGE);
+
+                return new SolveMailboxInconsistenciesTask(service, new RunningOptions(maxIterations, autoMerge));
             });
     }
 }

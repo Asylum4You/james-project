@@ -24,6 +24,7 @@ import org.apache.james.data.UsersRepositoryModuleChooser;
 import org.apache.james.jmap.JMAPListenerModule;
 import org.apache.james.jmap.JMAPModule;
 import org.apache.james.jmap.memory.pushsubscription.MemoryPushSubscriptionModule;
+import org.apache.james.jmap.oidc.JMAPOidcModule;
 import org.apache.james.jwt.JwtConfiguration;
 import org.apache.james.modules.BlobExportMechanismModule;
 import org.apache.james.modules.BlobMemoryModule;
@@ -69,6 +70,7 @@ import org.apache.james.modules.server.WebAdminMailOverWebModule;
 import org.apache.james.modules.server.WebAdminServerModule;
 import org.apache.james.modules.vault.DeletedMessageVaultModule;
 import org.apache.james.modules.vault.DeletedMessageVaultRoutesModule;
+import org.apache.james.oidc.memory.CaffeineOidcTokenCacheModule;
 import org.apache.james.webadmin.WebAdminConfiguration;
 import org.apache.james.webadmin.authentication.AuthenticationFilter;
 import org.apache.james.webadmin.authentication.NoAuthenticationFilter;
@@ -180,11 +182,12 @@ public class MemoryJamesServerMain implements JamesServerMain {
 
     private static Module chooseJmapModule(MemoryJamesConfiguration configuration) {
         if (configuration.isJmapEnabled()) {
-            return new JMAPListenerModule();
+            return Modules.combine(
+                new JMAPListenerModule(),
+                new JMAPOidcModule(),
+                new CaffeineOidcTokenCacheModule());
         }
-        return binder -> {
-
-        };
+        return Modules.EMPTY_MODULE;
     }
 
     private static Module chooseDropListsModule(MemoryJamesConfiguration configuration) {

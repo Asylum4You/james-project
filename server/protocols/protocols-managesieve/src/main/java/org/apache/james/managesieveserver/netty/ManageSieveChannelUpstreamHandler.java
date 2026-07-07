@@ -84,7 +84,6 @@ public class ManageSieveChannelUpstreamHandler extends ChannelInboundHandlerAdap
             }
 
             Session manageSieveSession = ctx.channel().attr(NettyConstants.SESSION_ATTRIBUTE_KEY).get();
-            Session.State statePriorExecution = manageSieveSession.getState();
             String responseString = manageSieveProcessor.handleRequest(manageSieveSession, request);
             attachment.resetCumulation();
             attachment.write(responseString);
@@ -95,12 +94,6 @@ public class ManageSieveChannelUpstreamHandler extends ChannelInboundHandlerAdap
                 attachment.stopDetectingCommandInjection();
 
                 // RFC-5804 section 1.7 returning capabilities is mandated after STARTTLS
-                String capabilities = manageSieveProcessor.handleRequest(manageSieveSession, "CAPABILITY");
-                attachment.write(capabilities);
-            }
-            if (manageSieveSession.getState() == Session.State.AUTHENTICATED &&
-                statePriorExecution != Session.State.AUTHENTICATED) {
-                // RFC-5804 section 1.7 returning capabilities is mandated after AUTH
                 String capabilities = manageSieveProcessor.handleRequest(manageSieveSession, "CAPABILITY");
                 attachment.write(capabilities);
             }
@@ -131,8 +124,6 @@ public class ManageSieveChannelUpstreamHandler extends ChannelInboundHandlerAdap
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
         try (Closeable closeable = ManageSieveMDCContext.from(ctx)) {
-            LOGGER.warn("Error while processing ManageSieve request", cause);
-
             if (cause instanceof TooLongFrameException) {
                 // Max line length exceeded
                 // See also JAMES-1190
@@ -140,6 +131,8 @@ public class ManageSieveChannelUpstreamHandler extends ChannelInboundHandlerAdap
             } else if (cause instanceof SessionTerminatedException) {
                 ctx.channel().attr(NettyConstants.RESPONSE_WRITER_ATTRIBUTE_KEY).get().write("OK channel is closing");
                 logout(ctx);
+            } else {
+                LOGGER.warn("Error while processing ManageSieve request", cause);
             }
         }
     }

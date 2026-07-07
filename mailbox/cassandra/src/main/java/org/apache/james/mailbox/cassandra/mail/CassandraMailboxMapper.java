@@ -44,7 +44,7 @@ import org.apache.james.mailbox.model.MailboxPath;
 import org.apache.james.mailbox.model.UidValidity;
 import org.apache.james.mailbox.model.search.MailboxQuery;
 import org.apache.james.mailbox.store.mail.MailboxMapper;
-import org.apache.james.util.FunctionalUtils;
+import org.apache.james.util.ReactorUtils;
 
 import com.google.common.base.Preconditions;
 
@@ -192,16 +192,13 @@ public class CassandraMailboxMapper implements MailboxMapper {
 
     @Override
     public Flux<Mailbox> findMailboxWithPathLike(MailboxQuery.UserBound query) {
-        String fixedNamespace = query.getFixedNamespace();
-        Username fixedUser = query.getFixedUser();
-
-        return performReadRepair(listMailboxes(fixedNamespace, fixedUser))
-            .filter(mailbox -> query.isPathMatch(mailbox.generateAssociatedPath()))
-            .flatMap(this::addAcl, CONCURRENCY);
+        return findMailboxWithPathLike(query, consistencyChoice());
     }
 
-    private Flux<Mailbox> listMailboxes(String fixedNamespace, Username fixedUser) {
-        return mailboxPathV3DAO.listUserMailboxes(fixedNamespace, fixedUser, consistencyChoice());
+    public Flux<Mailbox> findMailboxWithPathLike(MailboxQuery.UserBound query, JamesExecutionProfiles.ConsistencyChoice consistencyChoice) {
+        return performReadRepair(mailboxPathV3DAO.listUserMailboxes(query.getFixedNamespace(), query.getFixedUser(), consistencyChoice))
+            .filter(mailbox -> query.isPathMatch(mailbox.generateAssociatedPath()))
+            .flatMap(this::addAcl, CONCURRENCY);
     }
 
     @Override
@@ -221,21 +218,25 @@ public class CassandraMailboxMapper implements MailboxMapper {
         Preconditions.checkNotNull(mailbox.getMailboxId(), "A mailbox we want to rename should have a defined mailboxId");
 
         CassandraId cassandraId = (CassandraId) mailbox.getMailboxId();
-        return tryRename(mailbox, cassandraId)
-            .filter(FunctionalUtils.identityPredicate())
-            .switchIfEmpty(Mono.error(() -> new MailboxExistsException(mailbox.generateAssociatedPath().asString())))
-            .thenReturn(cassandraId);
+        return mailboxDAO.retrieveMailbox(cassandraId)
+            .flatMap(storedMailbox -> rename(mailbox, storedMailbox.generateAssociatedPath()))
+            .switchIfEmpty(Mono.error(() -> new MailboxNotFoundException(cassandraId)));
     }
 
-    private Mono<Boolean> tryRename(Mailbox cassandraMailbox, CassandraId cassandraId) {
-        return mailboxDAO.retrieveMailbox(cassandraId)
-            .flatMap(mailbox -> mailboxPathV3DAO.save(cassandraMailbox)
-                .filter(isCreated -> isCreated)
-                .flatMap(mailboxHasCreated -> deletePreviousMailboxPathReference(mailbox.generateAssociatedPath())
-                    .then(persistMailboxEntity(cassandraMailbox))
-                    .thenReturn(true))
-                .defaultIfEmpty(false))
-            .switchIfEmpty(Mono.error(() -> new MailboxNotFoundException(cassandraId)));
+    @Override
+    public Mono<MailboxId> rename(Mailbox cassandraMailbox, MailboxPath previousPath) {
+        Preconditions.checkNotNull(cassandraMailbox.getMailboxId(), "A mailbox we want to rename should have a defined mailboxId");
+        CassandraId cassandraId = (CassandraId) cassandraMailbox.getMailboxId();
+
+        return mailboxPathV3DAO.save(cassandraMailbox)
+            .handle(ReactorUtils.raiseErrorIfFalse(() -> new MailboxExistsException(cassandraMailbox.generateAssociatedPath().asString())))
+            // Additive writes first (the new path reference and the projection), subtractive write
+            // last (drop the old path reference). At any crash point the mailbox thus stays
+            // reachable under its new path with a consistent projection; only a stale old path
+            // reference may linger (the delete is retried to absorb transient failures).
+            .flatMap(applied -> persistMailboxEntity(cassandraMailbox)
+                .then(deletePreviousMailboxPathReference(previousPath)))
+            .thenReturn(cassandraId);
     }
 
     private Mono<Void> persistMailboxEntity(Mailbox cassandraMailbox) {
@@ -250,7 +251,7 @@ public class CassandraMailboxMapper implements MailboxMapper {
 
     @Override
     public Mono<Boolean> hasChildren(Mailbox mailbox, char delimiter) {
-        return performReadRepair(listMailboxes(mailbox.getNamespace(), mailbox.getUser()))
+        return performReadRepair(mailboxPathV3DAO.listUserMailboxes(mailbox.getNamespace(), mailbox.getUser(), consistencyChoice()))
             .filter(idAndPath -> isPathChildOfMailbox(idAndPath, mailbox, delimiter))
             .hasElements();
     }

@@ -23,6 +23,12 @@ import static org.apache.james.JsonSerializationVerifier.recursiveComparisonConf
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import org.apache.james.backends.cassandra.CassandraCluster;
 import org.apache.james.backends.cassandra.CassandraClusterExtension;
@@ -70,6 +76,7 @@ class SolveMailboxInconsistenciesServiceTest {
     CassandraMailboxDAO mailboxDAO;
     CassandraMailboxPathV3DAO mailboxPathV3DAO;
     CassandraSchemaVersionDAO versionDAO;
+    MailboxMergingTaskRunner mergingRunner;
     SolveMailboxInconsistenciesService testee;
 
     @BeforeEach
@@ -80,7 +87,8 @@ class SolveMailboxInconsistenciesServiceTest {
         mailboxPathV3DAO = new CassandraMailboxPathV3DAO(
             cassandra.getConf());
         versionDAO = new CassandraSchemaVersionDAO(cassandra.getConf());
-        testee = new SolveMailboxInconsistenciesService(mailboxDAO, mailboxPathV3DAO, new CassandraSchemaVersionManager(versionDAO));
+        mergingRunner = mock(MailboxMergingTaskRunner.class);
+        testee = new SolveMailboxInconsistenciesService(mailboxDAO, mailboxPathV3DAO, new CassandraSchemaVersionManager(versionDAO), mergingRunner);
 
         versionDAO.updateVersion(new SchemaVersion(8)).block();
     }
@@ -154,12 +162,13 @@ class SolveMailboxInconsistenciesServiceTest {
     }
 
     @Test
-    void fixMailboxInconsistenciesShouldReturnPartialWhenDAOMisMatchOnPath() {
+    void fixMailboxInconsistenciesShouldReturnCompletedWhenDAOMisMatchOnPath() {
+        // Same mailbox id referenced by two paths: auto-resolvable without data loss.
         mailboxDAO.save(MAILBOX).block();
         mailboxPathV3DAO.save(MAILBOX_NEW_PATH).block();
 
         assertThat(testee.fixMailboxInconsistencies(new Context()).block())
-            .isEqualTo(Result.PARTIAL);
+            .isEqualTo(Result.COMPLETED);
     }
 
     @Test
@@ -248,14 +257,14 @@ class SolveMailboxInconsistenciesServiceTest {
 
         testee.fixMailboxInconsistencies(context).block();
 
+        // The orphan mailbox pass re-registers the projection path, then the same-id conflict pass
+        // keeps the most recent path and drops the stale one: two fixes, no conflicting entry.
         assertThat(context.snapshot())
             .isEqualTo(Context.builder()
                 .processedMailboxEntries(1)
                 .processedMailboxPathEntries(2)
                 .addFixedInconsistencies(CASSANDRA_ID_1)
-                .addConflictingEntry(ConflictingEntry.builder()
-                    .mailboxDaoEntry(MAILBOX)
-                    .mailboxPathDaoEntry(MAILBOX_NEW_PATH))
+                .addFixedInconsistencies(CASSANDRA_ID_1)
                 .build()
                 .snapshot());
     }
@@ -335,8 +344,8 @@ class SolveMailboxInconsistenciesServiceTest {
 
     @Test
     void fixMailboxInconsistenciesShouldAlterStateWhenDaoMisMatchOnPath() {
-        // Note that CASSANDRA_ID_1 becomes usable
-        // However in order to avoid data loss, merging CASSANDRA_ID_1 and CASSANDRA_ID_2 is still required
+        // Same mailbox id referenced by two paths (a partial rename leftover): the solver keeps the
+        // most recently written path and drops the stale one, leaving a single consistent registration.
         mailboxDAO.save(MAILBOX).block();
         mailboxPathV3DAO.save(MAILBOX_NEW_PATH).block();
 
@@ -346,9 +355,27 @@ class SolveMailboxInconsistenciesServiceTest {
             softly.assertThat(mailboxDAO.retrieveAllMailboxes().collectList().block())
                 .containsExactlyInAnyOrder(MAILBOX);
             softly.assertThat(mailboxPathV3DAO.listAll().collectList().block())
-                .containsExactlyInAnyOrder(
-                    MAILBOX_NEW_PATH,
-                    MAILBOX);
+                .containsExactlyInAnyOrder(MAILBOX);
+        });
+    }
+
+    @Test
+    void fixMailboxInconsistenciesShouldKeepMostRecentPathWhenSameMailboxRegisteredUnderTwoPaths() {
+        // Real partial rename leftover: the projection points to the new path, and both the old and
+        // the new path are still registered to the same id. The most recently written path (the
+        // rename target) wins and the stale old path reference is dropped.
+        mailboxDAO.save(MAILBOX_NEW_PATH).block();
+        mailboxPathV3DAO.save(MAILBOX).block();
+        mailboxPathV3DAO.save(MAILBOX_NEW_PATH).block();
+
+        Result result = testee.fixMailboxInconsistencies(new Context()).block();
+
+        SoftAssertions.assertSoftly(softly -> {
+            softly.assertThat(result).isEqualTo(Result.COMPLETED);
+            softly.assertThat(mailboxDAO.retrieveAllMailboxes().collectList().block())
+                .containsExactlyInAnyOrder(MAILBOX_NEW_PATH);
+            softly.assertThat(mailboxPathV3DAO.listAll().collectList().block())
+                .containsExactlyInAnyOrder(MAILBOX_NEW_PATH);
         });
     }
 
@@ -399,6 +426,60 @@ class SolveMailboxInconsistenciesServiceTest {
                 .containsExactlyInAnyOrder(MAILBOX, mailbox2);
             softly.assertThat(mailboxPathV3DAO.listAll().collectList().block())
                 .containsExactlyInAnyOrder(MAILBOX_2);
+        });
+    }
+
+    @Test
+    void fixMailboxInconsistenciesShouldAutoMergeGhostMailboxWhenAutoMergeEnabled() {
+        // Two different mailboxes resolve to the same path "abc": CASSANDRA_ID_2 owns the path (path
+        // table = source of truth), CASSANDRA_ID_1 is a ghost projection squatting it with no path
+        // registration of its own. With autoMerge on, the ghost is merged into the path owner.
+        Mailbox pathOwnerProjection = new Mailbox(MAILBOX_PATH, UID_VALIDITY_2, CASSANDRA_ID_2);
+        mailboxDAO.save(MAILBOX).block();
+        mailboxDAO.save(pathOwnerProjection).block();
+        mailboxPathV3DAO.save(MAILBOX_2).block();
+
+        // The merging runner moves messages then drops the loser's projection row: simulate that side effect.
+        when(mergingRunner.runReactive(eq(CASSANDRA_ID_1), eq(CASSANDRA_ID_2), any()))
+            .thenReturn(mailboxDAO.delete(CASSANDRA_ID_1).thenReturn(Result.COMPLETED));
+
+        Context context = new Context();
+        testee.fixMailboxInconsistencies(context, new SolveMailboxInconsistenciesService.RunningOptions(1, true)).block();
+
+        SoftAssertions.assertSoftly(softly -> {
+            verify(mergingRunner).runReactive(eq(CASSANDRA_ID_1), eq(CASSANDRA_ID_2), any());
+            softly.assertThat(mailboxDAO.retrieveAllMailboxes().collectList().block())
+                .containsExactlyInAnyOrder(pathOwnerProjection);
+            softly.assertThat(mailboxPathV3DAO.listAll().collectList().block())
+                .containsExactlyInAnyOrder(MAILBOX_2);
+            softly.assertThat(context.snapshot().getFixedInconsistencies())
+                .containsExactly(CASSANDRA_ID_2);
+        });
+    }
+
+    @Test
+    void fixMailboxInconsistenciesShouldRealignLoserInsteadOfMergingWhenLoserIsRegisteredElsewhere() {
+        // CASSANDRA_ID_1 squats path "abc" (owned by CASSANDRA_ID_2) but also legitimately owns path
+        // "xyz": it is not a clean ghost. Rather than being merged away, its stale projection is
+        // realigned onto its registered path "xyz", which makes the ghost on "abc" disappear without
+        // any merge. The whole picture becomes consistent within a single run.
+        Mailbox pathOwnerProjection = new Mailbox(MAILBOX_PATH, UID_VALIDITY_2, CASSANDRA_ID_2);
+        Mailbox loserOtherPath = new Mailbox(NEW_MAILBOX_PATH, UID_VALIDITY_1, CASSANDRA_ID_1);
+        mailboxDAO.save(MAILBOX).block();
+        mailboxDAO.save(pathOwnerProjection).block();
+        mailboxPathV3DAO.save(MAILBOX_2).block();
+        mailboxPathV3DAO.save(loserOtherPath).block();
+
+        Context context = new Context();
+        testee.fixMailboxInconsistencies(context, new SolveMailboxInconsistenciesService.RunningOptions(1, true)).block();
+
+        SoftAssertions.assertSoftly(softly -> {
+            verify(mergingRunner, never()).runReactive(any(), any(), any());
+            softly.assertThat(mailboxDAO.retrieveAllMailboxes().collectList().block())
+                .containsExactlyInAnyOrder(pathOwnerProjection, loserOtherPath);
+            softly.assertThat(mailboxPathV3DAO.listAll().collectList().block())
+                .containsExactlyInAnyOrder(MAILBOX_2, loserOtherPath);
+            softly.assertThat(context.snapshot().getConflictingEntries()).isEmpty();
         });
     }
 }
